@@ -1,0 +1,16 @@
+# venv
+.venv/
+
+# local env
+.env
+
+# chrome profile
+.chrome-rpa-profile/
+
+# artifacts (обычно не коммитим)
+artifacts/
+# если хочешь оставить пустую папку:
+!artifacts/.gitkeep
+
+# mac
+.DS_Store
