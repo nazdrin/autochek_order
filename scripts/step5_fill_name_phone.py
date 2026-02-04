@@ -15,8 +15,9 @@ load_dotenv(ROOT / ".env")
 USE_CDP = os.getenv("BIOTUS_USE_CDP", "0") == "1"
 CDP_ENDPOINT = os.getenv("BIOTUS_CDP_ENDPOINT", "http://127.0.0.1:9222")
 
-FULL_NAME = "Бойко Александр"
-PHONE_LOCAL = "504175807"  # вводим без +380, т.к. маска уже содержит +38(0__)
+FULL_NAME = os.getenv("BIOTUS_FULL_NAME", "Бойко Александр")
+# вводим без +380, т.к. маска уже содержит +38(0__) ...
+PHONE_LOCAL = re.sub(r"\D+", "", os.getenv("BIOTUS_PHONE_LOCAL", "50 417 58 07"))
 
 
 
@@ -45,7 +46,6 @@ async def _set_value_js(page, element, value: str):
             el.value = val;
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
-            el.dispatchEvent(new Event('blur', { bubbles: true }));
         }""",
         element,
         value,
@@ -97,6 +97,10 @@ async def fill_by_label_text(page, label_text: str, value: str) -> bool:
     # Кандидаты для "имени" (от более точных к более общим)
     candidates = []
 
+    # 0) Stable checkout IDs (Biotus checkout)
+    if "Ім'я" in label_text or "прізвище" in label_text:
+        candidates.append(page.locator("#address-firstname:visible"))
+
     # A) get_by_label (если label реально связан с input)
     try:
         candidates.append(page.get_by_label(label_text, exact=False))
@@ -120,7 +124,7 @@ async def fill_by_label_text(page, label_text: str, value: str) -> bool:
     )
 
     # Пытаемся несколько раз, потому что вкладка "дроп" часто триггерит перерендер
-    for attempt in range(1, 6):
+    for attempt in range(1, 4):
         for loc in candidates:
             target = await _first_visible(loc)
             if not target:
@@ -129,7 +133,7 @@ async def fill_by_label_text(page, label_text: str, value: str) -> bool:
             if ok:
                 return True
         # ждём чуть-чуть, чтобы UI успокоился
-        await page.wait_for_timeout(350)
+        await page.wait_for_timeout(500)
 
     return False
 
@@ -144,6 +148,9 @@ async def main():
             browser = await p.chromium.launch(headless=False)
             context = await browser.new_context()
             page = await context.new_page()
+
+        # Wait until checkout recipient form inputs are rendered
+        await page.locator("#address-firstname").first.wait_for(state="visible", timeout=30000)
 
         await page.wait_for_timeout(800)
         await page.screenshot(path=str(ART / "step5_2_before_fill.png"), full_page=True)
@@ -160,9 +167,12 @@ async def main():
         await page.wait_for_timeout(300)
 
         # Телефон (маска: +38(0__) ___-__-__).
-        # Важно: XPath по "Номер телефону" может попадать в скрытые поля (country_id и т.п.),
-        # поэтому ищем ВИДИМОЕ поле телефона.
-        phone = page.locator('input[type="tel"]:visible')
+        # Сначала пробуем стабильный ID поля на checkout.
+        phone = page.locator("#address-telephone:visible")
+
+        if await phone.count() == 0:
+            # fallback: видимый tel
+            phone = page.locator('input[type="tel"]:visible')
 
         if await phone.count() == 0:
             # запасные варианты: видимый input с плейсхолдером +38 или (0
@@ -172,7 +182,6 @@ async def main():
             phone = page.locator('input:visible[placeholder*="(0" i]')
 
         if await phone.count() == 0:
-            # последний шанс: любой видимый input внутри ближайшего контейнера рядом с текстом "Номер телефону"
             phone = page.locator(
                 'xpath=//*[contains(normalize-space(), "Номер телефону")]/ancestor::*[self::div or self::section][1]//input[not(@type="hidden") and not(@type="submit")][1]'
             )
@@ -180,8 +189,10 @@ async def main():
         if await phone.count() == 0:
             raise RuntimeError("Не нашёл видимое поле 'Номер телефону'.")
 
-        await phone.first.scroll_into_view_if_needed()
-        await phone.first.click(force=True)
+        phone = phone.first
+        await phone.wait_for(state="visible", timeout=30000)
+        await phone.scroll_into_view_if_needed()
+        await phone.click()
 
         # очистить и ввести локальные цифры (после 0)
         await page.keyboard.press("Meta+A")  # macOS
