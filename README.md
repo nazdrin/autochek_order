@@ -126,6 +126,7 @@ BIOTUS_USE_CDP=1 python scripts/step4_checkout.py && \
 BIOTUS_USE_CDP=1 python scripts/step5_select_drop_tab.py && \
 BIOTUS_USE_CDP=1 python scripts/step5_fill_name_phone.py && \
 BIOTUS_USE_CDP=1 python scripts/step5_select_city.py
+BIOTUS_USE_CDP=1 python -u scripts/step6_select_np_branch.py
 
 
 ⸻

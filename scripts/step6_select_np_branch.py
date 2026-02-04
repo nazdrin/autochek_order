@@ -262,36 +262,70 @@ async def _find_branch_input(page):
 
     # Небольшая пауза: у SlimSelect часто есть анимация открытия
     await page.wait_for_timeout(120)
-    # Ждём появления поля поиска в ОТКРЫТОМ выпадающем списке.
-    # SlimSelect кладёт input обычно в div.ss-content / div.ss-search (часто как "портал" вне секции).
-    popup_input = page.locator(
-        'div.ss-content:visible input, '
-        'div.ss-search:visible input, '
-        'div.ss-content:visible input[type="search"], '
-        'input.select2-search__field:visible, '
-        'input[role="searchbox"]:visible'
-    ).filter(
-        has_not=page.locator('input#address-firstname, input#address-telephone, input#track-number')
-    )
 
+    # Ждём появления поля поиска именно в выпадашке отделений НП
     for _ in range(120):  # ~12 секунд
-        try:
-            if await popup_input.count() > 0:
-                return popup_input.first
-        except Exception:
-            pass
+        popup = await _get_branch_popup(page)
+        if popup is not None:
+            try:
+                inp = popup.locator('input[type="search"]').first
+                if await inp.count() > 0 and await inp.is_visible():
+                    return inp
+            except Exception:
+                pass
         await page.wait_for_timeout(100)
 
-    # Если не появилось поле поиска, возможно список уже открыт, но без input (редко).
+    return None
+
+# --- Helper: get the correct SlimSelect popup for NP branch ---
+async def _get_branch_popup(page, inp=None):
+    """Return the currently open SlimSelect popup for NP branch.
+
+    Prefer the popup whose search input has placeholder/aria-label
+    'Введіть вулицю або номер відділення'.
+    """
+    # Best: exact placeholder/aria-label match (as on the page)
+    popup = page.locator(
+        'div.ss-content:visible:has(input[type="search"][placeholder="Введіть вулицю або номер відділення"]), '
+        'div.ss-content:visible:has(input[type="search"][aria-label="Введіть вулицю або номер відділення"])'
+    ).first
+    try:
+        if await popup.count() > 0:
+            return popup
+    except Exception:
+        pass
+
+    # If we already have an input, scope by its ancestor popup
+    if inp is not None:
+        try:
+            anc = inp.locator('xpath=ancestor::div[contains(@class,"ss-content")][1]').first
+            if await anc.count() > 0:
+                return anc
+        except Exception:
+            pass
+
+    # Fallback: any visible SlimSelect popup
+    any_popup = page.locator('div.ss-content:visible').first
+    try:
+        if await any_popup.count() > 0:
+            return any_popup
+    except Exception:
+        pass
+
     return None
 
 
-# --- Helper: ensure dropdown open and options visible ---
-async def _ensure_branch_dropdown_open(page, inp=None):
+async def _ensure_branch_dropdown_open(page, inp=None, popup=None):
     """Make sure the branch dropdown is open and options are present.
     This UI is flaky: the dropdown can close on blur/scroll; we re-open and wait."""
-    # If options already visible — ok
-    opts = page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
+    if popup is None:
+        popup = await _get_branch_popup(page, inp=inp)
+
+    opts = (
+        popup.locator('div.ss-list .ss-option:visible')
+        if popup is not None
+        else page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
+    )
     try:
         if await opts.count() > 0:
             return True
@@ -322,6 +356,13 @@ async def _ensure_branch_dropdown_open(page, inp=None):
     # Wait a bit for async rendering
     for _ in range(80):  # ~8s
         try:
+            if popup is None:
+                popup = await _get_branch_popup(page, inp=inp)
+                opts = (
+                    popup.locator('div.ss-list .ss-option:visible')
+                    if popup is not None
+                    else page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
+                )
             if await opts.count() > 0:
                 return True
         except Exception:
@@ -330,9 +371,15 @@ async def _ensure_branch_dropdown_open(page, inp=None):
 
     return False
 
-async def _wait_suggestions_list(page):
-    # Prefer SlimSelect dropdown that is actually open (visible)
-    slim_opts = page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
+async def _wait_suggestions_list(page, popup=None):
+    if popup is None:
+        popup = await _get_branch_popup(page)
+
+    slim_opts = (
+        popup.locator('div.ss-list .ss-option:visible')
+        if popup is not None
+        else page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
+    )
 
     # Fallbacks (other libraries)
     select2_opts = page.locator('ul.select2-results__options:visible li.select2-results__option:visible')
@@ -477,6 +524,8 @@ async def main():
             # Ветка 2: кастомный инпут/комбобокс (SlimSelect)
             strict_re = re.compile(rf"^\s*Відділення\s*№\s*{re.escape(branch_no)}(?!\d)", re.IGNORECASE)
 
+            popup = await _get_branch_popup(page, inp=inp)
+
             # вводим так же, как пользователь: "Відділення №8", чтобы не путать с 80/81
             query_to_type = BRANCH_QUERY
             if BRANCH_QUERY.strip().isdigit():
@@ -500,12 +549,15 @@ async def main():
                     await inp.type(query_to_type, delay=25)
                     await page.wait_for_timeout(250)
 
+                    # refresh popup after typing (UI may re-render)
+                    popup = await _get_branch_popup(page, inp=inp)
+
                     # 3) Убедиться что список открыт и опции реально появились
-                    opened = await _ensure_branch_dropdown_open(page, inp=inp)
+                    opened = await _ensure_branch_dropdown_open(page, inp=inp, popup=popup)
                     if not opened:
                         raise RuntimeError("dropdown not opened")
 
-                    opts = await _wait_suggestions_list(page)
+                    opts = await _wait_suggestions_list(page, popup=popup)
                     if not opts:
                         raise RuntimeError("no suggestions")
 
