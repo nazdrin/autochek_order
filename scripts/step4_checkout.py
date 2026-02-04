@@ -26,34 +26,93 @@ async def main():
             context = await browser.new_context()
             page = await context.new_page()
 
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(300)
+
+        # Успех = мы на странице checkout
+        if "/checkout" in page.url:
+            await page.screenshot(path=str(ART / "step4_already_on_checkout.png"), full_page=True)
+            print(f"OK: already on checkout. Current URL: {page.url}")
+            if not USE_CDP:
+                await browser.close()
+            return
+
         await page.screenshot(path=str(ART / "step4_before_checkout_click.png"), full_page=True)
 
         # 1) Кнопка "Оформити" в модалке корзины
-        btn = page.get_by_role("button", name="Оформити")
-        if await btn.count() == 0:
-            btn = page.locator('button:has-text("Оформити")')
+        # По твоему DOM: #confirmButtons ... button[title="Оформити"]
+        candidates = [
+            # Prefer visible button inside the visible confirmButtons container (modal can be re-rendered)
+            page.locator('#confirmButtons:visible button[title="Оформити"]:visible'),
+            page.locator('#confirmButtons:visible button:has-text("Оформити"):visible'),
+            page.get_by_role("button", name="Оформити"),
+            page.locator('button[title="Оформити"]:visible'),
+            page.locator('button:has-text("Оформити"):visible'),
+        ]
 
-        if await btn.count() == 0:
+        btn = None
+        for c in candidates:
+            try:
+                if await c.count():
+                    btn = c.first
+                    break
+            except Exception:
+                continue
+
+        if btn is None:
             raise RuntimeError('Не нашёл кнопку "Оформити". Убедись, что модалка корзины открыта.')
 
-        # 2) Кликаем и ждём навигацию
-        old_url = page.url
-        await btn.first.click()
+        # 2) Кликаем и ждём переход именно на /checkout
+        # В каскадном запуске сайт может дольше "думать": увеличиваем таймаут ожидания,
+        # и повторяем клик только если видно, что первый клик не запустил переход.
+        last_err = None
 
-        # Пытаемся дождаться смены URL или появления признака страницы оформления
-        try:
-            await page.wait_for_url(lambda url: url != old_url, timeout=10000)
-        except PWTimeout:
-            pass
+        async def _btn_visible_enabled() -> bool:
+            try:
+                if await btn.count() == 0:
+                    return False
+                if not await btn.is_visible():
+                    return False
+                if await btn.is_disabled():
+                    return False
+                return True
+            except Exception:
+                return False
 
-        # Часто страница оформления имеет характерные слова/элементы
-        # Подождём загрузку
-        await page.wait_for_timeout(2000)
+        for attempt in range(1, 4):
+            try:
+                # Если кнопку перекрыл оверлей, force помогает.
+                await btn.click(force=True, timeout=5000)
 
+                # Даём UI начать переход (часто кнопка меняет состояние/цвет)
+                await page.wait_for_timeout(350)
+
+                try:
+                    await page.wait_for_url("**/checkout**", timeout=45000)
+                    break
+                except PWTimeout:
+                    # Если после клика кнопка уже исчезла или стала disabled — переход начался,
+                    # просто подождём ещё, но повторно НЕ кликаем.
+                    if not await _btn_visible_enabled():
+                        await page.wait_for_url("**/checkout**", timeout=45000)
+                        break
+
+                    # Иначе кнопка всё ещё видима/активна — возможно клик не засчитался, пробуем повторить.
+                    raise
+
+            except Exception as e:
+                last_err = e
+                await page.screenshot(path=str(ART / f"step4_click_attempt_{attempt}.png"), full_page=True)
+                await page.wait_for_timeout(800)
+                # пере-найти кнопку (DOM мог смениться)
+                btn = page.locator('#confirmButtons:visible button[title="Оформити"]:visible').first
+
+        if "/checkout" not in page.url:
+            await page.screenshot(path=str(ART / "step4_after_checkout_failed.png"), full_page=True)
+            raise RuntimeError(f"Не удалось перейти на /checkout. Current URL: {page.url}. Last error: {last_err}")
+
+        await page.wait_for_timeout(800)
         await page.screenshot(path=str(ART / "step4_after_checkout.png"), full_page=True)
-
-        print(f"OK: clicked 'Оформити'. Current URL: {page.url}")
+        print(f"OK: checkout opened. Current URL: {page.url}")
 
         # В CDP режиме не закрываем Chrome
         if not USE_CDP:
