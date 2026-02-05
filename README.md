@@ -131,15 +131,15 @@ BIOTUS_USE_CDP=1 python scripts/step7_fill_ttn.py && \
 BIOTUS_USE_CDP=1 python scripts/step8_attach_invoice_file.py
 
 set -e
-BIOTUS_USE_CDP=1 python scripts/step2_search.py && \
-BIOTUS_USE_CDP=1 python scripts/step3_add_to_cart.py && \
+BIOTUS_USE_CDP=1 python scripts/step2_3_add_items_to_cart.py && \
 BIOTUS_USE_CDP=1 python scripts/step4_checkout.py && \
 BIOTUS_USE_CDP=1 python scripts/step5_select_drop_tab.py && \
 BIOTUS_USE_CDP=1 python scripts/step5_fill_name_phone.py && \
 BIOTUS_USE_CDP=1 python scripts/step5_select_city.py && \
-BIOTUS_USE_CDP=1 python scripts/step6_1_select_np_terminal.py&& \
+BIOTUS_USE_CDP=1 python scripts/step6_1_select_np_terminal.py && \
 BIOTUS_USE_CDP=1 python scripts/step7_fill_ttn.py && \
-BIOTUS_USE_CDP=1 python scripts/step8_attach_invoice_file.py
+BIOTUS_USE_CDP=1 python scripts/step8_attach_invoice_file.py && \
+BIOTUS_USE_CDP=1 python -u scripts/step9_confirm_order.py
 
 
 
