@@ -143,9 +143,20 @@ async def choose_best_option(
       - иначе -> city only
 
     ВАЖНО: если город = м. Київ, то проверку делаем ТОЛЬКО по городу.
+    ВАЖНО: тип населеного пункту може відрізнятись між API та сайтом ("смт" == "с-ще").
     """
     qn = norm(query)
-    ct = norm(city_type) if city_type else ""  # soft preference (e.g. "с.")
+
+    def _norm_city_type(s: str) -> str:
+        s = norm(s)
+        s = s.replace("смт.", "смт").replace("м.", "м").replace("с.", "с")
+        # Biotus sometimes uses "с-ще" where API sends "смт".
+        if s in {"смт", "селище", "селище міського типу"}:
+            return "с-ще"
+        return s
+
+    ct = _norm_city_type(city_type) if city_type else ""  # soft preference (e.g. "с", "м", "с-ще")
+
     cn = norm(city_name) if city_name else ""
     if not cn:
         cn = qn
@@ -161,7 +172,7 @@ async def choose_best_option(
         # Normalize city name only (no type, no punctuation noise)
         s = norm(s)
         # common prefixes in UA/RU for city type
-        s = re.sub(r"^(м\.?\s+|с\.?\s+|смт\.?\s+)", "", s).strip()
+        s = re.sub(r"^(м\.?\s+|с\.?\s+|смт\.?\s+|с-ще\.?\s+|селище\s+)", "", s).strip()
         return s
 
     def _extract_city_from_option(txt: str) -> str:
@@ -186,9 +197,18 @@ async def choose_best_option(
     def type_pref(txt: str) -> bool:
         if not ct:
             return False
-        # Prefer when the left city segment contains the requested type
+        # Prefer when the left city segment matches the requested type.
         left = (txt or "").split("/")[0]
-        return ct in norm(left)
+        left_n = norm(left)
+        # Normalize site display types similar to API normalization.
+        # Treat "смт" and "с-ще" as equivalent.
+        if ct == "с-ще":
+            return left_n.startswith("смт") or left_n.startswith("с-ще") or left_n.startswith("селище")
+        if ct == "м":
+            return left_n.startswith("м")
+        if ct == "с":
+            return left_n.startswith("с")
+        return ct in left_n
 
     async def pick_best(predicate) -> Optional[object]:
         best = None
@@ -323,17 +343,25 @@ async def main():
         # CITY_QUERY already follows the precedence rules above.
         await city_input.fill("")
         await city_input.fill(CITY_QUERY)
-        await page.wait_for_timeout(300)  # SlimSelect debounce
+        await page.wait_for_timeout(150)  # SlimSelect debounce (faster)
 
         # 4) Ждём появления опций (они могут фильтроваться/подгружаться)
         options = await find_city_options(page)
 
         found = False
-        for _ in range(30):  # ~15 сек (30 * 500ms)
+        # Fast phase (~4s)
+        for _ in range(20):
             if await options.count() > 0:
                 found = True
                 break
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(200)
+        # Slow fallback (~6s)
+        if not found:
+            for _ in range(12):
+                if await options.count() > 0:
+                    found = True
+                    break
+                await page.wait_for_timeout(500)
 
         await page.screenshot(path=str(ART / "step5_3_city_dropdown.png"), full_page=True)
 
@@ -361,19 +389,17 @@ async def main():
 
         await chosen.click(force=True)
 
-        # 6) Ждём, пока SlimSelect зафиксирует выбор (dropdown закроется)
+        # 6) Ждём, пока SlimSelect зафиксирует выбор (dropdown закроется) — быстро и надёжно
         try:
-            await page.wait_for_function(
-                "() => !document.querySelector('.ss-list')",
-                timeout=TIMEOUT_MS
-            )
+            await page.locator(".ss-content:visible").first.wait_for(state="hidden", timeout=min(TIMEOUT_MS, 5000))
         except Exception:
-            pass
+            # Fallback: small pause to let UI settle
+            await page.wait_for_timeout(200)
 
         # проверяем выбранный текст из ss-single
         after = await get_selected_city_text(page)
         if not after:
-            await page.wait_for_timeout(300)
+            await page.wait_for_timeout(200)
             after = await get_selected_city_text(page)
         await page.screenshot(path=str(ART / "step5_3_after_city_selected.png"), full_page=True)
 

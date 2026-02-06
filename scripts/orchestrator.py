@@ -12,6 +12,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import re
+
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +36,34 @@ STEP9_CONFIRM_SCRIPT = ROOT / "scripts" / "step9_confirm_order.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
-TIMEOUT_SEC = int(os.getenv("ORCH_STEP_TIMEOUT_SEC", "600"))  # таймаут на шаг (10 минут по умолчанию)
+TIMEOUT_SEC = int(os.getenv("ORCH_STEP_TIMEOUT_SEC", "600"))  # общий fallback таймаут
+
+# Per-step timeouts (seconds). Can be overridden via env ORCH_TIMEOUT_<STEP_KEY>.
+# Example: ORCH_TIMEOUT_STEP6_BRANCH=20
+STEP_TIMEOUT_DEFAULTS: Dict[str, int] = {
+    "FETCH": int(os.getenv("ORCH_TIMEOUT_FETCH", "60")),
+    "STEP2_3": int(os.getenv("ORCH_TIMEOUT_STEP2_3", "90")),
+    "STEP4": int(os.getenv("ORCH_TIMEOUT_STEP4", "45")),
+    "STEP5_DROP_TAB": int(os.getenv("ORCH_TIMEOUT_STEP5_DROP_TAB", "25")),
+    "STEP5_CITY": int(os.getenv("ORCH_TIMEOUT_STEP5_CITY", "35")),
+    "STEP5_FILL_NAME_PHONE": int(os.getenv("ORCH_TIMEOUT_STEP5_FILL_NAME_PHONE", "30")),
+    "STEP6_BRANCH": int(os.getenv("ORCH_TIMEOUT_STEP6_BRANCH", "20")),
+    "STEP6_TERMINAL": int(os.getenv("ORCH_TIMEOUT_STEP6_TERMINAL", "25")),
+    "STEP7_TTN": int(os.getenv("ORCH_TIMEOUT_STEP7_TTN", "25")),
+    "STEP8_ATTACH": int(os.getenv("ORCH_TIMEOUT_STEP8_ATTACH", "75")),
+    "STEP9_CONFIRM": int(os.getenv("ORCH_TIMEOUT_STEP9_CONFIRM", "45")),
+    "SALESDRIVE_UPDATE": int(os.getenv("ORCH_TIMEOUT_SALESDRIVE_UPDATE", "30")),
+}
+
+def _timeout_for_step(step_key: str) -> int:
+    """Return timeout for a logical step key, with TIMEOUT_SEC as fallback."""
+    try:
+        v = STEP_TIMEOUT_DEFAULTS.get(step_key)
+        if isinstance(v, int) and v > 0:
+            return v
+    except Exception:
+        pass
+    return TIMEOUT_SEC
 
 STATE_FILE = Path(os.getenv("ORCH_STATE_FILE", str(ROOT / ".orch_state.json")))
 MAX_PROCESSED_IDS = int(os.getenv("ORCH_MAX_PROCESSED_IDS", "200"))
@@ -133,6 +162,12 @@ def short_reason(step_name: str, rc: int | None, out: str, err: str, exc: Except
     return f"{step_name}: failed"
 
 
+class StepError(RuntimeError):
+    def __init__(self, step: str, reason: str):
+        super().__init__(f"{step}: {reason}")
+        self.step = step
+        self.reason = reason
+
 # --- SalesDrive integration ---
 def salesdrive_update_status(order_id: int, status_id: int) -> None:
     """Update order status in SalesDrive using /api/order/update/. Raises on failure."""
@@ -152,7 +187,7 @@ def salesdrive_update_status(order_id: int, status_id: int) -> None:
     req.add_header("X-Api-Key", SALESDRIVE_API_KEY)
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=_timeout_for_step("SALESDRIVE_UPDATE")) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             if resp.status < 200 or resp.status >= 300:
                 raise RuntimeError(f"SalesDrive update failed HTTP {resp.status}: {body[:300]}")
@@ -369,18 +404,87 @@ def extract_tracking_number(order: Dict[str, Any]) -> str:
     return (d.get("trackingNumber") or "").strip()
 
 
-def choose_np_step(address: str, branch_number: str) -> Tuple[str, Path, str, str]:
+# Extract shipping_address from order
+def extract_shipping_address(order: Dict[str, Any]) -> str:
+    return (order.get("shipping_address") or "").strip()
+
+
+# --- Helper: normalize spaces ---
+def _normalize_spaces(s: str) -> str:
+    """Collapse all whitespace to single spaces and strip."""
+    return re.sub(r'\s+', ' ', s or '').strip()
+
+
+# --- Helper: build branch query from shipping/address info ---
+def build_branch_query_from_shipping(shipping_address: str, fallback_address: str) -> str:
+    """
+    Returns a short query string suitable for Biotus search, extracted from shipping_address or fallback_address.
+    - If shipping_address or fallback_address is empty, returns "".
+    - For "поштомат": returns number after "№" or any number, else the string.
+    - For "пункт": returns "Пункт №{num}" if possible, else "Пункт".
+    - For "відділен": returns "Відділення №{num}" if possible, else "Відділення".
+    - Otherwise, returns number after "№" or any number, else the string.
+    All output is normalized for whitespace.
+    """
+    src = (shipping_address or "").strip() or (fallback_address or "").strip()
+    if not src:
+        return ""
+    s = src
+    s_lower = s.casefold()
+    # Helper to find number after № or any number
+    def extract_number(ss: str) -> str | None:
+        # Try to find number after №
+        m = re.search(r'№\s*(\d+)', ss)
+        if m:
+            return m.group(1)
+        # Else, any number
+        m2 = re.search(r'\b(\d{1,6})\b', ss)
+        if m2:
+            return m2.group(1)
+        return None
+    if "поштомат" in s_lower:
+        num = extract_number(s)
+        if num:
+            return _normalize_spaces(num)
+        return _normalize_spaces(s)
+    elif "пункт" in s_lower:
+        num = extract_number(s)
+        if num:
+            return _normalize_spaces(f"Пункт №{num}")
+        return _normalize_spaces("Пункт")
+    elif "відділен" in s_lower:
+        num = extract_number(s)
+        if num:
+            return _normalize_spaces(f"Відділення №{num}")
+        return _normalize_spaces("Відділення")
+    else:
+        num = extract_number(s)
+        if num:
+            return _normalize_spaces(num)
+        return _normalize_spaces(s)
+
+
+def choose_np_step(address: str, branch_number: str, shipping_address: str) -> Tuple[str, Path, str, str]:
     """
     Returns: (step_name, script_path, env_key, env_value)
-    - If address contains 'поштомат' -> terminal script and BIOTUS_TERMINAL_QUERY.
-      Prefer passing the numeric branch number (e.g. 48437) because the UI search works by number.
-    - Otherwise -> branch script and BIOTUS_BRANCH_QUERY (pass full address as before).
+
+    Detection of delivery kind:
+      - Uses `address` from ord_delivery_data[0].address for kind detection (it contains "поштомат"/"відділення"/"пункт").
+
+    What we pass into scripts:
+      - If it's a postomat ("поштомат" in address) -> terminal script and BIOTUS_TERMINAL_QUERY.
+        Prefer passing the numeric branch number (e.g. 48437) because the UI search works by number.
+      - Otherwise -> branch script and BIOTUS_BRANCH_QUERY.
+        Pass a short query (e.g. "Відділення №2", "Пункт №964", or "48437") extracted from shipping_address or address,
+        using build_branch_query_from_shipping.
     """
     a_norm = (address or "").casefold()
     if "поштомат" in a_norm:
         value = (branch_number or "").strip() or (address or "").strip()
         return ("step6_1_select_np_terminal", STEP6_TERMINAL_SCRIPT, "BIOTUS_TERMINAL_QUERY", value)
-    return ("step6_select_np_branch", STEP6_BRANCH_SCRIPT, "BIOTUS_BRANCH_QUERY", (address or "").strip())
+
+    query = build_branch_query_from_shipping(shipping_address, address)
+    return ("step6_select_np_branch", STEP6_BRANCH_SCRIPT, "BIOTUS_BRANCH_QUERY", query)
 
 
 def process_one_order(order: Dict[str, Any]) -> None:
@@ -406,6 +510,7 @@ def process_one_order(order: Dict[str, Any]) -> None:
         env["BIOTUS_PHONE_LOCAL"] = phone_local
 
     delivery_address, delivery_branch_number = extract_delivery_info(order)
+    shipping_address = extract_shipping_address(order)
     tracking_number = extract_tracking_number(order)
     if tracking_number:
         env["BIOTUS_TTN"] = tracking_number
@@ -413,7 +518,9 @@ def process_one_order(order: Dict[str, Any]) -> None:
     if not delivery_address:
         raise RuntimeError("Не найдено поле ord_delivery_data[0].address для выбора отделения/поштомата.")
 
-    step6_name, step6_script, step6_env_key, step6_env_val = choose_np_step(delivery_address, delivery_branch_number)
+    step6_name, step6_script, step6_env_key, step6_env_val = choose_np_step(
+        delivery_address, delivery_branch_number, shipping_address
+    )
 
     city_env = extract_city_env(order)
     for k, v in city_env.items():
@@ -426,32 +533,36 @@ def process_one_order(order: Dict[str, Any]) -> None:
 
     env[step6_env_key] = step6_env_val
     print(f"[ORCH] Delivery address => {delivery_address}")
+    if shipping_address:
+        print(f"[ORCH] Shipping address => {shipping_address}")
     if delivery_branch_number:
         print(f"[ORCH] Delivery branchNumber => {delivery_branch_number}")
     print(f"[ORCH] Step6 => {step6_name} ({step6_env_key}='{step6_env_val}')")
 
     print(f"[ORCH] Using BIOTUS_ITEMS: {biotus_items}")
 
-    steps: List[Tuple[str, Path]] = [
-        ("step2_3_add_items_to_cart", STEP2_3_SCRIPT),
-        ("step4_checkout", STEP4_SCRIPT),
-        ("step5_select_drop_tab", STEP5_DROP_TAB_SCRIPT),
-        ("step5_select_city", STEP5_CITY_SCRIPT),
-        ("step5_fill_name_phone", STEP5_FILL_NAME_PHONE_SCRIPT),
-        (step6_name, step6_script),
-        ("step7_fill_ttn", STEP7_TTN_SCRIPT),
-        ("step8_attach_invoice_file", STEP8_ATTACH_SCRIPT),
-        ("step9_confirm_order", STEP9_CONFIRM_SCRIPT),
+    steps: List[Tuple[str, str, Path]] = [
+        ("STEP2_3", "step2_3_add_items_to_cart", STEP2_3_SCRIPT),
+        ("STEP4", "step4_checkout", STEP4_SCRIPT),
+        ("STEP5_DROP_TAB", "step5_select_drop_tab", STEP5_DROP_TAB_SCRIPT),
+        ("STEP5_CITY", "step5_select_city", STEP5_CITY_SCRIPT),
+        ("STEP5_FILL_NAME_PHONE", "step5_fill_name_phone", STEP5_FILL_NAME_PHONE_SCRIPT),
+        ("STEP6_TERMINAL" if step6_name == "step6_1_select_np_terminal" else "STEP6_BRANCH", step6_name, step6_script),
+        ("STEP7_TTN", "step7_fill_ttn", STEP7_TTN_SCRIPT),
+        ("STEP8_ATTACH", "step8_attach_invoice_file", STEP8_ATTACH_SCRIPT),
+        ("STEP9_CONFIRM", "step9_confirm_order", STEP9_CONFIRM_SCRIPT),
     ]
 
     current_step = None
-    for step_name, script in steps:
+    current_key = None
+    for step_key, step_name, script in steps:
         current_step = step_name
+        current_key = step_key
+        step_timeout = _timeout_for_step(step_key)
         try:
-            rc, out, err = run_python(script, env=env, timeout_sec=TIMEOUT_SEC)
+            rc, out, err = run_python(script, env=env, timeout_sec=step_timeout)
         except subprocess.TimeoutExpired as te:
-            # Remove notify_stub; raise with step name
-            raise RuntimeError(f"{step_name} timeout") from te
+            raise StepError(step_name, f"timeout after {step_timeout}s") from te
 
         if out.strip():
             print(out, end="" if out.endswith("\n") else "\n")
@@ -460,8 +571,7 @@ def process_one_order(order: Dict[str, Any]) -> None:
 
         if rc != 0:
             reason = short_reason(step_name, rc, out, err, None)
-            # Remove notify_stub; raise with step name and reason
-            raise RuntimeError(f"{step_name} failed: {reason}")
+            raise StepError(step_name, reason)
 
     # If all steps succeeded, update SalesDrive order status
     salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID)
@@ -502,7 +612,7 @@ def main() -> int:
     while True:
         try:
             env = os.environ.copy()
-            rc, out, err = run_python(FETCH_SCRIPT, env=env, timeout_sec=60, args=["--raw"])
+            rc, out, err = run_python(FETCH_SCRIPT, env=env, timeout_sec=_timeout_for_step("FETCH"), args=["--raw"])
             if rc != 0:
                 notify_stub(f"salesdrive_fetch_status21.py error rc={rc}: {err.strip()}")
                 raise RuntimeError("Fetch failed")
@@ -553,14 +663,21 @@ def main() -> int:
 
                         if args.dry_run:
                             print("[ORCH] dry-run enabled, no steps executed.")
+                            # In dry-run we do not mark processed_ids; this allows repeated dry-run tests.
                             continue
 
                         try:
                             process_one_order(order)
                         except Exception as e:
-                            reason = f"{type(e).__name__}: {str(e)}".strip()
-                            notify_stub(f"[ORCH][ORDER {order_id}] FAILED. {reason}")
-                            mark_failed(state, int(order_id), "pipeline", reason)
+                            if isinstance(e, StepError):
+                                step = e.step
+                                reason = e.reason
+                            else:
+                                step = "pipeline"
+                                reason = f"{type(e).__name__}: {str(e)}".strip()
+
+                            notify_stub(f"[ORCH][ORDER {order_id}] FAILED at {step}. {reason}")
+                            mark_failed(state, int(order_id), step, reason)
                             save_state(state)
                             # continue with next order
                             continue

@@ -4,46 +4,16 @@ RPA Biotus — оформление заказов
 Проект рассчитан на локальную работу (браузер запускается вручную, скрипты подключаются по CDP).
 
 ⸻
-
+BIOTUS_BASE_URL=https://opt.biotus.ua
+BIOTUS_LOGIN=ibezdrabko@icloud.com
+BIOTUS_PASSWORD=397Aa397$
 Общая логика
 
-Скрипты выполняются по шагам, каждый шаг — отдельный файл:
-	1.	step1_login.py — логин (опционально, если используем сохранённую сессию)
-	2.	step2_search.py — поиск товара по SKU
-	3.	step3_add_to_cart.py — добавление товара в корзину
-	4.	step4_checkout.py — переход к оформлению заказа
-	5.	step5_select_drop_tab.py — выбор режима «Для відправки дроп»
-	6.	step5_fill_name_phone.py — заполнение имени и телефона
-	7.	step5_select_city.py — выбор города (SlimSelect)
-	8.	step6_select_np_branch.py — выбор отделения Новой Почты (в разработке)
-
-Каждый шаг можно запускать отдельно или каскадно.
-
-⸻
-
-Структура проекта
-
-rpa_biotus/
-├── scripts/
-│   ├── step1_login.py
-│   ├── step2_search.py
-│   ├── step3_add_to_cart.py
-│   ├── step4_checkout.py
-│   ├── step5_select_drop_tab.py
-│   ├── step5_fill_name_phone.py
-│   ├── step5_select_city.py
-│   └── step6_select_np_branch.py
-├── artifacts/            # скриншоты и отладочные артефакты
-│   └── .gitkeep
-├── .env                  # локальные секреты (НЕ коммитится)
-├── .env.example          # пример env
-├── .gitignore
-├── requirements.txt
-└── README.md
-
-
-⸻
-
+python -u scripts/orchestrator.py --once
+rm -f .orch_state.json
+python -u scripts/orchestrator.py
+rm -f .orch_state.json
+python -u scripts/orchestrator.py --once
 Требования
 	•	macOS
 	•	Python 3.11
@@ -143,42 +113,10 @@ BIOTUS_USE_CDP=1 python -u scripts/step9_confirm_order.py
 
 
 
-⸻
-
-Текущее состояние стабильности
-
-Шаг	Статус
-Поиск товара	✅ стабильно
-Добавление в корзину	✅ стабильно
-Оформить заказ	⚠️ нестабильно (мигание)
-Имя + телефон	⚠️ нестабильно
-Выбор города	⚠️ частично стабильно
-Отделение НП	❌ не реализовано
 
 
-⸻
-
-Отладка
-	•	Все скриншоты сохраняются в artifacts/
-	•	При ошибках смотри последний .png
-	•	Для SlimSelect выбор города всегда через клик по опции
-
-⸻
-
-Принципы работы над проектом
-	•	Сначала анализ DOM и состояний
-	•	Потом минимальные правки
-	•	Один шаг — один файл
-	•	Никакой магии с Enter для SlimSelect
-
-⸻
-
-Дальнейшие шаги
-	•	Стабилизация step4_checkout.py
-	•	Полная переработка step5_fill_name_phone.py
-	•	Реализация step6_select_np_branch.py
-	•	Выделение общего helper-модуля
-
-⸻
+BIOTUS_BASE_URL=https://opt.biotus.ua
+BIOTUS_LOGIN=ibezdrabko@icloud.com
+BIOTUS_PASSWORD=397Aa397$
 
 Автор: Дмитрий
