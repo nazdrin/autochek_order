@@ -26,6 +26,7 @@ STEP5_FILL_NAME_PHONE_SCRIPT = ROOT / "scripts" / "step5_fill_name_phone.py"
 STEP6_BRANCH_SCRIPT = ROOT / "scripts" / "step6_select_np_branch.py"
 STEP6_TERMINAL_SCRIPT = ROOT / "scripts" / "step6_1_select_np_terminal.py"
 STEP7_TTN_SCRIPT = ROOT / "scripts" / "step7_fill_ttn.py"
+STEP8_ATTACH_SCRIPT = ROOT / "scripts" / "step8_attach_invoice_file.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -295,6 +296,7 @@ def process_one_order(order: Dict[str, Any]) -> None:
         ("step5_fill_name_phone", STEP5_FILL_NAME_PHONE_SCRIPT),
         (step6_name, step6_script),
         ("step7_fill_ttn", STEP7_TTN_SCRIPT),
+        ("step8_attach_invoice_file", STEP8_ATTACH_SCRIPT),
     ]
 
     for step_name, script in steps:
@@ -326,6 +328,7 @@ def main() -> int:
         ("Step6 branch script", STEP6_BRANCH_SCRIPT),
         ("Step6 terminal script", STEP6_TERMINAL_SCRIPT),
         ("Step7 ttn script", STEP7_TTN_SCRIPT),
+        ("Step8 attach invoice script", STEP8_ATTACH_SCRIPT),
     ]
     for label, p in required:
         if not p.exists():

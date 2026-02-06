@@ -1,5 +1,7 @@
 import asyncio
 import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,41 +14,55 @@ USE_CDP = os.getenv("BIOTUS_USE_CDP", "0") == "1"
 CDP_ENDPOINT = os.getenv("BIOTUS_CDP_ENDPOINT", "http://127.0.0.1:9222")
 
 ATTACH_DIR = Path(os.getenv("BIOTUS_ATTACH_DIR", "/Users/dmitrijnazdrin/rpa_biotus/маркировки"))
-ATTACH_EXTS = tuple(x.strip().lower() for x in os.getenv("BIOTUS_ATTACH_EXTS", ".pdf,.png,.jpg,.jpeg").split(","))
 
 TIMEOUT_MS = int(os.getenv("BIOTUS_TIMEOUT_MS", "15000"))
 TTN = os.getenv("BIOTUS_TTN", "").strip()
+# Nova Poshta API key (prefer BIOTUS_NP_API_KEY, but also allow NP_API_KEY)
+NP_API_KEY = (os.getenv("BIOTUS_NP_API_KEY") or os.getenv("NP_API_KEY") or "").strip()
 
 
-def pick_file(folder: Path) -> Path:
+def download_np_label(folder: Path) -> Path:
+    """Download Nova Poshta 100x100 marking label (pdf) for TTN into folder and return path."""
     if not folder.exists():
+        # keep behavior consistent: folder must exist
         raise RuntimeError(f"Папка не найдена: {folder}")
 
     if not TTN:
         raise RuntimeError(
             "BIOTUS_TTN не задан. Укажи BIOTUS_TTN в .env или переменных окружения, "
-            "чтобы выбрать файл накладной по номеру ТТН."
+            "чтобы скачать накладную по номеру ТТН."
         )
 
-    # Ищем файл, в имени которого есть TTN (без учёта регистра) и расширение входит в ATTACH_EXTS
-    ttn_lower = TTN.lower()
-    files = [
-        p
-        for p in folder.iterdir()
-        if p.is_file()
-        and p.suffix.lower() in ATTACH_EXTS
-        and ttn_lower in p.name.lower()
-    ]
-
-    if not files:
+    if not NP_API_KEY:
         raise RuntimeError(
-            f"Не найден файл в папке {folder} с TTN='{TTN}' и расширением {ATTACH_EXTS}. "
-            "Ожидаю, например: marking-<TTN>.pdf"
+            "Не задан API ключ Новой Почты. Укажи BIOTUS_NP_API_KEY (или NP_API_KEY) "
+            "в .env или переменных окружения."
         )
 
-    # если вдруг несколько совпадений — берём самый свежий
-    files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-    return files[0]
+    out_path = folder / f"marking-{TTN}.pdf"
+
+    url = (
+        "https://my.novaposhta.ua/orders/printMarking100x100/"
+        f"orders[]/{TTN}/type/pdf/apiKey/{NP_API_KEY}/zebra"
+    )
+
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=max(10, TIMEOUT_MS / 1000)) as resp:
+            status = getattr(resp, "status", 200)
+            if status and int(status) >= 400:
+                raise RuntimeError(f"Nova Poshta API вернул статус {status}")
+            data = resp.read()
+            if not data or len(data) < 1000:
+                # heuristic: empty/too small pdf is likely an error page
+                raise RuntimeError("Скачанный файл слишком маленький — похоже, NP API вернул ошибку")
+            out_path.write_bytes(data)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Ошибка NP API HTTP {e.code}: {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Ошибка NP API соединения: {e}") from e
+
+    return out_path
 
 
 async def pick_checkout_page(context):
@@ -88,8 +104,8 @@ async def pick_checkout_page(context):
 
 
 async def main():
-    file_path = pick_file(ATTACH_DIR)
-    print(f"[INFO] Will attach: {file_path}")
+    file_path = download_np_label(ATTACH_DIR)
+    print(f"[INFO] Downloaded and will attach: {file_path}")
 
     async with async_playwright() as p:
         if USE_CDP:
