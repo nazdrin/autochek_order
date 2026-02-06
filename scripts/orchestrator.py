@@ -20,6 +20,7 @@ FETCH_SCRIPT = ROOT / "scripts" / "salesdrive_fetch_status21.py"
 STEP2_3_SCRIPT = ROOT / "scripts" / "step2_3_add_items_to_cart.py"
 STEP4_SCRIPT = ROOT / "scripts" / "step4_checkout.py"
 STEP5_DROP_TAB_SCRIPT = ROOT / "scripts" / "step5_select_drop_tab.py"
+STEP5_CITY_SCRIPT = ROOT / "scripts" / "step5_select_city.py"
 STEP5_FILL_NAME_PHONE_SCRIPT = ROOT / "scripts" / "step5_fill_name_phone.py"
 
 
@@ -175,6 +176,36 @@ def build_biotus_items(order: Dict[str, Any]) -> str:
     return ";".join(items)
 
 
+def get_first_delivery_block(order: Dict[str, Any]) -> Dict[str, Any]:
+    odd = order.get("ord_delivery_data") or []
+    if isinstance(odd, list) and odd:
+        first = odd[0]
+        return first if isinstance(first, dict) else {}
+    if isinstance(odd, dict):
+        return odd
+    return {}
+
+
+def extract_city_env(order: Dict[str, Any]) -> Dict[str, str]:
+    d = get_first_delivery_block(order)
+    city_name = (d.get("cityName") or "").strip()
+    area_name = (d.get("areaName") or "").strip()
+    region_name = (d.get("regionName") or "").strip()
+    city_type = (d.get("cityType") or "").strip()
+
+    env: Dict[str, str] = {}
+    if city_name:
+        env["BIOTUS_CITY_NAME"] = city_name
+    if area_name:
+        env["BIOTUS_CITY_AREA"] = area_name
+    if region_name is not None:
+        # allow empty string explicitly as some flows expect it
+        env["BIOTUS_CITY_REGION"] = region_name
+    if city_type:
+        env["BIOTUS_CITY_TYPE"] = city_type
+    return env
+
+
 def process_one_order(order: Dict[str, Any]) -> None:
     biotus_items = build_biotus_items(order)
     if not biotus_items:
@@ -192,12 +223,22 @@ def process_one_order(order: Dict[str, Any]) -> None:
     if phone_local:
         env["BIOTUS_PHONE_LOCAL"] = phone_local
 
+    city_env = extract_city_env(order)
+    for k, v in city_env.items():
+        env[k] = v
+
+    if city_env:
+        print(
+            f"[ORCH] City => name={city_env.get('BIOTUS_CITY_NAME','')} area={city_env.get('BIOTUS_CITY_AREA','')} region={city_env.get('BIOTUS_CITY_REGION','')} type={city_env.get('BIOTUS_CITY_TYPE','')}"
+        )
+
     print(f"[ORCH] Using BIOTUS_ITEMS: {biotus_items}")
 
     steps: List[Tuple[str, Path]] = [
         ("step2_3_add_items_to_cart", STEP2_3_SCRIPT),
         ("step4_checkout", STEP4_SCRIPT),
         ("step5_select_drop_tab", STEP5_DROP_TAB_SCRIPT),
+        ("step5_select_city", STEP5_CITY_SCRIPT),
         ("step5_fill_name_phone", STEP5_FILL_NAME_PHONE_SCRIPT),
     ]
 
@@ -225,6 +266,7 @@ def main() -> int:
         ("Step2_3 script", STEP2_3_SCRIPT),
         ("Step4 script", STEP4_SCRIPT),
         ("Step5 drop tab script", STEP5_DROP_TAB_SCRIPT),
+        ("Step5 city script", STEP5_CITY_SCRIPT),
         ("Step5 fill name/phone script", STEP5_FILL_NAME_PHONE_SCRIPT),
     ]
     for label, p in required:

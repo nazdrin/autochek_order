@@ -135,21 +135,21 @@ async def choose_best_option(
     """
     SlimSelect: input = фильтр, выбор = клик по .ss-option.
 
-    Логика подбора:
-    - всегда требуем совпадение по городу (city_name если задан, иначе query)
-    - если заданы и area_name и region_name -> требуем оба
-    - если задан только area_name -> требуем area_name
-    - если задан только region_name -> требуем region_name
-    - иначе -> первое совпадение по городу
+    Логика подбора (structured деградация):
+    - всегда требуем совпадение по городу (CITY_NAME если задан, иначе query)
+    - если заданы area и region: сначала пробуем city+area+region
+      - если НЕ найдено (т.е. район/region не совпал) -> пробуем city+area
+      - если всё ещё не найдено (т.е. область/area не совпала) -> пробуем city+region
+      - иначе -> city only
 
-    Дополнительно: если area/region не заданы, можно использовать legacy must_tokens как уточнение.
+    ВАЖНО: если город = м. Київ, то проверку делаем ТОЛЬКО по городу.
     """
-    # Prefer structured city_name for matching if provided; fall back to query otherwise.
     qn = norm(query)
     ct = norm(city_type) if city_type else ""  # soft preference (e.g. "с.")
     cn = norm(city_name) if city_name else ""
     if not cn:
         cn = qn
+
     an = norm(area_name) if area_name else ""
     rn = norm(region_name) if region_name else ""
 
@@ -157,36 +157,53 @@ async def choose_best_option(
     if cnt == 0:
         return None
 
-    # Build required tokens list depending on structured inputs (hard requirements)
-    required: List[str] = []
-    if an:
-        required.append(an)
-    if rn:
-        required.append(rn)
+    def _norm_city_name(s: str) -> str:
+        # Normalize city name only (no type, no punctuation noise)
+        s = norm(s)
+        # common prefixes in UA/RU for city type
+        s = re.sub(r"^(м\.?\s+|с\.?\s+|смт\.?\s+)", "", s).strip()
+        return s
 
-    # If no structured filters, allow legacy must tokens as fallback
-    legacy_need = [norm(t) for t in must_tokens if t]
+    def _extract_city_from_option(txt: str) -> str:
+        """Biotus city option is typically like: 'м. Харків / Харківська обл. / Харківський р-н'.
+        We only want the city part (left side before first '/'), with type removed.
+        """
+        raw = (txt or "").strip()
+        left = raw.split("/")[0].strip()  # e.g. 'м. Харків' or 'с. Харківці'
+        return _norm_city_name(left)
+
+    # If a structured CITY_NAME is provided, require an exact city-name match.
+    # This prevents accidental matches like 'Харків' in 'Харківці'.
+    cn_exact = _norm_city_name(city_name) if city_name else ""
 
     def city_match(txt: str) -> bool:
+        if cn_exact:
+            return _extract_city_from_option(txt) == cn_exact
+        # Legacy / fallback: allow substring match
         t = norm(txt)
         return cn in t
 
     def type_pref(txt: str) -> bool:
         if not ct:
             return False
-        t = norm(txt)
-        # Prefer exact type token (e.g. "с.") in the option text.
-        return ct in t
+        # Prefer when the left city segment contains the requested type
+        left = (txt or "").split("/")[0]
+        return ct in norm(left)
 
-    # Pass 1: hard requirements (city + required). If multiple match, prefer those that also match CITY_TYPE.
-    if required:
+    async def pick_best(predicate) -> Optional[object]:
         best = None
         best_score = -1
-        for i in range(min(cnt, 120)):
+        for i in range(min(cnt, 200)):
             raw = await options.nth(i).inner_text()
             t = norm(raw)
-            if city_match(t) and _contains_all(t, required):
+            if predicate(t):
                 score = 10
+                # Bonus for exact city match when we can extract it (helps legacy too)
+                try:
+                    if _extract_city_from_option(raw) == _norm_city_name(cn):
+                        score += 2
+                except Exception:
+                    pass
                 if type_pref(t):
                     score += 1
                 if score > best_score:
@@ -194,37 +211,51 @@ async def choose_best_option(
                     best = options.nth(i)
         return best
 
-    # Pass 2: city + legacy must tokens (if any). Prefer CITY_TYPE when possible.
+    # Special-case: Kyiv -> match by city only.
+    # Accept both "київ" and "м київ" in inputs.
+    if cn == "київ" or cn == "м київ" or cn.startswith("київ") or cn.startswith("м київ"):
+        return await pick_best(lambda t: city_match(t))
+
+    # Structured passes (deterministic деградация)
+    if an and rn:
+        # Pass 1: city + area + region
+        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [an, rn]))
+        if best is not None:
+            return best
+        # Pass 2: район (region) не совпадает -> проверяем city + area
+        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [an]))
+        if best is not None:
+            return best
+        # Pass 3: область (area) не совпадает -> проверяем city + region
+        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [rn]))
+        if best is not None:
+            return best
+        # Pass 4: оба не совпали / нет точного совпадения -> city only
+        return await pick_best(lambda t: city_match(t))
+
+    if an:
+        # Only area provided -> city + area
+        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [an]))
+        if best is not None:
+            return best
+        return await pick_best(lambda t: city_match(t))
+
+    if rn:
+        # Only region provided -> city + region
+        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [rn]))
+        if best is not None:
+            return best
+        return await pick_best(lambda t: city_match(t))
+
+    # Legacy-only уточнение
+    legacy_need = [norm(t) for t in must_tokens if t]
     if legacy_need:
-        best = None
-        best_score = -1
-        for i in range(min(cnt, 120)):
-            raw = await options.nth(i).inner_text()
-            t = norm(raw)
-            if city_match(t) and _contains_all(t, legacy_need):
-                score = 10
-                if type_pref(t):
-                    score += 1
-                if score > best_score:
-                    best_score = score
-                    best = options.nth(i)
+        best = await pick_best(lambda t: city_match(t) and _contains_all(t, legacy_need))
         if best is not None:
             return best
 
-    # Pass 3: first city match, but prefer matching CITY_TYPE if possible.
-    best = None
-    best_score = -1
-    for i in range(min(cnt, 120)):
-        raw = await options.nth(i).inner_text()
-        t = norm(raw)
-        if city_match(t):
-            score = 10
-            if type_pref(t):
-                score += 1
-            if score > best_score:
-                best_score = score
-                best = options.nth(i)
-    return best
+    # Fallback: first city match (prefer CITY_TYPE when possible)
+    return await pick_best(lambda t: city_match(t))
 
 
 async def main():
@@ -261,8 +292,13 @@ async def main():
             structured_need.append(CITY_REGION)
 
         ok_city = norm(city_token) in cur_n
-        ok_structured = _contains_all(cur_n, structured_need) if structured_need else True
-        ok_legacy = _contains_all(cur_n, must_tokens) if must_tokens and not structured_need else True
+
+        # Special-case Kyiv: ignore область/район in validation (они часто расходятся с выпадашкой)
+        city_norm = norm(city_token)
+        is_kyiv = city_norm == "київ" or city_norm == "м київ" or city_norm.startswith("київ") or city_norm.startswith("м київ")
+
+        ok_structured = True if is_kyiv else (_contains_all(cur_n, structured_need) if structured_need else True)
+        ok_legacy = _contains_all(cur_n, must_tokens) if must_tokens and (not structured_need or is_kyiv) else True
 
         if ok_city and ok_structured and ok_legacy:
             print(f"OK: city already selected. current='{current}'")
