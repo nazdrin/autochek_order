@@ -21,7 +21,10 @@ STEP2_3_SCRIPT = ROOT / "scripts" / "step2_3_add_items_to_cart.py"
 STEP4_SCRIPT = ROOT / "scripts" / "step4_checkout.py"
 STEP5_DROP_TAB_SCRIPT = ROOT / "scripts" / "step5_select_drop_tab.py"
 STEP5_CITY_SCRIPT = ROOT / "scripts" / "step5_select_city.py"
+
 STEP5_FILL_NAME_PHONE_SCRIPT = ROOT / "scripts" / "step5_fill_name_phone.py"
+STEP6_BRANCH_SCRIPT = ROOT / "scripts" / "step6_select_np_branch.py"
+STEP6_TERMINAL_SCRIPT = ROOT / "scripts" / "step6_1_select_np_terminal.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -206,6 +209,34 @@ def extract_city_env(order: Dict[str, Any]) -> Dict[str, str]:
     return env
 
 
+def extract_delivery_info(order: Dict[str, Any]) -> Tuple[str, str]:
+    """Return (address, branch_number_str). branch_number_str may be '' when missing."""
+    d = get_first_delivery_block(order)
+    address = (d.get("address") or "").strip()
+    bn = d.get("branchNumber")
+    bn_str = ""
+    if bn is not None:
+        try:
+            bn_str = str(int(bn))
+        except Exception:
+            bn_str = str(bn).strip()
+    return address, bn_str
+
+
+def choose_np_step(address: str, branch_number: str) -> Tuple[str, Path, str, str]:
+    """
+    Returns: (step_name, script_path, env_key, env_value)
+    - If address contains 'поштомат' -> terminal script and BIOTUS_TERMINAL_QUERY.
+      Prefer passing the numeric branch number (e.g. 48437) because the UI search works by number.
+    - Otherwise -> branch script and BIOTUS_BRANCH_QUERY (pass full address as before).
+    """
+    a_norm = (address or "").casefold()
+    if "поштомат" in a_norm:
+        value = (branch_number or "").strip() or (address or "").strip()
+        return ("step6_1_select_np_terminal", STEP6_TERMINAL_SCRIPT, "BIOTUS_TERMINAL_QUERY", value)
+    return ("step6_select_np_branch", STEP6_BRANCH_SCRIPT, "BIOTUS_BRANCH_QUERY", (address or "").strip())
+
+
 def process_one_order(order: Dict[str, Any]) -> None:
     biotus_items = build_biotus_items(order)
     if not biotus_items:
@@ -223,6 +254,12 @@ def process_one_order(order: Dict[str, Any]) -> None:
     if phone_local:
         env["BIOTUS_PHONE_LOCAL"] = phone_local
 
+    delivery_address, delivery_branch_number = extract_delivery_info(order)
+    if not delivery_address:
+        raise RuntimeError("Не найдено поле ord_delivery_data[0].address для выбора отделения/поштомата.")
+
+    step6_name, step6_script, step6_env_key, step6_env_val = choose_np_step(delivery_address, delivery_branch_number)
+
     city_env = extract_city_env(order)
     for k, v in city_env.items():
         env[k] = v
@@ -232,6 +269,12 @@ def process_one_order(order: Dict[str, Any]) -> None:
             f"[ORCH] City => name={city_env.get('BIOTUS_CITY_NAME','')} area={city_env.get('BIOTUS_CITY_AREA','')} region={city_env.get('BIOTUS_CITY_REGION','')} type={city_env.get('BIOTUS_CITY_TYPE','')}"
         )
 
+    env[step6_env_key] = step6_env_val
+    print(f"[ORCH] Delivery address => {delivery_address}")
+    if delivery_branch_number:
+        print(f"[ORCH] Delivery branchNumber => {delivery_branch_number}")
+    print(f"[ORCH] Step6 => {step6_name} ({step6_env_key}='{step6_env_val}')")
+
     print(f"[ORCH] Using BIOTUS_ITEMS: {biotus_items}")
 
     steps: List[Tuple[str, Path]] = [
@@ -240,6 +283,7 @@ def process_one_order(order: Dict[str, Any]) -> None:
         ("step5_select_drop_tab", STEP5_DROP_TAB_SCRIPT),
         ("step5_select_city", STEP5_CITY_SCRIPT),
         ("step5_fill_name_phone", STEP5_FILL_NAME_PHONE_SCRIPT),
+        (step6_name, step6_script),
     ]
 
     for step_name, script in steps:
@@ -268,6 +312,8 @@ def main() -> int:
         ("Step5 drop tab script", STEP5_DROP_TAB_SCRIPT),
         ("Step5 city script", STEP5_CITY_SCRIPT),
         ("Step5 fill name/phone script", STEP5_FILL_NAME_PHONE_SCRIPT),
+        ("Step6 branch script", STEP6_BRANCH_SCRIPT),
+        ("Step6 terminal script", STEP6_TERMINAL_SCRIPT),
     ]
     for label, p in required:
         if not p.exists():

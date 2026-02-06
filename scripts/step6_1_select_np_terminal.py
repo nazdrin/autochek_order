@@ -22,16 +22,58 @@ CDP_ENDPOINT = os.getenv("BIOTUS_CDP_ENDPOINT", "http://127.0.0.1:9222")
 TERMINAL_QUERY = os.getenv("BIOTUS_TERMINAL_QUERY", "").strip()
 TERMINAL_MUST_CONTAIN = os.getenv("BIOTUS_TERMINAL_MUST_CONTAIN", "").strip()
 
+# If SalesDrive passes something like "поштомат №48437" we must search by number only.
+_RAW_TERMINAL_QUERY = TERMINAL_QUERY
+_TERMINAL_NUM = re.search(r"\d+", _RAW_TERMINAL_QUERY or "")
+if _TERMINAL_NUM:
+    TERMINAL_QUERY = _TERMINAL_NUM.group(0)
+
 # optional: if "1" and query has number -> strict match by №<num>
 TERMINAL_STRICT = os.getenv("BIOTUS_TERMINAL_STRICT", "0") == "1"
 
 # Support a common timeout env var.
 TIMEOUT_MS = int(os.getenv("BIOTUS_TIMEOUT_MS", "15000"))
 
+# Step6 (NP terminal) can be much faster than global TIMEOUT_MS.
+STEP6_TIMEOUT_MS = int(os.getenv("BIOTUS_STEP6_TIMEOUT_MS", str(min(TIMEOUT_MS, 6000))))
+STEP6_RETRIES = int(os.getenv("BIOTUS_STEP6_RETRIES", "2"))
+STEP6_CLICK_SETTLE_MS = int(os.getenv("BIOTUS_STEP6_CLICK_SETTLE_MS", "60"))
+STEP6_AFTER_TYPE_MS = int(os.getenv("BIOTUS_STEP6_AFTER_TYPE_MS", "120"))
+STEP6_AFTER_ENTER_MS = int(os.getenv("BIOTUS_STEP6_AFTER_ENTER_MS", "200"))
+STEP6_TYPE_DELAY_MS = int(os.getenv("BIOTUS_STEP6_TYPE_DELAY_MS", "10"))
+
 PLACEHOLDER_TERMINAL = "Введіть вулицю або номер поштомата"
 
 
 # ----------------- helpers -----------------
+async def _wait_no_blocking_overlay(page, timeout_ms: int | None = None):
+    """Wait until common checkout loaders/overlays are gone.
+
+    IMPORTANT: keep this bounded. In some themes an overlay can linger for a while,
+    so we use a per-call timeout (default STEP6_TIMEOUT_MS) to avoid minute-long stalls.
+    """
+    timeout_ms = int(timeout_ms or STEP6_TIMEOUT_MS)
+    poll_ms = 150
+
+    blockers = page.locator(
+        "div.loading-mask:visible, div.loader:visible, div.amcheckout-loader:visible, "
+        "div.amcheckout-overlay:visible, div.opc-progress-container:visible, "
+        ".amcheckout-loading:visible, ._block-content-loading:visible"
+    )
+
+    deadline = asyncio.get_event_loop().time() + (timeout_ms / 1000.0)
+    while True:
+        try:
+            if await blockers.count() == 0:
+                return
+        except Exception:
+            return
+
+        if asyncio.get_event_loop().time() >= deadline:
+            # Don't hard-fail here; callers will still attempt the click.
+            return
+
+        await page.wait_for_timeout(poll_ms)
 async def _human_click(page, locator):
     loc = locator.first
     try:
@@ -51,7 +93,11 @@ async def _human_click(page, locator):
         try:
             await loc.click(force=True)
         except Exception:
-            pass
+            # last resort: JS click (can bypass overlay/label quirks)
+            try:
+                await loc.evaluate("el => el.click()")
+            except Exception:
+                pass
 
 
 def _norm(s: str) -> str:
@@ -217,9 +263,24 @@ async def _ensure_terminal_mode(page):
 
     IMPORTANT: when running in cascade, default method is often 'до відділення',
     so terminal section/field may not exist until we switch the radio.
+
+    На этой теме обработчик переключения часто висит на контейнере метода
+    (`div.amcheckout-method ...` / `div.row.method-item`), поэтому кликаем туда.
     """
 
-    # Prefer clicking the label because Alpine/Magento themes часто вешают обработчик на label.
+    await _wait_no_blocking_overlay(page)
+
+    # Method container (best target): amcheckout-method with shipping-method attr
+    term_method = page.locator(
+        'div.amcheckout-method[data-shipping-method="newposhta_WarehouseTerminals"], '
+        'div.amcheckout-method[data-shipping-method*="WarehouseTerminals"], '
+        'div.container_shipping_method.container_WarehouseTerminals'
+    ).first
+
+    # Clickable row inside the method
+    term_row = term_method.locator('div.row.method-item').first
+
+    # Also keep label/radio as fallbacks
     term_label = page.locator(
         'label.amcheckout-label.-radio[for^="s_method_newposhta_WarehouseTerminals"], '
         'label[for^="s_method_newposhta_WarehouseTerminals"], '
@@ -234,7 +295,7 @@ async def _ensure_terminal_mode(page):
         'input[type="radio"][id*="WarehouseTerminals"]'
     ).first
 
-    # If already checked — nothing to do
+    # If already checked OR terminal UI already present — nothing to do
     try:
         if await term_radio.count() > 0:
             try:
@@ -245,11 +306,41 @@ async def _ensure_terminal_mode(page):
     except Exception:
         pass
 
-    # Click label first (most reliable)
+    try:
+        already = page.locator(
+            f'div.container_WarehouseTerminals div.ss-main:has-text("{PLACEHOLDER_TERMINAL}"), '
+            f'div.container_shipping_method.container_WarehouseTerminals div.ss-main:has-text("{PLACEHOLDER_TERMINAL}")'
+        ).first
+        if await already.count() > 0 and await already.is_visible():
+            return
+    except Exception:
+        pass
+
+    # Try clicking the method row/container first (most reliable for this theme)
+    try:
+        if await term_row.count() > 0:
+            await _human_click(page, term_row)
+            await _wait_no_blocking_overlay(page)
+    except Exception:
+        pass
+
+    # If click didn't stick (common in CDP/orchestrator runs), try JS click on container
+    try:
+        if await term_radio.count() > 0:
+            try:
+                if not await term_radio.is_checked() and await term_method.count() > 0:
+                    await term_method.evaluate("el => el.click()")
+                    await _wait_no_blocking_overlay(page)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # If not selected yet, click label
     try:
         if await term_label.count() > 0:
             await _human_click(page, term_label)
-            await page.wait_for_timeout(250)
+            await _wait_no_blocking_overlay(page)
     except Exception:
         pass
 
@@ -260,7 +351,7 @@ async def _ensure_terminal_mode(page):
                 await term_radio.check(force=True)
             except Exception:
                 await _human_click(page, term_radio)
-            await page.wait_for_timeout(250)
+            await _wait_no_blocking_overlay(page)
     except Exception:
         pass
 
@@ -269,9 +360,30 @@ async def _ensure_terminal_mode(page):
         fallback_click = page.get_by_text("Нова пошта до поштомата", exact=False).first
         if await fallback_click.count() > 0:
             await _human_click(page, fallback_click)
-            await page.wait_for_timeout(250)
+            await _wait_no_blocking_overlay(page)
     except Exception:
         pass
+
+    # Wait for selection state: either radio checked or method container gets -selected
+    for _ in range(max(30, STEP6_TIMEOUT_MS // 250)):
+        await _wait_no_blocking_overlay(page)
+        try:
+            if await term_radio.count() > 0:
+                try:
+                    if await term_radio.is_checked():
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            if await term_method.count() > 0:
+                cls = (await term_method.get_attribute("class")) or ""
+                if "-selected" in cls:
+                    break
+        except Exception:
+            pass
+        await page.wait_for_timeout(250)
 
     # Wait until terminal UI is present
     wait_target = page.locator(
@@ -280,7 +392,8 @@ async def _ensure_terminal_mode(page):
         f'div.container_shipping_method:has-text("Нова пошта до поштомата") div.ss-main:has-text("{PLACEHOLDER_TERMINAL}")'
     ).first
 
-    for _ in range(max(30, TIMEOUT_MS // 100)):
+    for _ in range(max(30, STEP6_TIMEOUT_MS // 100)):
+        await _wait_no_blocking_overlay(page)
         try:
             if await wait_target.count() > 0 and await wait_target.is_visible():
                 return
@@ -329,26 +442,62 @@ async def _get_terminal_popup(page, inp=None, sec=None):
 async def _find_terminal_input(page):
     sec = await _delivery_terminal_section(page)
 
-    # click open trigger in this section
-    trigger = sec.locator(
-        f'div.ss-main:has-text("{PLACEHOLDER_TERMINAL}"), div.ss-main'
-    ).first
-    if await trigger.count() == 0:
+    # We must be able to open SlimSelect even when it's already filled.
+    ss_main = sec.locator("div.ss-main").first
+    ss_single = sec.locator("div.ss-single").first  # inner clickable value (works when filled)
+    ss_arrow = sec.locator("svg.ss-arrow, div.ss-arrow").first
+
+    if await ss_main.count() == 0:
         return None
 
-    await _human_click(page, trigger)
-    await page.wait_for_timeout(150)
+    # Try a few times: in orchestrator runs the UI often has a loader/overlay
+    for _attempt in range(1, 3):
+        await _wait_no_blocking_overlay(page)
 
-    for _ in range(max(50, TIMEOUT_MS // 100)):
-        popup = await _get_terminal_popup(page, sec=sec)
-        if popup is not None:
-            inp = popup.locator('input[type="search"]').first
+        clicked = False
+        # Prefer clicking the value element first, then main, then arrow.
+        try:
+            if await ss_single.count() > 0 and await ss_single.is_visible():
+                await _human_click(page, ss_single)
+                clicked = True
+        except Exception:
+            pass
+
+        if not clicked:
             try:
-                if await inp.count() > 0 and await inp.is_visible():
-                    return inp
+                await _human_click(page, ss_main)
+                clicked = True
             except Exception:
                 pass
-        await page.wait_for_timeout(100)
+
+        if not clicked:
+            try:
+                if await ss_arrow.count() > 0:
+                    await _human_click(page, ss_arrow)
+                    clicked = True
+            except Exception:
+                pass
+
+        await page.wait_for_timeout(STEP6_CLICK_SETTLE_MS)
+        await _wait_no_blocking_overlay(page)
+
+        for _ in range(max(25, STEP6_TIMEOUT_MS // 120)):
+            popup = await _get_terminal_popup(page, sec=sec)
+            if popup is not None:
+                inp = popup.locator("input[type=\"search\"]").first
+                try:
+                    if await inp.count() > 0 and await inp.is_visible():
+                        return inp
+                except Exception:
+                    pass
+            await page.wait_for_timeout(80)
+
+        # If not opened, close any stray dropdown and retry
+        try:
+            await page.keyboard.press("Escape")
+        except Exception:
+            pass
+        await page.wait_for_timeout(120)
 
     return None
 
@@ -363,7 +512,7 @@ async def _wait_terminal_options(page, popup=None):
         return None
 
     opts = popup.locator("div.ss-list .ss-option:visible")
-    for _ in range(max(50, TIMEOUT_MS // 100)):
+    for _ in range(max(30, STEP6_TIMEOUT_MS // 120)):
         try:
             if await opts.count() > 0:
                 txt = (await opts.first.inner_text()).strip()
@@ -371,13 +520,13 @@ async def _wait_terminal_options(page, popup=None):
                     return opts
         except Exception:
             pass
-        await page.wait_for_timeout(100)
+        await page.wait_for_timeout(80)
     return None
 
 
 
 async def _wait_popup_collapse(page, inp):
-    for _ in range(50):  # ~5s
+    for _ in range(35):
         try:
             pop = await _get_terminal_popup(page, inp=inp)
             if pop is None:
@@ -386,7 +535,7 @@ async def _wait_popup_collapse(page, inp):
                 return
         except Exception:
             return
-        await page.wait_for_timeout(100)
+        await page.wait_for_timeout(80)
 
 
 # --- Robust CDP disconnect helper ---
@@ -425,7 +574,7 @@ async def main():
         raise RuntimeError("BIOTUS_TERMINAL_QUERY is empty. Set it to terminal number/text.")
 
     matcher = _build_terminal_matcher(TERMINAL_QUERY, TERMINAL_MUST_CONTAIN)
-    query_dbg = TERMINAL_QUERY
+    query_dbg = f"raw='{_RAW_TERMINAL_QUERY}' normalized='{TERMINAL_QUERY}'"
 
     async with async_playwright() as p:
         browser = context = page = None
@@ -435,11 +584,11 @@ async def main():
             if page.url == "about:blank":
                 page = await _pick_active_page(context)
 
-            await page.wait_for_timeout(250)
+            await page.wait_for_timeout(120)
             await page.screenshot(path=str(ART / "step6_1_0_before.png"), full_page=True)
 
             await _ensure_terminal_mode(page)
-            await page.wait_for_timeout(250)
+            await page.wait_for_timeout(120)
             await page.screenshot(path=str(ART / "step6_1_0a_after_terminal_mode.png"), full_page=True)
 
             # If a terminal is already selected and matches the requested one, exit early.
@@ -467,10 +616,11 @@ async def main():
             await inp.scroll_into_view_if_needed()
 
             last_err = None
-            for attempt in range(1, 4):
+            for attempt in range(1, STEP6_RETRIES + 1):
                 try:
+                    await _wait_no_blocking_overlay(page)
                     await _human_click(page, inp)
-                    await page.wait_for_timeout(100)
+                    await page.wait_for_timeout(STEP6_CLICK_SETTLE_MS)
 
                     # clear
                     try:
@@ -480,8 +630,9 @@ async def main():
                         await page.keyboard.press("Backspace")
 
                     # type query
-                    await inp.type(TERMINAL_QUERY, delay=25)
-                    await page.wait_for_timeout(250)
+                    await inp.type(TERMINAL_QUERY, delay=STEP6_TYPE_DELAY_MS)
+                    await page.wait_for_timeout(STEP6_AFTER_TYPE_MS)
+                    await _wait_no_blocking_overlay(page)
 
                     popup = await _get_terminal_popup(page, inp=inp)
                     opts = await _wait_terminal_options(page, popup=popup)
@@ -490,7 +641,7 @@ async def main():
 
                     # try Enter
                     await page.keyboard.press("Enter")
-                    await page.wait_for_timeout(450)
+                    await page.wait_for_timeout(STEP6_AFTER_ENTER_MS)
 
                     sec = await _delivery_terminal_section(page)
                     selected_txt = ""
@@ -527,7 +678,7 @@ async def main():
                             chosen = opts.first
 
                         await _human_click(page, chosen)
-                        await page.wait_for_timeout(500)
+                        await page.wait_for_timeout(220)
                         await _wait_popup_collapse(page, inp)
 
                         # verify again
@@ -557,7 +708,7 @@ async def main():
                         await _human_click(page, page.locator("body"))
                     except Exception:
                         pass
-                    await page.wait_for_timeout(250)
+                    await page.wait_for_timeout(120)
 
                     # Wait for ss-content to disappear (dropdown collapsed)
                     for _ in range(20):  # max ~5s, дальше не ждём — выбор уже проверен выше
@@ -571,7 +722,7 @@ async def main():
                                 break
                         except Exception:
                             break
-                        await page.wait_for_timeout(250)
+                        await page.wait_for_timeout(120)
 
                     # Re-read selected value after UI settles
                     try:
@@ -594,11 +745,11 @@ async def main():
                 except Exception as e:
                     last_err = e
                     await page.screenshot(path=str(ART / f"step6_1_retry_{attempt}.png"), full_page=True)
-                    await page.wait_for_timeout(500)
+                    await page.wait_for_timeout(220)
 
             if last_err is not None:
                 await page.screenshot(path=str(ART / "step6_1_err_no_match.png"), full_page=True)
-                raise RuntimeError(f"Не удалось стабильно выбрать поштомат после 3 попыток: {last_err}")
+                raise RuntimeError(f"Не удалось стабильно выбрать поштомат после {STEP6_RETRIES} попыток: {last_err}")
         finally:
             # In CDP mode we must NOT close the real Chrome window.
             # But we DO want the script to finish promptly in cascade runs.
