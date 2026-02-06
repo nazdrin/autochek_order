@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -34,6 +36,11 @@ TIMEOUT_SEC = int(os.getenv("ORCH_STEP_TIMEOUT_SEC", "600"))  # таймаут �
 
 STATE_FILE = Path(os.getenv("ORCH_STATE_FILE", str(ROOT / ".orch_state.json")))
 MAX_PROCESSED_IDS = int(os.getenv("ORCH_MAX_PROCESSED_IDS", "200"))
+
+# New config constants
+BATCH_SIZE = int(os.getenv("ORCH_BATCH_SIZE", "5"))
+BACKOFF_BASE_SEC = int(os.getenv("ORCH_BACKOFF_BASE_SEC", "60"))
+BACKOFF_MAX_SEC = int(os.getenv("ORCH_BACKOFF_MAX_SEC", "3600"))
 
 # Optional defaults for downstream scripts
 DEFAULT_BIOTUS_USE_CDP = os.getenv("BIOTUS_USE_CDP", "1")
@@ -73,8 +80,51 @@ def format_phone_local(order: Dict[str, Any]) -> str:
 
 
 def notify_stub(message: str) -> None:
-    # TODO: заменить на Telegram/Slack/Email
+    """Send notification to Telegram if TG_BOT_TOKEN and TG_CHAT_ID are set; always prints to stderr."""
     print(f"[NOTIFY] {message}", file=sys.stderr)
+
+    token = (os.getenv("TG_BOT_TOKEN") or "").strip()
+    chat_id = (os.getenv("TG_CHAT_ID") or "").strip()
+    if not token or not chat_id:
+        return
+
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "disable_web_page_preview": True,
+        }
+        data = urllib.parse.urlencode(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            _ = resp.read()
+    except Exception as e:
+        # Don't crash orchestrator due to notify issues
+        print(f"[NOTIFY] Telegram send failed: {e}", file=sys.stderr)
+
+
+def short_reason(step_name: str, rc: int | None, out: str, err: str, exc: Exception | None = None) -> str:
+    """Build a short human-readable reason for notifications."""
+    if exc is not None:
+        return f"{step_name}: {type(exc).__name__}: {str(exc).strip()}"
+
+    # Prefer stderr last non-empty line
+    src = (err or "").strip().splitlines()
+    if src:
+        last = src[-1].strip()
+        if last:
+            return f"{step_name}: {last}"
+
+    src2 = (out or "").strip().splitlines()
+    if src2:
+        last2 = src2[-1].strip()
+        if last2:
+            return f"{step_name}: {last2}"
+
+    if rc is not None:
+        return f"{step_name}: failed rc={rc}"
+    return f"{step_name}: failed"
 
 
 def run_python(script: Path, env: Dict[str, str], timeout_sec: int, args: List[str] | None = None) -> Tuple[int, str, str]:
@@ -127,11 +177,11 @@ def parse_orders_from_fetch_output(stdout: str) -> List[Dict[str, Any]]:
 
 def load_state() -> Dict[str, Any]:
     if not STATE_FILE.exists():
-        return {"processed_ids": []}
+        return {"processed_ids": [], "failed": {}}
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {"processed_ids": []}
+            return {"processed_ids": [], "failed": {}}
         ids = data.get("processed_ids")
         if not isinstance(ids, list):
             ids = []
@@ -143,9 +193,64 @@ def load_state() -> Dict[str, Any]:
             except Exception:
                 continue
         data["processed_ids"] = norm_ids
+        failed = data.get("failed")
+        if not isinstance(failed, dict):
+            failed = {}
+        data["failed"] = failed
         return data
     except Exception:
-        return {"processed_ids": []}
+        return {"processed_ids": [], "failed": {}}
+def _now_ts() -> int:
+    return int(time.time())
+
+
+def _backoff_seconds(fail_count: int) -> int:
+    # 1st failure => base, 2nd => 2x, 3rd => 4x ... capped
+    sec = BACKOFF_BASE_SEC * (2 ** max(0, fail_count - 1))
+    return min(sec, BACKOFF_MAX_SEC)
+
+
+def mark_failed(state: Dict[str, Any], order_id: int, step: str, reason: str) -> None:
+    failed: Dict[str, Any] = state.setdefault("failed", {})
+    key = str(order_id)
+    entry = failed.get(key) or {}
+    try:
+        cnt = int(entry.get("count") or 0)
+    except Exception:
+        cnt = 0
+    cnt += 1
+    wait_sec = _backoff_seconds(cnt)
+    entry.update(
+        {
+            "count": cnt,
+            "next_ts": _now_ts() + wait_sec,
+            "last_step": step,
+            "last_error": reason[:500],
+            "updated_at": _now_ts(),
+        }
+    )
+    failed[key] = entry
+
+
+def clear_failed(state: Dict[str, Any], order_id: int) -> None:
+    failed = state.get("failed")
+    if isinstance(failed, dict):
+        failed.pop(str(order_id), None)
+
+
+def is_backoff_active(state: Dict[str, Any], order_id: int) -> Tuple[bool, int]:
+    failed = state.get("failed")
+    if not isinstance(failed, dict):
+        return False, 0
+    entry = failed.get(str(order_id))
+    if not isinstance(entry, dict):
+        return False, 0
+    try:
+        next_ts = int(entry.get("next_ts") or 0)
+    except Exception:
+        next_ts = 0
+    now = _now_ts()
+    return (next_ts > now), max(0, next_ts - now)
 
 
 def save_state(state: Dict[str, Any]) -> None:
@@ -245,6 +350,7 @@ def choose_np_step(address: str, branch_number: str) -> Tuple[str, Path, str, st
 
 
 def process_one_order(order: Dict[str, Any]) -> None:
+    order_id = order.get("id")
     biotus_items = build_biotus_items(order)
     if not biotus_items:
         raise RuntimeError("Не смог сформировать BIOTUS_ITEMS из order['products'].")
@@ -299,14 +405,24 @@ def process_one_order(order: Dict[str, Any]) -> None:
         ("step8_attach_invoice_file", STEP8_ATTACH_SCRIPT),
     ]
 
+    current_step = None
     for step_name, script in steps:
-        rc, out, err = run_python(script, env=env, timeout_sec=TIMEOUT_SEC)
+        current_step = step_name
+        try:
+            rc, out, err = run_python(script, env=env, timeout_sec=TIMEOUT_SEC)
+        except subprocess.TimeoutExpired as te:
+            # Remove notify_stub; raise with step name
+            raise RuntimeError(f"{step_name} timeout") from te
+
         if out.strip():
             print(out, end="" if out.endswith("\n") else "\n")
         if err.strip():
             print(err, file=sys.stderr, end="" if err.endswith("\n") else "\n")
+
         if rc != 0:
-            raise RuntimeError(f"{step_name} завершился с кодом {rc}")
+            reason = short_reason(step_name, rc, out, err, None)
+            # Remove notify_stub; raise with step name and reason
+            raise RuntimeError(f"{step_name} failed: {reason}")
 
 
 def main() -> int:
@@ -336,6 +452,7 @@ def main() -> int:
             return 2
 
     state = load_state()
+    state.setdefault("failed", {})
     processed_ids: List[int] = state.get("processed_ids", [])
 
     while True:
@@ -350,48 +467,75 @@ def main() -> int:
             if not orders:
                 print("[ORCH] No orders in status=21. Sleeping...")
             else:
-                # pick first unprocessed
-                picked: Dict[str, Any] | None = None
-                picked_id: int | None = None
+                # process up to BATCH_SIZE orders per fetch (skip processed and those in backoff)
+                eligible: List[Tuple[int, Dict[str, Any]]] = []
                 for o in orders:
                     try:
                         oid = int(o.get("id"))
                     except Exception:
                         continue
-                    if oid not in processed_ids:
-                        picked = o
-                        picked_id = oid
+                    if oid in processed_ids:
+                        continue
+                    backoff_active, wait_left = is_backoff_active(state, oid)
+                    if backoff_active:
+                        continue
+                    eligible.append((oid, o))
+                    if len(eligible) >= BATCH_SIZE:
                         break
 
-                if picked is None:
-                    print(f"[ORCH] Got {len(orders)} order(s) but all already processed. Sleeping...")
+                if not eligible:
+                    # maybe everything is processed or in backoff
+                    in_backoff = 0
+                    for o in orders:
+                        try:
+                            oid = int(o.get("id"))
+                        except Exception:
+                            continue
+                        if oid in processed_ids:
+                            continue
+                        if is_backoff_active(state, oid)[0]:
+                            in_backoff += 1
+                    if in_backoff:
+                        print(f"[ORCH] Got {len(orders)} order(s); {in_backoff} in backoff, nothing eligible now. Sleeping...")
+                    else:
+                        print(f"[ORCH] Got {len(orders)} order(s) but all already processed. Sleeping...")
                 else:
-                    order = picked
-                    order_id = picked_id
-                    print(f"[ORCH] Got {len(orders)} order(s). Processing id={order_id}")
+                    print(f"[ORCH] Got {len(orders)} order(s). Will process up to {len(eligible)} this cycle.")
 
-                    biotus_items = build_biotus_items(order)
-                    print(f"[ORCH] BIOTUS_ITEMS => {biotus_items}")
+                    for order_id, order in eligible:
+                        print(f"[ORCH] Processing id={order_id}")
+                        biotus_items = build_biotus_items(order)
+                        print(f"[ORCH] BIOTUS_ITEMS => {biotus_items}")
 
-                    if not args.dry_run:
-                        process_one_order(order)
-                        # mark processed only after success
+                        if args.dry_run:
+                            print("[ORCH] dry-run enabled, no steps executed.")
+                            continue
+
+                        try:
+                            process_one_order(order)
+                        except Exception as e:
+                            reason = f"{type(e).__name__}: {str(e)}".strip()
+                            notify_stub(f"[ORCH][ORDER {order_id}] FAILED. {reason}")
+                            mark_failed(state, int(order_id), "pipeline", reason)
+                            save_state(state)
+                            # continue with next order
+                            continue
+
+                        # success
                         processed_ids.append(int(order_id))
-                        # keep file from growing forever
                         if len(processed_ids) > MAX_PROCESSED_IDS:
                             processed_ids = processed_ids[-MAX_PROCESSED_IDS:]
                         state["processed_ids"] = processed_ids
                         state["last_processed_id"] = int(order_id)
-                        state["last_processed_at"] = int(time.time())
+                        state["last_processed_at"] = _now_ts()
+                        clear_failed(state, int(order_id))
                         save_state(state)
-                        print(f"[ORCH] Done steps 2_3->7 for order id={order_id}. (Next steps later)")
-                    else:
-                        print("[ORCH] dry-run enabled, step2_3 not executed.")
+                        print(f"[ORCH] Done pipeline for order id={order_id}.")
 
         except subprocess.TimeoutExpired:
-            notify_stub("Timeout while running a step.")
+            notify_stub("[ORCH] Timeout while running a step.")
         except Exception as e:
-            notify_stub(f"Orchestrator error: {e}")
+            notify_stub(f"[ORCH] Orchestrator error: {type(e).__name__}: {e}")
 
         if args.once:
             break
