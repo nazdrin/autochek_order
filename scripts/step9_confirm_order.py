@@ -1,6 +1,7 @@
 # scripts/step9_confirm_order.py
 import asyncio
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -85,33 +86,192 @@ async def _wait_not_disabled(locator, timeout_ms: int):
     raise RuntimeError("Кнопка не стала активной (disabled не исчез) за таймаут.")
 
 
-async def _click_payment_confirm_if_shown(page, timeout_ms: int):
-    """Если после подтверждения заказа появилось окно 'Оплата замовлення' — нажимаем 'Підтвердити'."""
-    # В модалке кнопка часто имеет текст 'Підтвердити'
-    confirm_btn = page.get_by_role("button", name="Підтвердити").locator(":visible")
-
-    # Иногда роль может не определиться — fallback по тексту
-    if await confirm_btn.count() == 0:
-        confirm_btn = page.get_by_text("Підтвердити", exact=False).locator(":visible").first
-
-    # Если кнопки нет — считаем, что модалка не появилась (или уже закрылась)
-    if await confirm_btn.count() == 0:
+async def _dom_click(locator):
+    """Click via DOM (element.click()) as a fallback when Playwright click is swallowed by overlays."""
+    try:
+        await locator.evaluate("el => el.click()")
+        return True
+    except Exception:
         return False
 
-    # Небольшой скрин перед кликом
+
+async def _click_payment_confirm_if_shown(page, timeout_ms: int) -> bool:
+    """Если после подтверждения заказа появилось окно 'Оплата замовлення' — нажимаем 'Підтвердити'.
+
+    Важно: на странице иногда есть несколько элементов с текстом 'Підтвердити'.
+    Поэтому кликаем ТОЛЬКО внутри модалки оплаты.
+
+    Проблема, которую лечим:
+    - в CDP/каскаде модалка может появляться с задержкой;
+    - `:visible` иногда не совпадает с тем, что реально видно из‑за анимаций/перерисовок.
+    Поэтому сначала ждём появления/видимости модалки, а уже потом ищем кнопку.
+    """
+
+    # Локаторы без :visible — видимость будем проверять через wait_for/is_visible
+    overlay = page.locator("div.confirmBalanceOverlay")
+    block = page.locator("div.balance-confirm-block")
+    title = page.get_by_text("Оплата замовлення", exact=False)
+
+    # 1) Ждём, что модалка реально появилась/стала видимой (до 7 сек или меньше общего таймаута)
+    wait_deadline = asyncio.get_event_loop().time() + min(timeout_ms, 7000) / 1000
+    container = None
+
+    while asyncio.get_event_loop().time() < wait_deadline:
+        try:
+            if await block.count() > 0:
+                try:
+                    await block.first.wait_for(state="visible", timeout=250)
+                    container = block.first
+                    break
+                except Exception:
+                    pass
+            if await overlay.count() > 0:
+                try:
+                    await overlay.first.wait_for(state="visible", timeout=250)
+                    container = overlay.first
+                    break
+                except Exception:
+                    pass
+            if await title.count() > 0:
+                try:
+                    if await title.first.is_visible():
+                        # Поднимаем контейнер от заголовка
+                        cand = title.first.locator(
+                            "xpath=ancestor::div[contains(@class,'balance-confirm-block')][1]"
+                        )
+                        if await cand.count() == 0:
+                            cand = title.first.locator(
+                                "xpath=ancestor::div[contains(@class,'confirmBalanceOverlay')][1]"
+                            )
+                        if await cand.count() > 0:
+                            try:
+                                await cand.first.wait_for(state="visible", timeout=250)
+                            except Exception:
+                                pass
+                            container = cand.first
+                            break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.15)
+
+    # Модалки нет
+    if container is None:
+        return False
+
+    # Скрин перед кликом
     try:
         await page.screenshot(path=str(ART / "step9_2_payment_modal_before.png"), full_page=True)
     except Exception:
         pass
 
-    # Клик по 'Підтвердити'
-    try:
-        await confirm_btn.first.click(timeout=min(timeout_ms, 8000))
-    except PWTimeoutError:
-        await confirm_btn.first.click(force=True)
+    # 2) Находим кнопку подтверждения строго внутри контейнера
+    confirm_btn = container.locator("button:has-text('Підтвердити')")
 
-    # Дать UI закрыть модалку
-    await page.wait_for_timeout(800)
+    # Иногда текст внутри span
+    if await confirm_btn.count() == 0:
+        confirm_btn = container.get_by_role("button", name="Підтвердити")
+
+    # Берём ТОЛЬКО видимую кнопку
+    confirm_btn = confirm_btn.filter(has_not=container.locator("[disabled]"))
+
+    # Если всё равно не нашли — попробуем более узкий селектор по верстке
+    if await confirm_btn.count() == 0:
+        confirm_btn = container.locator("div.messageBox button.button")
+
+    if await confirm_btn.count() == 0:
+        return False
+
+    btn = confirm_btn.first
+
+    # 3) Скролл/фокус — помогает Alpine
+    try:
+        await btn.scroll_into_view_if_needed(timeout=2000)
+    except Exception:
+        pass
+
+    try:
+        await btn.focus(timeout=1000)
+    except Exception:
+        pass
+
+    # Ждём, что кнопка кликабельна (если disabled используется)
+    try:
+        await _wait_not_disabled(confirm_btn, min(timeout_ms, 8000))
+    except Exception:
+        pass
+
+    # 4) Кликаем (click -> force -> dispatch MouseEvent)
+    clicked = False
+    try:
+        await btn.click(timeout=min(timeout_ms, 8000))
+        clicked = True
+    except Exception:
+        pass
+
+    if not clicked:
+        try:
+            await btn.click(force=True)
+            clicked = True
+        except Exception:
+            pass
+
+    if not clicked:
+        # Alpine иногда "проглатывает" element.click(); шлём полноценный MouseEvent
+        try:
+            await btn.evaluate(
+                """el => el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}))"""
+            )
+            clicked = True
+        except Exception:
+            pass
+
+    if not clicked:
+        return False
+
+    # небольшой буфер, чтобы запрос/обработчик успели отработать
+    await page.wait_for_timeout(600)
+
+    # 5) Ждём признак успеха:
+    # - модалка скрылась
+    # - или URL сменился (уходим с /checkout)
+    # - или появилась страница/текст успеха
+    deadline = asyncio.get_event_loop().time() + min(timeout_ms, 20000) / 1000
+    success_text = page.get_by_text("Дякуємо", exact=False)
+
+    while asyncio.get_event_loop().time() < deadline:
+        # 5.1 контейнер исчез/скрылся
+        try:
+            await container.wait_for(state="hidden", timeout=250)
+            break
+        except Exception:
+            pass
+
+        # 5.2 редирект
+        try:
+            url = page.url or ""
+            if "opt.biotus" in url and "/checkout" not in url:
+                break
+        except Exception:
+            pass
+
+        # 5.3 текст успеха
+        try:
+            if await success_text.count() > 0 and await success_text.first.is_visible():
+                break
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.25)
+
+    # Если модалка всё ещё видна — считаем, что клик не сработал
+    try:
+        if await container.is_visible():
+            return False
+    except Exception:
+        pass
 
     try:
         await page.screenshot(path=str(ART / "step9_3_payment_modal_after.png"), full_page=True)
@@ -163,8 +323,7 @@ async def main():
         # Если появилось окно 'Оплата замовлення' — подтверждаем оплату
         confirmed = False
         try:
-            # ждем немного появления модалки (не весь TIMEOUT, чтобы не зависать)
-            await page.wait_for_timeout(300)
+            # Даём странице шанс показать модалку (иногда появляется не сразу)
             confirmed = await _click_payment_confirm_if_shown(page, TIMEOUT_MS)
         except Exception:
             confirmed = False
@@ -172,7 +331,7 @@ async def main():
         if confirmed:
             print("OK: clicked 'Підтверджую замовлення' and confirmed payment modal ('Підтвердити').")
         else:
-            print("OK: clicked 'Підтверджую замовлення'. (Payment modal not detected)")
+            print("OK: clicked 'Підтверджую замовлення'. (Payment modal not confirmed / not shown)")
 
         if not USE_CDP:
             await context.close()
