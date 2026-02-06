@@ -28,7 +28,9 @@ STEP5_FILL_NAME_PHONE_SCRIPT = ROOT / "scripts" / "step5_fill_name_phone.py"
 STEP6_BRANCH_SCRIPT = ROOT / "scripts" / "step6_select_np_branch.py"
 STEP6_TERMINAL_SCRIPT = ROOT / "scripts" / "step6_1_select_np_terminal.py"
 STEP7_TTN_SCRIPT = ROOT / "scripts" / "step7_fill_ttn.py"
+
 STEP8_ATTACH_SCRIPT = ROOT / "scripts" / "step8_attach_invoice_file.py"
+STEP9_CONFIRM_SCRIPT = ROOT / "scripts" / "step9_confirm_order.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -42,8 +44,12 @@ BATCH_SIZE = int(os.getenv("ORCH_BATCH_SIZE", "5"))
 BACKOFF_BASE_SEC = int(os.getenv("ORCH_BACKOFF_BASE_SEC", "60"))
 BACKOFF_MAX_SEC = int(os.getenv("ORCH_BACKOFF_MAX_SEC", "3600"))
 
+
 # Optional defaults for downstream scripts
 DEFAULT_BIOTUS_USE_CDP = os.getenv("BIOTUS_USE_CDP", "1")
+ORCH_DONE_STATUS_ID = int(os.getenv("ORCH_DONE_STATUS_ID", "4"))
+SALESDRIVE_BASE_URL = (os.getenv("SALESDRIVE_BASE_URL") or "https://petrenko.salesdrive.me").rstrip("/")
+SALESDRIVE_API_KEY = (os.getenv("SALESDRIVE_API_KEY") or "").strip()
 
 
 def build_full_name(order: Dict[str, Any]) -> str:
@@ -125,6 +131,34 @@ def short_reason(step_name: str, rc: int | None, out: str, err: str, exc: Except
     if rc is not None:
         return f"{step_name}: failed rc={rc}"
     return f"{step_name}: failed"
+
+
+# --- SalesDrive integration ---
+def salesdrive_update_status(order_id: int, status_id: int) -> None:
+    """Update order status in SalesDrive using /api/order/update/. Raises on failure."""
+    if not SALESDRIVE_API_KEY:
+        raise RuntimeError("SALESDRIVE_API_KEY is not set")
+
+    url = f"{SALESDRIVE_BASE_URL}/api/order/update/"
+    payload = {
+        "id": int(order_id),
+        "data": {"statusId": int(status_id)},
+    }
+
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("accept", "application/json")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-Api-Key", SALESDRIVE_API_KEY)
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            if resp.status < 200 or resp.status >= 300:
+                raise RuntimeError(f"SalesDrive update failed HTTP {resp.status}: {body[:300]}")
+            # salesdrive often returns json; we don't require specific fields now
+    except Exception as e:
+        raise RuntimeError(f"SalesDrive update failed: {e}")
 
 
 def run_python(script: Path, env: Dict[str, str], timeout_sec: int, args: List[str] | None = None) -> Tuple[int, str, str]:
@@ -351,6 +385,10 @@ def choose_np_step(address: str, branch_number: str) -> Tuple[str, Path, str, st
 
 def process_one_order(order: Dict[str, Any]) -> None:
     order_id = order.get("id")
+    try:
+        order_id_int = int(order_id)
+    except Exception:
+        raise RuntimeError(f"Invalid order id: {order_id}")
     biotus_items = build_biotus_items(order)
     if not biotus_items:
         raise RuntimeError("Не смог сформировать BIOTUS_ITEMS из order['products'].")
@@ -403,6 +441,7 @@ def process_one_order(order: Dict[str, Any]) -> None:
         (step6_name, step6_script),
         ("step7_fill_ttn", STEP7_TTN_SCRIPT),
         ("step8_attach_invoice_file", STEP8_ATTACH_SCRIPT),
+        ("step9_confirm_order", STEP9_CONFIRM_SCRIPT),
     ]
 
     current_step = None
@@ -423,6 +462,10 @@ def process_one_order(order: Dict[str, Any]) -> None:
             reason = short_reason(step_name, rc, out, err, None)
             # Remove notify_stub; raise with step name and reason
             raise RuntimeError(f"{step_name} failed: {reason}")
+
+    # If all steps succeeded, update SalesDrive order status
+    salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID)
+    print(f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}")
 
 
 def main() -> int:
@@ -445,6 +488,7 @@ def main() -> int:
         ("Step6 terminal script", STEP6_TERMINAL_SCRIPT),
         ("Step7 ttn script", STEP7_TTN_SCRIPT),
         ("Step8 attach invoice script", STEP8_ATTACH_SCRIPT),
+        ("Step9 confirm order script", STEP9_CONFIRM_SCRIPT),
     ]
     for label, p in required:
         if not p.exists():
