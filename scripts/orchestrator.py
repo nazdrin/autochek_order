@@ -25,6 +25,7 @@ STEP5_CITY_SCRIPT = ROOT / "scripts" / "step5_select_city.py"
 STEP5_FILL_NAME_PHONE_SCRIPT = ROOT / "scripts" / "step5_fill_name_phone.py"
 STEP6_BRANCH_SCRIPT = ROOT / "scripts" / "step6_select_np_branch.py"
 STEP6_TERMINAL_SCRIPT = ROOT / "scripts" / "step6_1_select_np_terminal.py"
+STEP7_TTN_SCRIPT = ROOT / "scripts" / "step7_fill_ttn.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -223,6 +224,11 @@ def extract_delivery_info(order: Dict[str, Any]) -> Tuple[str, str]:
     return address, bn_str
 
 
+def extract_tracking_number(order: Dict[str, Any]) -> str:
+    d = get_first_delivery_block(order)
+    return (d.get("trackingNumber") or "").strip()
+
+
 def choose_np_step(address: str, branch_number: str) -> Tuple[str, Path, str, str]:
     """
     Returns: (step_name, script_path, env_key, env_value)
@@ -255,6 +261,10 @@ def process_one_order(order: Dict[str, Any]) -> None:
         env["BIOTUS_PHONE_LOCAL"] = phone_local
 
     delivery_address, delivery_branch_number = extract_delivery_info(order)
+    tracking_number = extract_tracking_number(order)
+    if tracking_number:
+        env["BIOTUS_TTN"] = tracking_number
+        print(f"[ORCH] TTN => {tracking_number}")
     if not delivery_address:
         raise RuntimeError("Не найдено поле ord_delivery_data[0].address для выбора отделения/поштомата.")
 
@@ -284,6 +294,7 @@ def process_one_order(order: Dict[str, Any]) -> None:
         ("step5_select_city", STEP5_CITY_SCRIPT),
         ("step5_fill_name_phone", STEP5_FILL_NAME_PHONE_SCRIPT),
         (step6_name, step6_script),
+        ("step7_fill_ttn", STEP7_TTN_SCRIPT),
     ]
 
     for step_name, script in steps:
@@ -314,6 +325,7 @@ def main() -> int:
         ("Step5 fill name/phone script", STEP5_FILL_NAME_PHONE_SCRIPT),
         ("Step6 branch script", STEP6_BRANCH_SCRIPT),
         ("Step6 terminal script", STEP6_TERMINAL_SCRIPT),
+        ("Step7 ttn script", STEP7_TTN_SCRIPT),
     ]
     for label, p in required:
         if not p.exists():
@@ -369,7 +381,7 @@ def main() -> int:
                         state["last_processed_id"] = int(order_id)
                         state["last_processed_at"] = int(time.time())
                         save_state(state)
-                        print(f"[ORCH] Done steps 2_3->5 for order id={order_id}. (Next steps later)")
+                        print(f"[ORCH] Done steps 2_3->7 for order id={order_id}. (Next steps later)")
                     else:
                         print("[ORCH] dry-run enabled, step2_3 not executed.")
 
