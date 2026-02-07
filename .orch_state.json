@@ -1,18 +1,20 @@
 {
   "processed_ids": [
-    4970,
-    4967,
-    4957
+    4990,
+    4999,
+    4998,
+    4997,
+    4996,
+    5001,
+    5000,
+    4994,
+    4993,
+    4947,
+    5002,
+    5004,
+    5005
   ],
-  "failed": {
-    "4969": {
-      "count": 2,
-      "next_ts": 1770468433,
-      "last_step": "step7_fill_ttn",
-      "last_error": "step7_fill_ttn: - waiting for locator(\"input#track-number:visible\").first to be visible",
-      "updated_at": 1770468313
-    }
-  },
-  "last_processed_id": 4957,
-  "last_processed_at": 1770468206
+  "failed": {},
+  "last_processed_id": 5005,
+  "last_processed_at": 1770480427
 }

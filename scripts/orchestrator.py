@@ -73,9 +73,22 @@ BATCH_SIZE = int(os.getenv("ORCH_BATCH_SIZE", "5"))
 BACKOFF_BASE_SEC = int(os.getenv("ORCH_BACKOFF_BASE_SEC", "60"))
 BACKOFF_MAX_SEC = int(os.getenv("ORCH_BACKOFF_MAX_SEC", "3600"))
 
+# New orchestrator failure control constants
+ORCH_MAX_ATTEMPTS = int(os.getenv("ORCH_MAX_ATTEMPTS", "3"))
+ORCH_FAIL_STATUS_ID = int(os.getenv("ORCH_FAIL_STATUS_ID", "20"))
+ORCH_FAIL_MARK = (os.getenv("ORCH_FAIL_MARK") or "🟥").strip() or "🟥"
+
+
+
 
 # Optional defaults for downstream scripts
-DEFAULT_BIOTUS_USE_CDP = os.getenv("BIOTUS_USE_CDP", "1")
+BIOTUS_HEADLESS = (os.getenv("BIOTUS_HEADLESS") or "0").strip() == "1"
+
+# If headless is requested, default to non-CDP unless explicitly overridden.
+DEFAULT_BIOTUS_USE_CDP = os.getenv("BIOTUS_USE_CDP")
+if not DEFAULT_BIOTUS_USE_CDP:
+    DEFAULT_BIOTUS_USE_CDP = "0" if BIOTUS_HEADLESS else "1"
+
 ORCH_DONE_STATUS_ID = int(os.getenv("ORCH_DONE_STATUS_ID", "4"))
 SALESDRIVE_BASE_URL = (os.getenv("SALESDRIVE_BASE_URL") or "https://petrenko.salesdrive.me").rstrip("/")
 SALESDRIVE_API_KEY = (os.getenv("SALESDRIVE_API_KEY") or "").strip()
@@ -169,15 +182,20 @@ class StepError(RuntimeError):
         self.reason = reason
 
 # --- SalesDrive integration ---
-def salesdrive_update_status(order_id: int, status_id: int) -> None:
-    """Update order status in SalesDrive using /api/order/update/. Raises on failure."""
+def salesdrive_update_status(order_id: int, status_id: int, comment: str | None = None) -> None:
+    """Update order status in SalesDrive using /api/order/update/. Raises on failure.
+    Optionally supports a comment (short, max 800 chars)."""
     if not SALESDRIVE_API_KEY:
         raise RuntimeError("SALESDRIVE_API_KEY is not set")
 
     url = f"{SALESDRIVE_BASE_URL}/api/order/update/"
+    data_obj: Dict[str, Any] = {"statusId": int(status_id)}
+    if comment:
+        # SalesDrive commonly supports "comment"; keep it short.
+        data_obj["comment"] = str(comment)[:800]
     payload = {
         "id": int(order_id),
-        "data": {"statusId": int(status_id)},
+        "data": data_obj,
     }
 
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -288,17 +306,48 @@ def mark_failed(state: Dict[str, Any], order_id: int, step: str, reason: str) ->
     except Exception:
         cnt = 0
     cnt += 1
+    terminal = False
+    if ORCH_MAX_ATTEMPTS > 0 and cnt >= ORCH_MAX_ATTEMPTS:
+        terminal = True
     wait_sec = _backoff_seconds(cnt)
+    # If terminal, disable future retries by setting next_ts far in the future
+    next_ts = _now_ts() + wait_sec
+    if terminal:
+        next_ts = _now_ts() + 10 * 365 * 24 * 3600  # ~10 years
     entry.update(
         {
             "count": cnt,
-            "next_ts": _now_ts() + wait_sec,
+            "next_ts": next_ts,
             "last_step": step,
             "last_error": reason[:500],
             "updated_at": _now_ts(),
+            "terminal": terminal,
         }
     )
     failed[key] = entry
+
+
+# Helpers for terminal/attempts
+def is_terminal_failed(state: Dict[str, Any], order_id: int) -> bool:
+    failed = state.get("failed")
+    if not isinstance(failed, dict):
+        return False
+    entry = failed.get(str(order_id))
+    if not isinstance(entry, dict):
+        return False
+    return bool(entry.get("terminal"))
+
+def get_fail_count(state: Dict[str, Any], order_id: int) -> int:
+    failed = state.get("failed")
+    if not isinstance(failed, dict):
+        return 0
+    entry = failed.get(str(order_id))
+    if not isinstance(entry, dict):
+        return 0
+    try:
+        return int(entry.get("count") or 0)
+    except Exception:
+        return 0
 
 
 def clear_failed(state: Dict[str, Any], order_id: int) -> None:
@@ -698,6 +747,8 @@ def main() -> int:
                         continue
                     if oid in processed_ids:
                         continue
+                    if is_terminal_failed(state, oid):
+                        continue
                     backoff_active, wait_left = is_backoff_active(state, oid)
                     if backoff_active:
                         continue
@@ -706,8 +757,9 @@ def main() -> int:
                         break
 
                 if not eligible:
-                    # maybe everything is processed or in backoff
+                    # maybe everything is processed or in backoff or terminal failed
                     in_backoff = 0
+                    terminal = 0
                     for o in orders:
                         try:
                             oid = int(o.get("id"))
@@ -715,10 +767,18 @@ def main() -> int:
                             continue
                         if oid in processed_ids:
                             continue
+                        if is_terminal_failed(state, oid):
+                            terminal += 1
+                            continue
                         if is_backoff_active(state, oid)[0]:
                             in_backoff += 1
-                    if in_backoff:
-                        print(f"[ORCH] Got {len(orders)} order(s); {in_backoff} in backoff, nothing eligible now. Sleeping...")
+                    if in_backoff or terminal:
+                        parts = []
+                        if in_backoff:
+                            parts.append(f"{in_backoff} in backoff")
+                        if terminal:
+                            parts.append(f"{terminal} terminal failed")
+                        print(f"[ORCH] Got {len(orders)} order(s); " + ", ".join(parts) + ". Nothing eligible now. Sleeping...")
                     else:
                         print(f"[ORCH] Got {len(orders)} order(s) but all already processed. Sleeping...")
                 else:
@@ -744,9 +804,25 @@ def main() -> int:
                                 step = "pipeline"
                                 reason = f"{type(e).__name__}: {str(e)}".strip()
 
-                            notify_stub(f"[ORCH][ORDER {order_id}] FAILED at {step}. {reason}")
+                            # Record failure and decide if it became terminal
                             mark_failed(state, int(order_id), step, reason)
                             save_state(state)
+
+                            fail_count = get_fail_count(state, int(order_id))
+                            became_terminal = is_terminal_failed(state, int(order_id))
+
+                            # Do NOT send intermediate notifications. Only notify + change status when terminal.
+                            if became_terminal:
+                                red_reason = f"{ORCH_FAIL_MARK} Order {order_id} failed after {fail_count} attempt(s). Last step: {step}. Reason: {reason}"
+                                # Try to set SalesDrive status to FAIL status with a short red comment.
+                                try:
+                                    salesdrive_update_status(int(order_id), ORCH_FAIL_STATUS_ID, comment=red_reason)
+                                    print(f"[ORCH] SalesDrive status updated: order_id={order_id} -> statusId={ORCH_FAIL_STATUS_ID}")
+                                except Exception as se:
+                                    # Include SalesDrive error in notify, but keep going
+                                    red_reason = f"{red_reason}\nSalesDrive update error: {se}"
+                                notify_stub(red_reason)
+
                             # continue with next order
                             continue
 

@@ -71,6 +71,8 @@ BIOTUS_TIMEOUT_MS=15000
   --remote-debugging-port=9222 \
   --user-data-dir="$PWD/.chrome-rpa-profile"
 
+BIOTUS_USE_CDP=1 python tools/save_state.py
+
 	•	В этом окне можно залогиниться вручную
 	•	Сессия сохраняется между запусками
 
@@ -119,4 +121,25 @@ BIOTUS_BASE_URL=https://opt.biotus.ua
 BIOTUS_LOGIN=ibezdrabko@icloud.com
 BIOTUS_PASSWORD=397Aa397$
 
+chmod +x tools/anti_focus.sh
+
+./tools/anti_focus.sh
+
+
+
 Автор: Дмитрий
+
+запуск
+
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$PWD/.chrome-rpa-profile"
+
+
+  source .venv/bin/activate
+BIOTUS_USE_CDP=1 python tools/save_state.py
+
+
+BIOTUS_HEADLESS=1 BIOTUS_STATE_FILE=.biotus_state.json python -u scripts/orchestrator.py
+
+BIOTUS_USE_CDP=0 BIOTUS_HEADLESS=1 BIOTUS_STATE_FILE=.biotus_state.json python -u scripts/orchestrator.py
