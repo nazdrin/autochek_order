@@ -469,24 +469,33 @@ def build_branch_query_from_shipping(shipping_address: str, fallback_address: st
         tail = after_colon_tail(s)
         return tail or _normalize_spaces(s)
 
-    # --- Pickup point (Пункт приймання-видачі) ---
+    # --- Pickup point / пункт ---
+    # IMPORTANT:
+    # We only build the specific form "Пункт приймання-видачі №N" when the source text
+    # actually contains "Пункт приймання-видачі". For plain "Пункт №N" we keep it as is.
     if "пункт" in s_lower:
+        has_pryimannya = "пункт приймання-видачі" in s_lower
         num = extract_number(s)
-        if num:
-            # IMPORTANT:
-            # Для пунктів НП поиск по "Пункт №N" не работает стабильно.
-            # Корректно ищется только полная форма "Пункт приймання-видачі №N".
+
+        # Case A: "Пункт приймання-видачі №N ..." -> search by the same prefix + number
+        if has_pryimannya and num:
             return _normalize_spaces(f"Пункт приймання-видачі №{num}")
 
-        # если номера нет — ищем по адресу после двоеточия
+        # Case B: plain "Пункт №N ..." -> keep "Пункт №N" (do NOT switch to приймання-видачі)
+        if (not has_pryimannya) and num:
+            return _normalize_spaces(f"Пункт №{num}")
+
+        # Case C: no number -> search by address tail after ':' if present (keep as-is)
         tail = after_colon_tail(s)
         if tail:
             return tail
 
-        # fallback: убираем сервисную часть и ищем по оставшемуся тексту
+        # fallback: remove leading service words and search by remaining text
         s2 = re.sub(r"\(\s*до\s*\d+\s*кг\s*\)", "", s, flags=re.IGNORECASE)
-        s2 = re.sub(r"^\s*Пункт\s+приймання\-видачі\s*", "", s2, flags=re.IGNORECASE)
-        s2 = re.sub(r"^\s*Пункт\s*", "", s2, flags=re.IGNORECASE)
+        if has_pryimannya:
+            s2 = re.sub(r"^\s*Пункт\s+приймання\-видачі\s*", "", s2, flags=re.IGNORECASE)
+        else:
+            s2 = re.sub(r"^\s*Пункт\s*", "", s2, flags=re.IGNORECASE)
         return _normalize_spaces(s2) or _normalize_spaces(s)
 
     # --- Warehouse отделение ---
