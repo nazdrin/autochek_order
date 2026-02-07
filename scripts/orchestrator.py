@@ -418,50 +418,102 @@ def _normalize_spaces(s: str) -> str:
 # --- Helper: build branch query from shipping/address info ---
 def build_branch_query_from_shipping(shipping_address: str, fallback_address: str) -> str:
     """
-    Returns a short query string suitable for Biotus search, extracted from shipping_address or fallback_address.
-    - If shipping_address or fallback_address is empty, returns "".
-    - For "поштомат": returns number after "№" or any number, else the string.
-    - For "пункт": returns "Пункт №{num}" if possible, else "Пункт".
-    - For "відділен": returns "Відділення №{num}" if possible, else "Відділення".
-    - Otherwise, returns number after "№" or any number, else the string.
-    All output is normalized for whitespace.
+    Build a SHORT query string suitable for Biotus NP dropdown search.
+
+    Inputs:
+      - shipping_address: order.shipping_address (often includes full label + limits + address)
+      - fallback_address: ord_delivery_data[0].address
+
+    Rules:
+      - For "поштомат" we search by number whenever possible.
+      - For "відділення" we search by "Відділення №N" whenever possible.
+      - For "пункт":
+          * if number exists -> "Пункт №N"
+          * if NO number -> use the address tail after ':' (e.g. "вул. Сонячна 105а")
+      - Always drop weight limits like "(до 30 кг)" from the query.
     """
     src = (shipping_address or "").strip() or (fallback_address or "").strip()
     if not src:
         return ""
-    s = src
+
+    s = _normalize_spaces(src)
     s_lower = s.casefold()
-    # Helper to find number after № or any number
+
+    # Remove common service suffixes like "(до 30 кг)"
+    s = re.sub(r"\(\s*до\s*\d+\s*кг\s*\)", "", s, flags=re.IGNORECASE)
+    s = _normalize_spaces(s)
+    s_lower = s.casefold()
+
     def extract_number(ss: str) -> str | None:
-        # Try to find number after №
-        m = re.search(r'№\s*(\d+)', ss)
+        m = re.search(r"№\s*(\d+)", ss)
         if m:
             return m.group(1)
-        # Else, any number
-        m2 = re.search(r'\b(\d{1,6})\b', ss)
+        m2 = re.search(r"\b(\d{1,6})\b", ss)
         if m2:
             return m2.group(1)
         return None
+
+    def after_colon_tail(ss: str) -> str:
+        # If we have "...: address" return only address part.
+        if ":" in ss:
+            tail = ss.split(":", 1)[1]
+            return _normalize_spaces(tail)
+        return ""
+
+    # --- Postomat ---
     if "поштомат" in s_lower:
         num = extract_number(s)
         if num:
             return _normalize_spaces(num)
-        return _normalize_spaces(s)
-    elif "пункт" in s_lower:
+        # fallback: try address tail
+        tail = after_colon_tail(s)
+        return tail or _normalize_spaces(s)
+
+    # --- Pickup point (Пункт приймання-видачі) ---
+    if "пункт" in s_lower:
         num = extract_number(s)
         if num:
-            return _normalize_spaces(f"Пункт №{num}")
-        return _normalize_spaces("Пункт")
-    elif "відділен" in s_lower:
+            # IMPORTANT:
+            # Для пунктів НП поиск по "Пункт №N" не работает стабильно.
+            # Корректно ищется только полная форма "Пункт приймання-видачі №N".
+            return _normalize_spaces(f"Пункт приймання-видачі №{num}")
+
+        # если номера нет — ищем по адресу после двоеточия
+        tail = after_colon_tail(s)
+        if tail:
+            return tail
+
+        # fallback: убираем сервисную часть и ищем по оставшемуся тексту
+        s2 = re.sub(r"\(\s*до\s*\d+\s*кг\s*\)", "", s, flags=re.IGNORECASE)
+        s2 = re.sub(r"^\s*Пункт\s+приймання\-видачі\s*", "", s2, flags=re.IGNORECASE)
+        s2 = re.sub(r"^\s*Пункт\s*", "", s2, flags=re.IGNORECASE)
+        return _normalize_spaces(s2) or _normalize_spaces(s)
+
+    # --- Warehouse отделение ---
+    if "відділен" in s_lower:
         num = extract_number(s)
         if num:
             return _normalize_spaces(f"Відділення №{num}")
-        return _normalize_spaces("Відділення")
-    else:
-        num = extract_number(s)
-        if num:
-            return _normalize_spaces(num)
-        return _normalize_spaces(s)
+        # if no number, try address tail
+        tail = after_colon_tail(s)
+        return tail or _normalize_spaces("Відділення")
+
+    # --- Unknown: try number, else address tail, else full ---
+    num = extract_number(s)
+    if num:
+        return _normalize_spaces(num)
+    tail = after_colon_tail(s)
+    return tail or _normalize_spaces(s)
+
+
+# --- Helper: detect branch kind (punkt or viddilennya) ---
+def detect_branch_kind(shipping_address: str, fallback_address: str) -> str:
+    """Return 'punkt' or 'viddilennya' based on text. Default to 'viddilennya'."""
+    src = (shipping_address or "").strip() or (fallback_address or "").strip()
+    s = (src or "").casefold()
+    if "пункт" in s:
+        return "punkt"
+    return "viddilennya"
 
 
 def choose_np_step(address: str, branch_number: str, shipping_address: str) -> Tuple[str, Path, str, str]:
@@ -522,6 +574,10 @@ def process_one_order(order: Dict[str, Any]) -> None:
         delivery_address, delivery_branch_number, shipping_address
     )
 
+    # Help step6_select_np_branch.py choose correct matching logic for "Пункт"
+    if step6_env_key == "BIOTUS_BRANCH_QUERY":
+        env["BIOTUS_BRANCH_KIND"] = detect_branch_kind(shipping_address, delivery_address)
+
     city_env = extract_city_env(order)
     for k, v in city_env.items():
         env[k] = v
@@ -537,7 +593,10 @@ def process_one_order(order: Dict[str, Any]) -> None:
         print(f"[ORCH] Shipping address => {shipping_address}")
     if delivery_branch_number:
         print(f"[ORCH] Delivery branchNumber => {delivery_branch_number}")
-    print(f"[ORCH] Step6 => {step6_name} ({step6_env_key}='{step6_env_val}')")
+    extra_kind = ""
+    if step6_env_key == "BIOTUS_BRANCH_QUERY":
+        extra_kind = f", BIOTUS_BRANCH_KIND='{env.get('BIOTUS_BRANCH_KIND','')}'"
+    print(f"[ORCH] Step6 => {step6_name} ({step6_env_key}='{step6_env_val}'{extra_kind})")
 
     print(f"[ORCH] Using BIOTUS_ITEMS: {biotus_items}")
 

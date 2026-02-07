@@ -167,6 +167,21 @@ async def _click_payment_confirm_if_shown(page, timeout_ms: int) -> bool:
     except Exception:
         pass
 
+    # Если это модалка с недостаточным балансом — НЕ продолжаем.
+    # В таком кейсе заказ не оформится, поэтому нужно завершать шаг ошибкой,
+    # чтобы оркестратор НЕ менял статус заказа в SalesDrive.
+    try:
+        topup_btn = container.get_by_role("button", name=re.compile(r"Поповнити\s+баланс", re.I))
+        if await topup_btn.count() > 0 and await topup_btn.first.is_visible():
+            try:
+                await page.screenshot(path=str(ART / "step9_err_insufficient_balance.png"), full_page=True)
+            except Exception:
+                pass
+            raise RuntimeError("Недостаточно баланса: показано окно 'Поповнити баланс'. Заказ не подтвержден.")
+    except Exception:
+        # если не смогли проверить — продолжаем штатно
+        pass
+
     # 2) Находим кнопку подтверждения строго внутри контейнера
     confirm_btn = container.locator("button:has-text('Підтвердити')")
 
@@ -273,6 +288,40 @@ async def _click_payment_confirm_if_shown(page, timeout_ms: int) -> bool:
     except Exception:
         pass
 
+    # Доп. защита: иногда после "Підтвердити" (из модалки) сайт редиректит на страницу баланса
+    # из-за недостатка средств. В этом случае заказ НЕ оформлен — шаг должен упасть.
+    try:
+        url = page.url or ""
+    except Exception:
+        url = ""
+
+    try:
+        balance_hint = page.get_by_text("Ваш баланс", exact=False)
+        topup_any = page.get_by_role("button", name=re.compile(r"Поповнити\s+баланс", re.I))
+        not_enough = page.get_by_text(re.compile(r"не\s+вистачає", re.I))
+
+        if "/balance" in url or "/balance/index" in url:
+            try:
+                await page.screenshot(path=str(ART / "step9_err_redirect_balance.png"), full_page=True)
+            except Exception:
+                pass
+            raise RuntimeError("Недостатньо балансу: редирект на сторінку балансу після підтвердження оплати.")
+
+        # Иногда URL ещё не сменился, но уже отрисована страница баланса/кнопка пополнения
+        if (await balance_hint.count() > 0 and await balance_hint.first.is_visible()) or (
+            await topup_any.count() > 0 and await topup_any.first.is_visible()
+        ) or (await not_enough.count() > 0 and await not_enough.first.is_visible()):
+            try:
+                await page.screenshot(path=str(ART / "step9_err_insufficient_balance_after.png"), full_page=True)
+            except Exception:
+                pass
+            raise RuntimeError("Недостатньо балансу: показано сторінку/кнопку поповнення після підтвердження.")
+    except RuntimeError:
+        raise
+    except Exception:
+        # не валим шаг из-за проблем с проверкой
+        pass
+
     try:
         await page.screenshot(path=str(ART / "step9_3_payment_modal_after.png"), full_page=True)
     except Exception:
@@ -317,7 +366,7 @@ async def main():
             # fallback: force click
             await btn.first.click(force=True)
 
-        await page.wait_for_timeout(1200)
+        await page.wait_for_timeout(700)
         await page.screenshot(path=str(ART / "step9_1_after_click.png"), full_page=True)
 
         # Если появилось окно 'Оплата замовлення' — подтверждаем оплату
@@ -325,6 +374,9 @@ async def main():
         try:
             # Даём странице шанс показать модалку (иногда появляется не сразу)
             confirmed = await _click_payment_confirm_if_shown(page, TIMEOUT_MS)
+        except RuntimeError as e:
+            # Критические бизнес-ошибки (например, недостаточно баланса) должны падать наружу.
+            raise
         except Exception:
             confirmed = False
 
@@ -332,6 +384,42 @@ async def main():
             print("OK: clicked 'Підтверджую замовлення' and confirmed payment modal ('Підтвердити').")
         else:
             print("OK: clicked 'Підтверджую замовлення'. (Payment modal not confirmed / not shown)")
+
+        # Финальная проверка: если оказались на странице баланса/пополнения — заказ не оформлен.
+        try:
+            await page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+        try:
+            url = page.url or ""
+        except Exception:
+            url = ""
+
+        try:
+            balance_hint = page.get_by_text("Ваш баланс", exact=False)
+            topup_any = page.get_by_role("button", name=re.compile(r"Поповнити\s+баланс", re.I))
+            not_enough = page.get_by_text(re.compile(r"не\s+вистачає", re.I))
+
+            if "/balance" in url or "/balance/index" in url:
+                try:
+                    await page.screenshot(path=str(ART / "step9_err_balance_page_final.png"), full_page=True)
+                except Exception:
+                    pass
+                raise RuntimeError("Недостатньо балансу: відкрилася сторінка балансу. Замовлення не оформлено.")
+
+            if (await balance_hint.count() > 0 and await balance_hint.first.is_visible()) or (
+                await topup_any.count() > 0 and await topup_any.first.is_visible()
+            ) or (await not_enough.count() > 0 and await not_enough.first.is_visible()):
+                try:
+                    await page.screenshot(path=str(ART / "step9_err_balance_hint_final.png"), full_page=True)
+                except Exception:
+                    pass
+                raise RuntimeError("Недостатньо балансу: знайдено 'Поповнити баланс/Ваш баланс/не вистачає'.")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
 
         if not USE_CDP:
             await context.close()

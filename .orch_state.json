@@ -1,8 +1,12 @@
 {
-  "processed_ids": [
-    4870
-  ],
-  "failed": {},
-  "last_processed_id": 4870,
-  "last_processed_at": 1770388939
+  "processed_ids": [],
+  "failed": {
+    "4890": {
+      "count": 1,
+      "next_ts": 1770443020,
+      "last_step": "step9_confirm_order",
+      "last_error": "step9_confirm_order: RuntimeError: Недостатньо балансу: редирект на сторінку балансу після підтвердження оплати.",
+      "updated_at": 1770442960
+    }
+  }
 }
