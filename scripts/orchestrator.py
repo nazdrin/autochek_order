@@ -518,6 +518,18 @@ def build_branch_query_from_shipping(shipping_address: str, fallback_address: st
         tail = after_colon_tail(s)
         return tail or _normalize_spaces(s)
 
+    # --- Pickup point / пункт приймання-видачі (special case) ---
+    if "пункт приймання-видачі" in s_lower and ":" in s:
+        left, right = s.split(":", 1)
+        left = _normalize_spaces(left)
+        right = _normalize_spaces(right)
+        # remove weight brackets like "(до 30 кг)"
+        right = re.sub(r"\s*\(до [^)]+\)\s*", " ", right, flags=re.IGNORECASE).strip()
+        m = re.search(r"№\s*(\d+)", left)
+        if m:
+            return _normalize_spaces(f"Пункт приймання-видачі №{m.group(1)}: {right}")
+        return _normalize_spaces(f"Пункт приймання-видачі: {right}")
+
     # --- Pickup point / пункт ---
     # IMPORTANT:
     # We only build the specific form "Пункт приймання-видачі №N" when the source text

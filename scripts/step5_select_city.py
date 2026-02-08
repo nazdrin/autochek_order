@@ -23,6 +23,10 @@ CITY_TYPE = (os.getenv("BIOTUS_CITY_TYPE") or "").strip()       # e.g. "с.", "�
 CITY_NAME = (os.getenv("BIOTUS_CITY_NAME") or "").strip()       # e.g. "Калинівка"
 CITY_AREA = (os.getenv("BIOTUS_CITY_AREA") or "").strip()       # e.g. "Київська"
 CITY_REGION = (os.getenv("BIOTUS_CITY_REGION") or "").strip()   # e.g. "Вишгородський"
+CITY_TYPE_EQUIV = (os.getenv("BIOTUS_CITY_TYPE_EQUIV") or "смт=с-ще=селище").strip()
+CITY_STRICT_TYPE = (os.getenv("BIOTUS_CITY_STRICT_TYPE") or "0").strip() == "1"
+CITY_STRICT_REGION = (os.getenv("BIOTUS_CITY_STRICT_REGION") or "1").strip() == "1"
+CITY_STRICT_AREA = (os.getenv("BIOTUS_CITY_STRICT_AREA") or "1").strip() == "1"
 
 CITY_QUERY_LEGACY = (os.getenv("BIOTUS_CITY_QUERY") or "").strip()
 MUST_CONTAIN_RAW = (os.getenv("BIOTUS_CITY_MUST_CONTAIN") or "").strip()
@@ -151,6 +155,77 @@ def _city_type_matches(selected_text: str, city_type: str) -> bool:
     return _norm_city_type_for_compare(sel_type) == _norm_city_type_for_compare(city_type)
 
 
+def _parse_type_equiv(spec: str) -> List[set]:
+    groups: List[set] = []
+    for chunk in (spec or "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = [p.strip() for p in chunk.split("=") if p.strip()]
+        if parts:
+            groups.append(set(parts))
+    return groups
+
+
+def _type_equiv_match(t: str, expected: str, equiv_groups: List[set]) -> bool:
+    if not expected:
+        return True
+    t_n = _norm_city_type_for_compare(t)
+    e_n = _norm_city_type_for_compare(expected)
+    if t_n == e_n:
+        return True
+    for g in equiv_groups:
+        gn = {_norm_city_type_for_compare(x) for x in g}
+        if t_n in gn and e_n in gn:
+            return True
+    return False
+
+
+def _extract_option_type(txt: str) -> str:
+    left = (txt or "").split("/")[0].strip().lower()
+    m = re.match(r"^(м\.?|с\.?|смт\.?|с-ще\.?|селище)", left)
+    return m.group(1) if m else ""
+
+
+def _norm_area_region(s: str) -> str:
+    s = norm(s)
+    s = s.replace("область", "").replace("обл.", "").replace("обл", "")
+    s = s.replace("район", "").replace("р-н", "").replace("рн", "")
+    s = re.sub(r"[\\.,;()\\[\\]]", " ", s)
+    s = re.sub(r"\\s+", " ", s).strip()
+    return s
+
+
+def _parse_city_option(txt: str) -> tuple[str, str, str, str]:
+    """
+    Parse option like:
+      "с-ще Літин / Вінницька обл. / Вінницький р-н"
+      "м. Харків / Харківська обл. / Харківський р-н"
+    Returns: (type, name, area, region) all normalized.
+    """
+    raw = (txt or "").strip()
+    parts = [p.strip() for p in raw.split("/") if p.strip()]
+    left = parts[0] if parts else ""
+    opt_type = _extract_option_type(left)
+    name_only = _norm_city_name_only(left)
+    area = _norm_area_region(parts[1]) if len(parts) > 1 else ""
+    region = _norm_area_region(parts[2]) if len(parts) > 2 else ""
+    return _norm_city_type_for_compare(opt_type), name_only, area, region
+
+
+def _norm_city_name_only(s: str) -> str:
+    s = norm(s)
+    s = re.sub(r"^(м\.?\s+|с\.?\s+|смт\.?\s+|с-ще\.?\s+|селище\s+)", "", s).strip()
+    return s
+
+
+def _city_selected_ok(selected_text: str, expected_name: str, expected_type: str) -> bool:
+    if not selected_text:
+        return False
+    _t, name_only, _a, _r = _parse_city_option(selected_text)
+    return _norm_city_name_only(expected_name) == name_only
+
+
 async def _assert_final_city_selected(page, expected_name: str, expected_type: str) -> None:
     selected = await get_selected_city_text(page)
     if not selected:
@@ -159,9 +234,7 @@ async def _assert_final_city_selected(page, expected_name: str, expected_type: s
             f"City not applied. Expected '{expected_name}' type '{expected_type}', got ''. "
             "See artifacts/step5_err_city_not_applied.png"
         )
-    ok_name = norm(expected_name) in norm(selected)
-    ok_type = _city_type_matches(selected, expected_type)
-    if not (ok_name and ok_type):
+    if not _city_selected_ok(selected, expected_name, expected_type):
         await page.screenshot(path=str(ART / "step5_err_city_not_applied.png"), full_page=True)
         raise RuntimeError(
             f"City not applied. Expected '{expected_name}' type '{expected_type}', got '{selected}'. "
@@ -192,147 +265,77 @@ async def choose_best_option(
     """
     SlimSelect: input = фильтр, выбор = клик по .ss-option.
 
-    Логика подбора (structured деградация):
-    - всегда требуем совпадение по городу (CITY_NAME если задан, иначе query)
-    - если заданы area и region: сначала пробуем city+area+region
-      - если НЕ найдено (т.е. район/region не совпал) -> пробуем city+area
-      - если всё ещё не найдено (т.е. область/area не совпала) -> пробуем city+region
-      - иначе -> city only
-
-    ВАЖНО: если город = м. Київ, то проверку делаем ТОЛЬКО по городу.
-    ВАЖНО: тип населеного пункту може відрізнятись між API та сайтом ("смт" == "с-ще").
+    Логика:
+    - обязательный exact match по CITY_NAME (left part, без префикса типа)
+    - AREA/REGION используются как фильтры по режимам A/B/C/D
+    - CITY_TYPE влияет на score, "смт"~"с-ще"~"селище" эквивалентны
     """
     qn = norm(query)
-
-    def _norm_city_type(s: str) -> str:
-        s = norm(s)
-        s = s.replace("смт.", "смт").replace("м.", "м").replace("с.", "с")
-        # Biotus sometimes uses "с-ще" where API sends "смт".
-        if s in {"смт", "селище", "селище міського типу"}:
-            return "с-ще"
-        return s
-
-    ct = _norm_city_type(city_type) if city_type else ""  # soft preference (e.g. "с", "м", "с-ще")
-
-    cn = norm(city_name) if city_name else ""
-    if not cn:
-        cn = qn
-
-    an = norm(area_name) if area_name else ""
-    rn = norm(region_name) if region_name else ""
+    expected_name = _norm_city_name_only(city_name) if city_name else _norm_city_name_only(qn)
+    expected_area = _norm_area_region(area_name) if area_name else ""
+    expected_region = _norm_area_region(region_name) if region_name else ""
+    equiv_groups = _parse_type_equiv(CITY_TYPE_EQUIV)
 
     cnt = await options.count()
     if cnt == 0:
         return None
 
-    def _norm_city_name(s: str) -> str:
-        # Normalize city name only (no type, no punctuation noise)
-        s = norm(s)
-        # common prefixes in UA/RU for city type
-        s = re.sub(r"^(м\.?\s+|с\.?\s+|смт\.?\s+|с-ще\.?\s+|селище\s+)", "", s).strip()
-        return s
+    matches = []
+    for i in range(min(cnt, 200)):
+        raw = (await options.nth(i).inner_text()).strip()
+        if not raw:
+            continue
+        opt_type, name_only, area_norm, region_norm = _parse_city_option(raw)
+        if name_only != expected_name:
+            continue
+        matches.append((i, raw, opt_type, area_norm, region_norm))
 
-    def _extract_city_from_option(txt: str) -> str:
-        """Biotus city option is typically like: 'м. Харків / Харківська обл. / Харківський р-н'.
-        We only want the city part (left side before first '/'), with type removed.
-        """
-        raw = (txt or "").strip()
-        left = raw.split("/")[0].strip()  # e.g. 'м. Харків' or 'с. Харківці'
-        return _norm_city_name(left)
+    if not matches:
+        raise RuntimeError("city not found")
 
-    # If a structured CITY_NAME is provided, require an exact city-name match.
-    # This prevents accidental matches like 'Харків' in 'Харківці'.
-    cn_exact = _norm_city_name(city_name) if city_name else ""
+    print(f"[step5] candidates with city match: {len(matches)}")
 
-    def city_match(txt: str) -> bool:
-        if cn_exact:
-            return _extract_city_from_option(txt) == cn_exact
-        # Legacy / fallback: allow substring match
-        t = norm(txt)
-        return cn in t
+    # Mode A: city + area + region
+    mode = "A"
+    if expected_area and expected_region:
+        cand = [m for m in matches if expected_area in m[3] and expected_region in m[4]]
+    else:
+        cand = []
+    if not cand:
+        # Mode B: city + area
+        mode = "B"
+        cand = [m for m in matches if expected_area and expected_area in m[3]] if expected_area else []
+    if not cand:
+        # Mode C: city + region
+        mode = "C"
+        cand = [m for m in matches if expected_region and expected_region in m[4]] if expected_region else []
+    if not cand:
+        # Mode D: city only
+        mode = "D"
+        cand = matches
 
-    def type_pref(txt: str) -> bool:
-        if not ct:
-            return False
-        # Prefer when the left city segment matches the requested type.
-        left = (txt or "").split("/")[0]
-        left_n = norm(left)
-        # Normalize site display types similar to API normalization.
-        # Treat "смт" and "с-ще" as equivalent.
-        if ct == "с-ще":
-            return left_n.startswith("смт") or left_n.startswith("с-ще") or left_n.startswith("селище")
-        if ct == "м":
-            return left_n.startswith("м")
-        if ct == "с":
-            return left_n.startswith("с")
-        return ct in left_n
-
-    async def pick_best(predicate) -> Optional[object]:
-        best = None
-        best_score = -1
-        for i in range(min(cnt, 200)):
-            raw = await options.nth(i).inner_text()
-            t = norm(raw)
-            if predicate(t):
-                score = 10
-                # Bonus for exact city match when we can extract it (helps legacy too)
-                try:
-                    if _extract_city_from_option(raw) == _norm_city_name(cn):
-                        score += 2
-                except Exception:
-                    pass
-                if type_pref(t):
+    def score_item(item):
+        _i, raw, opt_type, area_norm, region_norm = item
+        score = 0
+        if expected_area and expected_area in area_norm:
+            score += 5
+        if expected_region and expected_region in region_norm:
+            score += 5
+        if city_type:
+            type_ok = _type_equiv_match(opt_type, city_type, equiv_groups)
+            if type_ok:
+                score += 2
+                if raw.lower().split("/")[0].strip().startswith(opt_type):
                     score += 1
-                if score > best_score:
-                    best_score = score
-                    best = options.nth(i)
-        return best
+        return score
 
-    # Special-case: Kyiv -> match by city only.
-    # Accept both "київ" and "м київ" in inputs.
-    if cn == "київ" or cn == "м київ" or cn.startswith("київ") or cn.startswith("м київ"):
-        return await pick_best(lambda t: city_match(t))
-
-    # Structured passes (deterministic деградация)
-    if an and rn:
-        # Pass 1: city + area + region
-        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [an, rn]))
-        if best is not None:
-            return best
-        # Pass 2: район (region) не совпадает -> проверяем city + area
-        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [an]))
-        if best is not None:
-            return best
-        # Pass 3: область (area) не совпадает -> проверяем city + region
-        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [rn]))
-        if best is not None:
-            return best
-        # Pass 4: оба не совпали / нет точного совпадения -> city only
-        return await pick_best(lambda t: city_match(t))
-
-    if an:
-        # Only area provided -> city + area
-        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [an]))
-        if best is not None:
-            return best
-        return await pick_best(lambda t: city_match(t))
-
-    if rn:
-        # Only region provided -> city + region
-        best = await pick_best(lambda t: city_match(t) and _contains_all(t, [rn]))
-        if best is not None:
-            return best
-        return await pick_best(lambda t: city_match(t))
-
-    # Legacy-only уточнение
-    legacy_need = [norm(t) for t in must_tokens if t]
-    if legacy_need:
-        best = await pick_best(lambda t: city_match(t) and _contains_all(t, legacy_need))
-        if best is not None:
-            return best
-
-    # Fallback: first city match (prefer CITY_TYPE when possible)
-    return await pick_best(lambda t: city_match(t))
+    cand.sort(key=lambda x: (-score_item(x), x[0]))
+    idx, raw, _t, _a, _r = cand[0]
+    print(
+        f"[step5] mode={mode} expected city='{expected_name}', area='{expected_area}', region='{expected_region}', "
+        f"type='{city_type}' -> picked='{raw}'"
+    )
+    return options.nth(idx)
 
 
 async def main():
@@ -362,23 +365,8 @@ async def main():
         # otherwise against the (legacy) query string.
         city_token = CITY_NAME if CITY_NAME else CITY_QUERY
 
-        structured_need: List[str] = []
-        if CITY_AREA:
-            structured_need.append(CITY_AREA)
-        if CITY_REGION:
-            structured_need.append(CITY_REGION)
-
-        ok_city = norm(city_token) in cur_n
-
-        # Special-case Kyiv: ignore область/район in validation (они часто расходятся с выпадашкой)
-        city_norm = norm(city_token)
-        is_kyiv = city_norm == "київ" or city_norm == "м київ" or city_norm.startswith("київ") or city_norm.startswith("м київ")
-
-        ok_structured = True if is_kyiv else (_contains_all(cur_n, structured_need) if structured_need else True)
-        ok_legacy = _contains_all(cur_n, must_tokens) if must_tokens and (not structured_need or is_kyiv) else True
-        ok_type = _city_type_matches(current, CITY_TYPE)
-
-        if ok_city and ok_structured and ok_legacy and ok_type:
+        ok_legacy = _contains_all(cur_n, must_tokens) if must_tokens else True
+        if _city_selected_ok(current, CITY_NAME if CITY_NAME else CITY_QUERY, CITY_TYPE) and ok_legacy:
             print(f"OK: city already selected. current='{current}'")
             if not USE_CDP:
                 await browser.close()
@@ -425,15 +413,19 @@ async def main():
             )
 
         # 5) Выбираем лучшую опцию
-        chosen = await choose_best_option(
-            options,
-            CITY_QUERY,
-            CITY_TYPE,
-            CITY_NAME,
-            CITY_AREA,
-            CITY_REGION,
-            must_tokens,
-        )
+        try:
+            chosen = await choose_best_option(
+                options,
+                CITY_QUERY,
+                CITY_TYPE,
+                CITY_NAME,
+                CITY_AREA,
+                CITY_REGION,
+                must_tokens,
+            )
+        except RuntimeError as e:
+            await page.screenshot(path=str(ART / "step5_err_city_not_applied.png"), full_page=True)
+            raise
         if chosen is None:
             raise RuntimeError(
                 "Опции есть, но не нашёл подходящую под параметры города. "

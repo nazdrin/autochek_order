@@ -190,6 +190,8 @@ def _infer_branch_kind(branch_query: str) -> str:
 
 def _build_matcher(kind: str, query: str, must_contain: str):
     q_raw = query or ""
+    # normalize special NP point text: remove weight brackets
+    q_raw = re.sub(r"\s*\(до [^)]+\)\s*", " ", q_raw).strip()
     qn = _norm(q_raw)
     must_tokens = _tokenize_must_contain(must_contain)
 
@@ -270,6 +272,44 @@ def _build_matcher(kind: str, query: str, must_contain: str):
         return qn in tn
 
     return matches, strict_re, num
+
+
+def _normalize_addr_query(q_raw: str) -> str:
+    q = (q_raw or "").strip()
+    q = re.sub(r"\s*\(до [^)]+\)\s*", " ", q, flags=re.IGNORECASE).strip()
+    return q
+
+
+def _addr_matches(option_text: str, addr_query: str) -> bool:
+    """Match address by strong tokens + house number."""
+    if not option_text or not addr_query:
+        return False
+
+    def norm_addr(s: str) -> str:
+        s = _norm(s)
+        s = s.replace("пункт приймання-видачі", "")
+        s = s.replace("пункт приймання видачі", "")
+        s = s.replace("пункт", "")
+        s = s.replace("відділення", "")
+        s = s.replace("№", " ")
+        s = s.replace("вулиця", "вул")
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    q = norm_addr(addr_query)
+    t = norm_addr(option_text)
+
+    nums = re.findall(r"\d+", q)
+    house_num = nums[-1] if nums else None
+
+    raw_tokens = [tok for tok in re.split(r"\s+", q) if tok]
+    addr_tokens = [t for t in raw_tokens if len(t) >= 4 and t not in {"вул", "пр", "пл"}]
+
+    if addr_tokens and not all(tok in t for tok in addr_tokens):
+        return False
+    if house_num and house_num not in t:
+        return False
+    return True
 
 
 async def _delivery_np_section(page):
@@ -547,12 +587,22 @@ async def main():
             else:
                 query_to_type = f"Пункт №{BRANCH_QUERY.strip()}"
 
-        # address-style point query: 'Пункт ...: <address>'
-        addr_mode = (kind == "point") and (":" in (BRANCH_QUERY or "")) and (not _branch_number_from_query(BRANCH_QUERY))
-        if addr_mode:
+        # mode detection for points
+        has_colon = ":" in (BRANCH_QUERY or "")
+        has_num = bool(re.search(r"№\s*\d+", BRANCH_QUERY or ""))
+        combined_mode = has_colon and has_num
+        addr_mode = has_colon and not has_num
+        numeric_mode = not addr_mode and not combined_mode
+
+        expected_num = _branch_number_from_query(BRANCH_QUERY)
+        expected_addr = ""
+
+        if addr_mode or combined_mode:
             addr_part = BRANCH_QUERY.split(":", 1)[1].strip()
+            addr_part = _normalize_addr_query(addr_part)
             # normalize common prefixes
             addr_part = re.sub(r"^\s*вул\.?\s+", "вул. ", addr_part, flags=re.IGNORECASE)
+            expected_addr = addr_part
             query_to_type = addr_part
 
         # fallback queries for numbered branches/points
@@ -766,50 +816,68 @@ async def main():
                     count = await opts.count()
                     chosen = None
 
-                    if addr_mode:
+                    if combined_mode:
+                        if not expected_num or not expected_addr:
+                            last_err = RuntimeError("no combined match")
+                            raise last_err
+                        for i in range(min(count, 80)):
+                            item = opts.nth(i)
+                            try:
+                                txt = (await item.inner_text()).strip()
+                            except Exception:
+                                continue
+                            if not txt:
+                                continue
+                            if "результатів не знайдено" in _norm(txt):
+                                continue
+                            if (re.search(rf"№\s*{re.escape(expected_num)}(?!\d)", txt)) and _addr_matches(txt, expected_addr):
+                                chosen = item
+                                break
+                        if not chosen:
+                            last_err = RuntimeError("no combined match")
+                            raise last_err
+                    elif addr_mode:
                         if count == 0:
                             last_err = RuntimeError("no suggestions")
                             raise last_err
-                        chosen = opts.nth(0)
-                    else:
-                        # Prefer strict match for numbered branch to avoid address number hits (e.g. 9/2)
-                        if strict_re is not None:
-                            for i in range(min(count, 80)):
-                                item = opts.nth(i)
-                                try:
-                                    txt = (await item.inner_text()).strip()
-                                except Exception:
-                                    continue
-                                if not txt:
-                                    continue
-                                if strict_re.search(txt):
-                                    chosen = item
-                                    break
-                        if chosen is None:
-                            for i in range(min(count, 80)):
-                                item = opts.nth(i)
-                                try:
-                                    txt = (await item.inner_text()).strip()
-                                except Exception:
-                                    continue
-                                if not txt:
-                                    continue
-                                if not matcher(txt):
-                                    continue
+                        for i in range(min(count, 80)):
+                            item = opts.nth(i)
+                            try:
+                                txt = (await item.inner_text()).strip()
+                            except Exception:
+                                continue
+                            if not txt:
+                                continue
+                            if "результатів не знайдено" in _norm(txt):
+                                continue
+                            if _addr_matches(txt, expected_addr):
                                 chosen = item
                                 break
-
-                    if not chosen and not addr_mode and count > 0 and not num:
-                        if not BRANCH_MUST_CONTAIN:
-                            chosen = opts.nth(0)
-                        else:
+                        if not chosen:
+                            last_err = RuntimeError("no address match")
+                            raise last_err
+                    else:
+                        # numeric-mode (strict by number)
+                        if not expected_num:
+                            last_err = RuntimeError("no numeric match")
+                            raise last_err
+                        num_re = re.compile(rf"№\s*{re.escape(expected_num)}(?!\d)", re.IGNORECASE)
+                        for i in range(min(count, 80)):
+                            item = opts.nth(i)
                             try:
-                                first_txt = (await opts.nth(0).inner_text()).strip()
+                                txt = (await item.inner_text()).strip()
                             except Exception:
-                                first_txt = ""
-                            must_tokens = _tokenize_must_contain(BRANCH_MUST_CONTAIN)
-                            if first_txt and all(t in _norm(first_txt) for t in must_tokens):
-                                chosen = opts.nth(0)
+                                continue
+                            if not txt:
+                                continue
+                            if "результатів не знайдено" in _norm(txt):
+                                continue
+                            if num_re.search(txt):
+                                chosen = item
+                                break
+                        if not chosen:
+                            last_err = RuntimeError("no numeric match")
+                            raise last_err
 
                     if not chosen:
                         try:
@@ -867,13 +935,23 @@ async def main():
                     await page.wait_for_timeout(300)
                     continue
 
-                    if addr_mode:
+                    if combined_mode:
                         if not selected_txt2 or "введіть" in _norm(selected_txt2):
                             last_err = RuntimeError("selected value not applied")
                             raise last_err
-                    else:
-                        if not _selected_text_ok(selected_txt2, kind, branch_no, must_tokens):
+                        if not (re.search(rf"№\s*{re.escape(expected_num)}(?!\d)", selected_txt2) and _addr_matches(selected_txt2, expected_addr)):
+                            last_err = RuntimeError("selected value mismatch")
+                            raise last_err
+                    elif addr_mode:
+                        if not selected_txt2 or "введіть" in _norm(selected_txt2):
                             last_err = RuntimeError("selected value not applied")
+                            raise last_err
+                        if not _addr_matches(selected_txt2, expected_addr):
+                            last_err = RuntimeError("selected value mismatch")
+                            raise last_err
+                    else:
+                        if not expected_num or not re.search(rf"№\s*{re.escape(expected_num)}(?!\d)", selected_txt2):
+                            last_err = RuntimeError("selected value mismatch")
                             raise last_err
 
                 selected_final = selected_txt2 or selected_txt
