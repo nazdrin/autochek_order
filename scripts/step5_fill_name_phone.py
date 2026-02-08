@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 from pathlib import Path
 import re
 
@@ -18,6 +19,16 @@ CDP_ENDPOINT = os.getenv("BIOTUS_CDP_ENDPOINT", "http://127.0.0.1:9222")
 FULL_NAME = os.getenv("BIOTUS_FULL_NAME", "Бойко Александр")
 # вводим без +380, т.к. маска уже содержит +38(0__) ...
 PHONE_LOCAL = re.sub(r"\D+", "", os.getenv("BIOTUS_PHONE_LOCAL", "50 417 58 07"))
+
+
+def _select_all(page):
+    if sys.platform.startswith("win") or os.name == "nt":
+        return page.keyboard.press("Control+A")
+    return page.keyboard.press("Meta+A")
+
+
+def _digits(s: str) -> str:
+    return re.sub(r"\D+", "", s or "")
 
 
 
@@ -192,11 +203,44 @@ async def main():
         phone = phone.first
         await phone.wait_for(state="visible", timeout=30000)
         await phone.scroll_into_view_if_needed()
-        await phone.click()
 
-        # очистить и ввести локальные цифры (после 0)
-        await page.keyboard.press("Meta+A")  # macOS
-        await page.keyboard.type(PHONE_LOCAL)
+        # Phone fill with retries (Windows-safe select all)
+        success = False
+        for attempt in range(1, 4):
+            try:
+                before_value = await phone.input_value()
+            except Exception:
+                before_value = ""
+
+            await page.screenshot(path=str(ART / "step5_phone_before.png"), full_page=True)
+
+            await phone.click()
+            await _select_all(page)
+            await page.keyboard.press("Backspace")
+            await _select_all(page)
+            await page.keyboard.press("Delete")
+
+            await phone.type(PHONE_LOCAL, delay=25)
+            await page.wait_for_timeout(250)
+
+            try:
+                after_value = await phone.input_value()
+            except Exception:
+                after_value = ""
+
+            digits = _digits(after_value)
+            want = PHONE_LOCAL
+            if (digits.endswith(want) or (want in digits)) and (after_value != before_value):
+                await page.screenshot(path=str(ART / "step5_phone_after.png"), full_page=True)
+                success = True
+                break
+
+            await page.screenshot(path=str(ART / f"step5_phone_retry_{attempt}.png"), full_page=True)
+            await page.wait_for_timeout(300)
+
+        if not success:
+            await page.screenshot(path=str(ART / "step5_phone_failed.png"), full_page=True)
+            raise RuntimeError("Не удалось корректно перезаписать телефон (Windows-safe fill).")
 
         await page.wait_for_timeout(800)
         await page.screenshot(path=str(ART / "step5_2_after_fill.png"), full_page=True)
