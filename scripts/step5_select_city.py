@@ -151,6 +151,23 @@ def _city_type_matches(selected_text: str, city_type: str) -> bool:
     return _norm_city_type_for_compare(sel_type) == _norm_city_type_for_compare(city_type)
 
 
+async def _assert_final_city_selected(page, expected_name: str, expected_type: str) -> None:
+    selected = await get_selected_city_text(page)
+    if not selected:
+        await page.screenshot(path=str(ART / "step5_err_city_not_applied.png"), full_page=True)
+        raise RuntimeError(
+            f"City not applied. Expected '{expected_name}' type '{expected_type}', got ''. "
+            "See artifacts/step5_err_city_not_applied.png"
+        )
+    ok_name = norm(expected_name) in norm(selected)
+    ok_type = _city_type_matches(selected, expected_type)
+    if not (ok_name and ok_type):
+        await page.screenshot(path=str(ART / "step5_err_city_not_applied.png"), full_page=True)
+        raise RuntimeError(
+            f"City not applied. Expected '{expected_name}' type '{expected_type}', got '{selected}'. "
+            "See artifacts/step5_err_city_not_applied.png"
+        )
+
 async def _wait_options_visible(options, timeout_ms: int) -> bool:
     deadline = timeout_ms / 100
     for _ in range(int(deadline)):
@@ -441,12 +458,15 @@ async def main():
             await page.wait_for_timeout(100)
         await page.screenshot(path=str(ART / "step5_3_after_city_selected.png"), full_page=True)
 
-        ok_type_after = _city_type_matches(after, CITY_TYPE)
-        if (norm(CITY_QUERY) not in norm(after)) or (not ok_type_after):
-            print(f"WARN: city selection may not be fixed. after='{after}'. Check step5_3_after_city_selected.png")
-        else:
-            mode = "STRUCTURED" if (CITY_AREA or CITY_REGION) else ("ADVANCED" if must_tokens else "SIMPLE")
-            print(f"OK: city selected ({mode}). query='{CITY_QUERY}', selected='{after}'")
+        # Hard assert: must match final city + type
+        try:
+            await _assert_final_city_selected(page, CITY_NAME if CITY_NAME else CITY_QUERY, CITY_TYPE)
+        except RuntimeError as e:
+            print(f"ERROR: city not applied. {e}")
+            raise
+
+        mode = "STRUCTURED" if (CITY_AREA or CITY_REGION) else ("ADVANCED" if must_tokens else "SIMPLE")
+        print(f"OK: city selected final='{after}' ({mode})")
 
         if not USE_CDP:
             await browser.close()

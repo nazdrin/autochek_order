@@ -13,7 +13,7 @@ python -u scripts/orchestrator.py --once
 rm -f .orch_state.json
 python -u scripts/orchestrator.py
 rm -f .orch_state.json
-python -u scripts/orchestrator.py --once
+ 
 Требования
 	•	macOS
 	•	Python 3.11
