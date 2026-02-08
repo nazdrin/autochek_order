@@ -333,7 +333,7 @@ async def _ensure_np_branch_mode(page):
     except Exception:
         pass
 
-    for _ in range(80):  # ~8 секунд
+    for _ in range(25):  # ~2.5 секунд
         try:
             if await sec.locator('div.ss-main').count() > 0:
                 break
@@ -344,171 +344,177 @@ async def _ensure_np_branch_mode(page):
         await page.wait_for_timeout(100)
 
 
-# --- Helper: get the correct SlimSelect popup for NP branch ---
-async def _get_branch_popup(page, inp=None):
-    """Return the currently open SlimSelect popup for NP branch."""
-    popup = page.locator(
-        'div.ss-content:visible:has(input[type="search"][placeholder="Введіть вулицю або номер відділення"]), '
-        'div.ss-content:visible:has(input[type="search"][aria-label="Введіть вулицю або номер відділення"])'
-    ).first
-    try:
-        if await popup.count() > 0:
-            return popup
-    except Exception:
-        pass
-
-    if inp is not None:
-        try:
-            anc = inp.locator('xpath=ancestor::div[contains(@class,"ss-content")][1]').first
-            if await anc.count() > 0:
-                return anc
-        except Exception:
-            pass
-
-    any_popup = page.locator('div.ss-content:visible').first
-    try:
-        if await any_popup.count() > 0:
-            return any_popup
-    except Exception:
-        pass
-
-    return None
-
-
-async def _ensure_branch_dropdown_open(page, inp=None, popup=None):
-    """Make sure the branch dropdown is open and options are present."""
-    if popup is None:
-        popup = await _get_branch_popup(page, inp=inp)
-
-    opts = (
-        popup.locator('div.ss-list .ss-option:visible')
-        if popup is not None
-        else page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
+async def _wait_np_section_idle(page, sec, timeout_ms: int = 2500):
+    # Try to wait for common spinners/preloaders/overlays to disappear (best-effort)
+    busy = sec.locator(
+        ".loading:visible, .loader:visible, .spinner:visible, .preloader:visible, "
+        "[class*=\"loading\"]:visible, [class*=\"spinner\"]:visible, "
+        ".overlay:visible, .modal-backdrop:visible, .backdrop:visible"
     )
     try:
-        if await opts.count() > 0:
-            return True
+        if await busy.count() > 0:
+            await busy.first.wait_for(state="hidden", timeout=timeout_ms)
+            return
     except Exception:
         pass
+    await page.wait_for_timeout(200)
 
-    sec = await _delivery_np_section(page)
-    trigger = sec.locator(
+
+async def _find_np_ss_main(sec):
+    preferred = sec.locator(
         'div.ss-main:has-text("Введіть вулицю або номер відділення"), '
-        'div.ss-main:has-text("Введіть вулицю"), '
-        'div.ss-main'
-    ).first
-
+        'div.ss-main:has-text("Введіть вулицю")'
+    )
     try:
-        if await trigger.count() > 0:
-            await _human_click(page, trigger)
+        if await preferred.count() > 0:
+            return preferred.first, await preferred.count()
     except Exception:
         pass
 
-    if inp is not None:
+    any_main = sec.locator("div.ss-main")
+    try:
+        cnt = await any_main.count()
+    except Exception:
+        cnt = 0
+    return (any_main.first if cnt > 0 else None), cnt
+
+
+async def _popup_ok(popup) -> bool:
+    try:
+        if await popup.count() == 0:
+            return False
+        if not await popup.is_visible():
+            return False
+        has_list = await popup.locator("div.ss-list").count() > 0
+        has_input = await popup.locator("div.ss-search input, input[type='search']").count() > 0
+        return bool(has_list and has_input)
+    except Exception:
+        return False
+
+
+async def _get_popup_for_ss_main(page, ss_main):
+    if ss_main is None:
+        return None, False, False
+
+    # sibling ss-content
+    try:
+        sib = ss_main.locator("xpath=following-sibling::div[contains(@class,'ss-content')]").first
+        if await _popup_ok(sib):
+            return sib, True, True
+    except Exception:
+        pass
+
+    # parent siblings up to 3 levels
+    parent = ss_main
+    for _ in range(3):
         try:
-            await _human_click(page, inp)
+            parent = parent.locator("xpath=..")
+            sib = parent.locator("xpath=following-sibling::div[contains(@class,'ss-content')]").first
+            if await _popup_ok(sib):
+                return sib, True, True
         except Exception:
             pass
 
-    for _ in range(80):  # ~8s
+    # fallback: last visible popup, prefer one with options
+    try:
+        visible = page.locator("div.ss-content:visible")
+        vcnt = await visible.count()
+        if vcnt > 0:
+            for i in range(vcnt):
+                cand = visible.nth(i)
+                try:
+                    if await cand.locator("div.ss-option:visible").count() > 0 and await _popup_ok(cand):
+                        return cand, True, False
+                except Exception:
+                    pass
+            last = visible.nth(vcnt - 1)
+            if await _popup_ok(last):
+                return last, True, False
+    except Exception:
+        pass
+
+    return None, False, False
+
+
+async def _ensure_np_dropdown_open(page, ss_main, timeout_ms: int = 2500):
+    if ss_main is None:
+        return None, False, False
+    try:
+        await _human_click(page, ss_main)
+    except Exception:
         try:
-            if popup is None:
-                popup = await _get_branch_popup(page, inp=inp)
-                opts = (
-                    popup.locator('div.ss-list .ss-option:visible')
-                    if popup is not None
-                    else page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
-                )
-            if await opts.count() > 0:
+            await ss_main.click(force=True)
+        except Exception:
+            return None, False, False
+
+    checks = max(5, int(timeout_ms / 100))
+    for _ in range(checks):
+        popup, ok, sibling = await _get_popup_for_ss_main(page, ss_main)
+        if ok and popup is not None:
+            return popup, True, sibling
+        await page.wait_for_timeout(100)
+    return None, False, False
+
+
+async def _get_np_search_input(popup):
+    if popup is None:
+        return None
+    return popup.locator("div.ss-search input, input[type='search']").first
+
+
+async def _wait_options_visible(page, options, timeout_ms: int = 2500) -> bool:
+    checks = max(5, int(timeout_ms / 100))
+    for _ in range(checks):
+        try:
+            if await options.count() > 0:
                 return True
         except Exception:
             pass
         await page.wait_for_timeout(100)
-
     return False
 
 
-async def _wait_suggestions_list(page, popup=None):
-    if popup is None:
-        popup = await _get_branch_popup(page)
-
-    slim_opts = (
-        popup.locator('div.ss-list .ss-option:visible')
-        if popup is not None
-        else page.locator('div.ss-content:visible div.ss-list .ss-option:visible')
-    )
-
-    select2_opts = page.locator('ul.select2-results__options:visible li.select2-results__option:visible')
-    role_opts = page.locator('[role="listbox"]:visible [role="option"]:visible')
-
-    candidates = [slim_opts, select2_opts, role_opts]
-
-    for _ in range(120):  # ~12 секунд
-        for c in candidates:
-            try:
-                if await c.count() > 0:
-                    txt = (await c.first.inner_text()).strip()
-                    if len(txt) >= 3:
-                        return c
-            except Exception:
-                pass
-        await page.wait_for_timeout(100)
-
-    return None
+def _selected_text_ok(selected_txt: str, kind: str, num: str, must_tokens: list[str]) -> bool:
+    if not selected_txt:
+        return False
+    st = _norm(selected_txt)
+    if "введіть" in st:
+        return False
+    # must_contain tokens
+    for t in must_tokens:
+        if t and t not in st:
+            return False
+    # strict numeric validation for branches
+    if kind == "branch" and num:
+        # require 'Відділення №<n>' and avoid address numbers like 9/2
+        strict = re.compile(rf"^\s*Відділення\s*№\s*{re.escape(num)}(?!\d)", re.IGNORECASE)
+        if strict.search(selected_txt):
+            return True
+        return False
+    return True
 
 
-async def _find_branch_input(page):
-    sec = await _delivery_np_section(page)
+def _is_placeholder(text: str) -> bool:
+    return "введіть" in _norm(text)
 
-    trigger = None
 
-    cand = sec.locator(
-        'div.ss-main:has-text("Введіть вулицю або номер відділення"), '
-        'div.ss-main:has-text("Введіть вулицю")'
-    ).first
-    if await cand.count() > 0:
-        trigger = cand
-
-    if trigger is None:
-        opener_text = sec.get_by_text("Введіть вулицю або номер відділення", exact=False).first
-        if await opener_text.count() > 0:
-            trigger = opener_text
-
-    if trigger is None:
-        cand2 = page.locator(
-            'div.ss-main:has-text("Введіть вулицю або номер відділення"), '
-            'div.ss-main:has-text("Введіть вулицю")'
-        ).first
-        if await cand2.count() > 0:
-            trigger = cand2
-
-    if trigger is None:
-        return None
-
+async def _get_selected_text(sec, ss_main=None) -> str:
+    if ss_main is not None:
+        loc = ss_main.locator("div.ss-single").first
+    else:
+        loc = sec.locator("div.ss-main .ss-single, .ss-single").first
     try:
-        await _human_click(page, trigger)
+        if await loc.count() == 0:
+            return ""
+        return (await loc.inner_text()).strip()
     except Exception:
-        pass
-
-    await page.wait_for_timeout(120)
-
-    for _ in range(120):  # ~12 секунд
-        popup = await _get_branch_popup(page)
-        if popup is not None:
-            try:
-                inp = popup.locator('input[type="search"]').first
-                if await inp.count() > 0 and await inp.is_visible():
-                    return inp
-            except Exception:
-                pass
-        await page.wait_for_timeout(100)
-
-    return None
+        return ""
 
 
 async def main():
     kind = _infer_branch_kind(BRANCH_QUERY)  # "branch" or "point"
-    matcher, _strict_re, branch_no = _build_matcher(kind, BRANCH_QUERY, BRANCH_MUST_CONTAIN)
+    matcher, strict_re, branch_no = _build_matcher(kind, BRANCH_QUERY, BRANCH_MUST_CONTAIN)
+    TRY_ENTER = os.getenv("BIOTUS_BRANCH_TRY_ENTER", "0") == "1"
 
     async with async_playwright() as p:
         browser, context, page = await _connect(p)
@@ -524,183 +530,262 @@ async def main():
         await page.wait_for_timeout(500)
         await page.screenshot(path=str(ART / "step6_0_before_branch.png"), full_page=True)
 
-        await _ensure_np_branch_mode(page)
-        await page.wait_for_timeout(300)
-        await page.screenshot(path=str(ART / "step6_0a_after_np_selected.png"), full_page=True)
+        sec = await _delivery_np_section(page)
+        last_err = None
+        last_screen = None
 
-        inp = await _find_branch_input(page)
-        if not inp:
-            await page.screenshot(path=str(ART / "step6_err_no_input.png"), full_page=True)
+        # What we type into the search field:
+        # - for numeric branch/point: type 'Відділення №<n>' or 'Пункт №<n>'
+        # - for address-style point: type ONLY the address part (without 'Пункт приймання-видачі:'),
+        #   then pick the FIRST suggestion.
+        query_to_type = BRANCH_QUERY
+
+        # numeric-only query -> keep old behavior
+        if BRANCH_QUERY.strip().isdigit():
+            if kind == "branch":
+                query_to_type = f"Відділення №{BRANCH_QUERY.strip()}"
+            else:
+                query_to_type = f"Пункт №{BRANCH_QUERY.strip()}"
+
+        # address-style point query: 'Пункт ...: <address>'
+        addr_mode = (kind == "point") and (":" in (BRANCH_QUERY or "")) and (not _branch_number_from_query(BRANCH_QUERY))
+        if addr_mode:
+            addr_part = BRANCH_QUERY.split(":", 1)[1].strip()
+            # normalize common prefixes
+            addr_part = re.sub(r"^\s*вул\.?\s+", "вул. ", addr_part, flags=re.IGNORECASE)
+            query_to_type = addr_part
+
+        # fallback queries for numbered branches/points
+        fallback_queries: list[str] = []
+        num = _branch_number_from_query(BRANCH_QUERY)
+        if num:
+            qn = BRANCH_QUERY.lower()
+            if "пункт приймання-видачі" in qn:
+                fallback_queries = [f"№{num}", num]
+            elif "пункт" in qn:
+                fallback_queries = [f"№{num}", num]
+            elif "відділен" in qn:
+                fallback_queries = [f"№{num}", num]
+            else:
+                fallback_queries = [f"№{num}", num]
+
+        search_queries = [query_to_type]
+        for fq in fallback_queries:
+            if fq and fq not in search_queries:
+                search_queries.append(fq)
+
+        for attempt in range(1, 4):
             try:
-                sec = await _delivery_np_section(page)
-                print("[DEBUG] url=", page.url)
-                print("[DEBUG] title=", await page.title())
-
-                wh = page.locator('select[name="extension_attributes_warehouse_ref"]')
-                print("[DEBUG] warehouse select count:", await wh.count())
-                if await wh.count() > 0:
-                    try:
-                        outer = await wh.first.evaluate('e=>e.outerHTML')
-                        print("[DEBUG] warehouse select outerHTML~", outer.replace("\n", " ")[:300], "...")
-                    except Exception:
-                        pass
-
-                ss = sec.locator('div.ss-main')
-                print("[DEBUG] ss-main in section:", await ss.count())
-
-                fields = page.locator(
-                    'input:visible, textarea:visible, select:visible, [contenteditable="true"]:visible, [role="textbox"]:visible'
-                )
-                n = await fields.count()
-                print("[DEBUG] visible fields:", n)
-                for i in range(min(n, 30)):
-                    el = fields.nth(i)
-                    tag = await el.evaluate('e=>e.tagName')
-                    ph = await el.get_attribute('placeholder')
-                    aria = await el.get_attribute('aria-label')
-                    name = await el.get_attribute('name')
-                    _id = await el.get_attribute('id')
-                    cls = await el.get_attribute('class')
-                    role = await el.get_attribute('role')
-                    print(f"  [{i}] <{tag}> id={_id} name={name} role={role} placeholder={ph} aria={aria} class={cls}")
-            except Exception as e:
-                print("[DEBUG] dump failed:", e)
-
-            raise RuntimeError(
-                "Не смог открыть/найти поле поиска отделения/пункта. "
-                "Открой страницу checkout, выбери 'Нова пошта до відділення' и убедись, что поле 'Введіть вулицю...' доступно. "
-                "Смотри artifacts/step6_err_no_input.png"
-            )
-
-        await inp.scroll_into_view_if_needed()
-
-        # Ветка 1: если это <select>, выбираем опцию напрямую.
-        try:
-            tag = (await inp.evaluate('e=>e.tagName')).upper()
-        except Exception:
-            tag = ""
-
-        if tag == "SELECT":
-            await page.screenshot(path=str(ART / "step6_0b_branch_select_found.png"), full_page=True)
-
-            opt_loc = inp.locator("option")
-            opt_count = await opt_loc.count()
-            chosen_value = None
-            chosen_label = None
-
-            for i in range(min(opt_count, 500)):
-                o = opt_loc.nth(i)
+                await _ensure_np_branch_mode(page)
+                # ensure mode by clicking label/radio too
                 try:
-                    label = (await o.inner_text()).strip()
+                    label = sec.locator('label:has-text("Нова пошта до відділення")').first
+                    if await label.count() > 0:
+                        await _human_click(page, label)
                 except Exception:
-                    continue
-                if not label:
-                    continue
-                if not matcher(label):
-                    continue
+                    pass
                 try:
-                    val = await o.get_attribute("value")
+                    radio = sec.locator('input[type="radio"]:visible').first
+                    if await radio.count() > 0:
+                        await _human_click(page, radio)
                 except Exception:
-                    val = None
-                if val:
-                    chosen_value = val
-                    chosen_label = label
+                    pass
+
+                await _wait_np_section_idle(page, sec, timeout_ms=2500)
+                if attempt == 1:
+                    await page.screenshot(path=str(ART / "step6_0a_after_np_selected.png"), full_page=True)
+
+                # Early exit if already selected
+                try:
+                    selected_now = (await sec.locator("div.ss-main").first.inner_text()).strip()
+                except Exception:
+                    selected_now = ""
+                if selected_now and not _is_placeholder(selected_now):
+                    if addr_mode or matcher(selected_now):
+                        await page.screenshot(path=str(ART / "step6_already_selected.png"), full_page=True)
+                        print("OK: branch already selected, skipping step6 selection")
+                        if not USE_CDP:
+                            await browser.close()
+                        return
+
+                ss_main, ss_main_count = await _find_np_ss_main(sec)
+
+                # Ensure ss-main is not disabled
+                trigger = ss_main
+                try:
+                    if trigger is not None and await trigger.count() > 0:
+                        cls = await trigger.get_attribute("class")
+                        aria = await trigger.get_attribute("aria-disabled")
+                        if (cls and "ss-disabled" in cls) or (aria == "true"):
+                            await page.wait_for_timeout(200)
+                            await page.keyboard.press("Escape")
+                            await page.wait_for_timeout(200)
+                            continue
+                except Exception:
+                    pass
+
+                # Early exit: if native <select> exists in section, use it
+                sel = sec.locator('select[name="extension_attributes_warehouse_ref"]:visible').first
+                if await sel.count() > 0:
+                    await page.screenshot(path=str(ART / "step6_0b_branch_select_found.png"), full_page=True)
+                    opt_loc = sel.locator("option")
+                    opt_count = await opt_loc.count()
+                    chosen_value = None
+                    chosen_label = None
+
+                    for i in range(min(opt_count, 500)):
+                        o = opt_loc.nth(i)
+                        try:
+                            label_txt = (await o.inner_text()).strip()
+                        except Exception:
+                            continue
+                        if not label_txt:
+                            continue
+                        if not matcher(label_txt):
+                            continue
+                        try:
+                            val = await o.get_attribute("value")
+                        except Exception:
+                            val = None
+                        if val:
+                            chosen_value = val
+                            chosen_label = label_txt
+                            break
+
+                    if not chosen_value:
+                        await page.screenshot(path=str(ART / "step6_err_no_match.png"), full_page=True)
+                        raise RuntimeError(
+                            f"Не нашёл подходящий пункт ({kind}) для запроса '{BRANCH_QUERY}' в <select>. "
+                            f"Проверь step6_err_no_match.png"
+                        )
+
+                    await sel.select_option(value=chosen_value)
+                    await page.wait_for_timeout(300)
+                    await page.screenshot(path=str(ART / "step6_2_after_selected.png"), full_page=True)
+                    print(f"OK: пункт/отделение выбрано (select, {kind}). label='{chosen_label}'")
+                    last_err = None
                     break
 
-            if not chosen_value:
-                await page.screenshot(path=str(ART / "step6_err_no_match.png"), full_page=True)
-                raise RuntimeError(
-                    f"Не нашёл подходящий пункт ({kind}) для запроса '{BRANCH_QUERY}' в <select>. "
-                    f"Проверь step6_err_no_match.png"
+                popup, opened, popup_sibling = await _ensure_np_dropdown_open(page, ss_main)
+                ss_open = False
+                try:
+                    ss_open = await popup.is_visible() if popup is not None else False
+                except Exception:
+                    ss_open = False
+
+                search_inp = await _get_np_search_input(popup)
+                has_search = False
+                try:
+                    if search_inp and await search_inp.count() > 0:
+                        has_search = True
+                except Exception:
+                    has_search = False
+
+                visible_contents = 0
+                try:
+                    visible_contents = await page.locator("div.ss-content:visible").count()
+                except Exception:
+                    visible_contents = 0
+
+                opts = popup.locator("div.ss-option:visible") if popup is not None else sec.locator("div.ss-content:visible .ss-option:visible")
+                try:
+                    opt_count = await opts.count()
+                except Exception:
+                    opt_count = 0
+
+                print(
+                    f"[step6] attempt {attempt}: query='{search_queries[min(attempt - 1, len(search_queries) - 1)]}' "
+                    f"ss_main_count={ss_main_count} popup_sibling={popup_sibling} dropdown_open={opened} "
+                    f"ss_content={ss_open} search_input={has_search} visible_popups={visible_contents} "
+                    f"options={opt_count}"
                 )
 
-            await inp.select_option(value=chosen_value)
-            await page.wait_for_timeout(500)
-            await page.screenshot(path=str(ART / "step6_2_after_selected.png"), full_page=True)
-            print(f"OK: пункт/отделение выбрано (select, {kind}). label='{chosen_label}'")
+                if not opened:
+                    last_screen = ART / f"step6_retry_dropdown_not_open_{attempt}.png"
+                    await page.screenshot(path=str(last_screen), full_page=True)
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(300)
+                    continue
 
-        else:
-            # Ветка 2: кастомный инпут/комбобокс (SlimSelect)
-            popup = await _get_branch_popup(page, inp=inp)
+                await page.screenshot(path=str(ART / "step6_dbg_dropdown_open.png"), full_page=True)
 
-            # What we type into the search field:
-            # - for numeric branch/point: type 'Відділення №<n>' or 'Пункт №<n>'
-            # - for address-style point: type ONLY the address part (without 'Пункт приймання-видачі:'),
-            #   then pick the FIRST suggestion.
-            query_to_type = BRANCH_QUERY
+                if not has_search:
+                    last_screen = ART / f"step6_retry_no_search_input_{attempt}.png"
+                    await page.screenshot(path=str(last_screen), full_page=True)
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(300)
+                    continue
 
-            # numeric-only query -> keep old behavior
-            if BRANCH_QUERY.strip().isdigit():
-                if kind == "branch":
-                    query_to_type = f"Відділення №{BRANCH_QUERY.strip()}"
-                else:
-                    query_to_type = f"Пункт №{BRANCH_QUERY.strip()}"
+                # choose query for this attempt (primary + fallback)
+                q_idx = min(attempt - 1, len(search_queries) - 1)
+                q_to_type = search_queries[q_idx]
 
-            # address-style point query: 'Пункт ...: <address>'
-            addr_mode = (kind == "point") and (":" in (BRANCH_QUERY or "")) and (not _branch_number_from_query(BRANCH_QUERY))
-            if addr_mode:
-                addr_part = BRANCH_QUERY.split(":", 1)[1].strip()
-                # normalize common prefixes
-                addr_part = re.sub(r"^\s*вул\.?\s+", "вул. ", addr_part, flags=re.IGNORECASE)
-                query_to_type = addr_part
-
-            last_err = None
-
-            for attempt in range(1, 4):
+                await search_inp.click(force=True)
+                await page.wait_for_timeout(120)
                 try:
-                    await _human_click(page, inp)
-                    await page.wait_for_timeout(150)
+                    await search_inp.fill("")
+                except Exception:
+                    await page.keyboard.press("Meta+A")
+                    await page.keyboard.press("Backspace")
 
-                    try:
-                        await inp.fill("")
-                    except Exception:
-                        await page.keyboard.press("Meta+A")
-                        await page.keyboard.press("Backspace")
+                await search_inp.fill(q_to_type)
+                await page.wait_for_timeout(200)
+                try:
+                    val = await search_inp.input_value()
+                    print(f"[step6] attempt {attempt}: input_value='{val}'")
+                except Exception:
+                    pass
 
-                    await inp.type(query_to_type, delay=25)
-                    await page.wait_for_timeout(250)
+                opts = popup.locator("div.ss-option:visible")
+                found = await _wait_options_visible(page, opts, timeout_ms=8000)
+                if not found:
+                    last_screen = ART / f"step6_retry_no_options_{attempt}.png"
+                    await page.screenshot(path=str(last_screen), full_page=True)
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(300)
+                    continue
 
-                    popup = await _get_branch_popup(page, inp=inp)
+                count_now = await opts.count()
+                print(f"[step6] attempt {attempt}: options={count_now} query='{q_to_type}'")
 
-                    opened = await _ensure_branch_dropdown_open(page, inp=inp, popup=popup)
-                    if not opened:
-                        raise RuntimeError("dropdown not opened")
-
-                    opts = await _wait_suggestions_list(page, popup=popup)
-                    if not opts:
-                        raise RuntimeError("no suggestions")
-
-                    await page.wait_for_timeout(250)
-
-                    # пробуем ENTER (иногда выбирает подсказку)
+                # optional ENTER (disabled by default)
+                if TRY_ENTER:
                     await page.keyboard.press("Enter")
-                    await page.wait_for_timeout(600)
+                    await page.wait_for_timeout(200)
 
-                    sec = await _delivery_np_section(page)
-                    selected_txt = ""
-                    try:
-                        selected_txt = (await sec.locator("div.ss-main").first.inner_text()).strip()
-                    except Exception:
-                        pass
+                selected_txt = await _get_selected_text(sec, ss_main=ss_main)
+                selected_txt2 = ""
 
-                    ok = False
-                    if selected_txt:
-                        st = _norm(selected_txt)
-                        # if still showing placeholder, nothing is selected
-                        if "введіть" not in st and matcher(selected_txt):
-                            ok = True
+                ok = False
+                must_tokens = _tokenize_must_contain(BRANCH_MUST_CONTAIN)
+                if selected_txt:
+                    if _selected_text_ok(selected_txt, kind, branch_no, must_tokens):
+                        ok = True
 
-                    # Если ENTER не сработал — кликаем по правильной опции
-                    if not ok:
-                        count = await opts.count()
-                        chosen = None
+                if not ok:
+                    count = await opts.count()
+                    chosen = None
 
-                        # Address-mode: just pick the first suggestion (what UI returned)
-                        if addr_mode:
-                            if count == 0:
-                                raise RuntimeError("no suggestions")
-                            chosen = opts.nth(0)
-                        else:
+                    if addr_mode:
+                        if count == 0:
+                            last_err = RuntimeError("no suggestions")
+                            raise last_err
+                        chosen = opts.nth(0)
+                    else:
+                        # Prefer strict match for numbered branch to avoid address number hits (e.g. 9/2)
+                        if strict_re is not None:
+                            for i in range(min(count, 80)):
+                                item = opts.nth(i)
+                                try:
+                                    txt = (await item.inner_text()).strip()
+                                except Exception:
+                                    continue
+                                if not txt:
+                                    continue
+                                if strict_re.search(txt):
+                                    chosen = item
+                                    break
+                        if chosen is None:
                             for i in range(min(count, 80)):
                                 item = opts.nth(i)
                                 try:
@@ -714,72 +799,107 @@ async def main():
                                 chosen = item
                                 break
 
-                        if not chosen:
-                            # debug: print first options to understand mismatch
-                            try:
-                                sample = []
-                                for j in range(min(await opts.count(), 10)):
-                                    t = (await opts.nth(j).inner_text()).strip()
-                                    if t:
-                                        sample.append(t)
-                                if sample:
-                                    print("[DEBUG] first options:")
-                                    for s in sample:
-                                        print("  -", s)
-                            except Exception:
-                                pass
-                            raise RuntimeError("no match")
-
-                        try:
-                            await chosen.scroll_into_view_if_needed()
-                        except Exception:
-                            pass
-
-                        await _human_click(page, chosen)
-                        await page.wait_for_timeout(650)
-                        # wait until options list collapses (selection applied)
-                        for _ in range(40):  # ~4s
-                            try:
-                                pop2 = await _get_branch_popup(page, inp=inp)
-                                if pop2 is None:
-                                    break
-                                if await pop2.locator('div.ss-list .ss-option:visible').count() == 0:
-                                    break
-                            except Exception:
-                                break
-                            await page.wait_for_timeout(100)
-
-                        # повторная проверка — SlimSelect иногда не фиксирует выбор с первого раза
-                        sec = await _delivery_np_section(page)
-                        selected_txt2 = ""
-                        try:
-                            selected_txt2 = (await sec.locator("div.ss-main").first.inner_text()).strip()
-                        except Exception:
-                            pass
-
-                        # In addr_mode we only require that placeholder is gone.
-                        if addr_mode:
-                            if not selected_txt2 or "введіть" in _norm(selected_txt2):
-                                raise RuntimeError("selected value not applied")
+                    if not chosen and not addr_mode and count > 0 and not num:
+                        if not BRANCH_MUST_CONTAIN:
+                            chosen = opts.nth(0)
                         else:
-                            if not selected_txt2 or not matcher(selected_txt2):
-                                raise RuntimeError("selected value not applied")
+                            try:
+                                first_txt = (await opts.nth(0).inner_text()).strip()
+                            except Exception:
+                                first_txt = ""
+                            must_tokens = _tokenize_must_contain(BRANCH_MUST_CONTAIN)
+                            if first_txt and all(t in _norm(first_txt) for t in must_tokens):
+                                chosen = opts.nth(0)
 
+                    if not chosen:
+                        try:
+                            sample = []
+                            for j in range(min(await opts.count(), 10)):
+                                t = (await opts.nth(j).inner_text()).strip()
+                                if t:
+                                    sample.append(t)
+                            if sample:
+                                print("[DEBUG] first options:")
+                                for s in sample:
+                                    print("  -", s)
+                        except Exception:
+                            pass
+                        last_err = RuntimeError("no match")
+                        raise last_err
+
+                    try:
+                        await chosen.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
+
+                    await chosen.click(force=True)
+                    await page.wait_for_timeout(200)
+                    # Wait for selected text to update (dropdown may stay open)
+                    selected_txt2 = ""
+                    updated = False
+                    for _ in range(25):  # ~2.5s
+                        selected_txt2 = await _get_selected_text(sec, ss_main=ss_main)
+                        if _selected_text_ok(selected_txt2, kind, branch_no, must_tokens):
+                            updated = True
+                            break
+                        await page.wait_for_timeout(100)
+
+                if updated:
+                    # dropdown may remain open; close and proceed
+                    try:
+                        await page.keyboard.press("Escape")
+                    except Exception:
+                        pass
+                    # success, stop retrying
+                    selected_final = selected_txt2 or selected_txt
                     await page.screenshot(path=str(ART / "step6_2_after_selected.png"), full_page=True)
                     print(
-                        f"OK: пункт/отделение выбрано ({kind}). query='{BRANCH_QUERY}', must='{BRANCH_MUST_CONTAIN}'"
+                        f"OK: пункт/отделение выбрано ({kind}). query='{BRANCH_QUERY}', must='{BRANCH_MUST_CONTAIN}', selected='{selected_final}'"
                     )
                     last_err = None
                     break
+                else:
+                    await page.screenshot(
+                        path=str(ART / f"step6_retry_selected_not_applied_{attempt}.png"),
+                        full_page=True,
+                    )
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(300)
+                    continue
 
-                except Exception as e:
-                    last_err = e
-                    await page.screenshot(path=str(ART / f"step6_retry_{attempt}.png"), full_page=True)
-                    await page.wait_for_timeout(500)
+                    if addr_mode:
+                        if not selected_txt2 or "введіть" in _norm(selected_txt2):
+                            last_err = RuntimeError("selected value not applied")
+                            raise last_err
+                    else:
+                        if not _selected_text_ok(selected_txt2, kind, branch_no, must_tokens):
+                            last_err = RuntimeError("selected value not applied")
+                            raise last_err
 
-            if last_err is not None:
-                await page.screenshot(path=str(ART / "step6_err_no_match.png"), full_page=True)
-                raise RuntimeError(f"Не удалось стабильно выбрать пункт/отделение после 3 попыток: {last_err}")
+                selected_final = selected_txt2 or selected_txt
+                await page.screenshot(path=str(ART / "step6_2_after_selected.png"), full_page=True)
+                print(
+                    f"OK: пункт/отделение выбрано ({kind}). query='{BRANCH_QUERY}', must='{BRANCH_MUST_CONTAIN}', selected='{selected_final}'"
+                )
+                last_err = None
+                break
+
+            except Exception as e:
+                last_err = e
+                if last_screen is None:
+                    last_screen = ART / f"step6_retry_{attempt}.png"
+                    await page.screenshot(path=str(last_screen), full_page=True)
+                await page.keyboard.press("Escape")
+                await page.wait_for_timeout(300)
+
+        if last_err is not None:
+            if last_screen is None:
+                last_screen = ART / "step6_err_no_match.png"
+                await page.screenshot(path=str(last_screen), full_page=True)
+            raise RuntimeError(
+                f"Не удалось стабильно выбрать пункт/отделение после 3 попыток: {last_err}. "
+                f"Смотри {last_screen.name}"
+            )
 
 
 if __name__ == "__main__":

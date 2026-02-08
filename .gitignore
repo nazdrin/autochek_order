@@ -14,3 +14,42 @@ artifacts/
 
 # mac
 .DS_Store
+
+# python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+
+# logs
+*.log
+logs/
+
+# build artifacts
+dist/
+build/
+
+# playwright
+playwright-report/
+test-results/
+trace.zip
+traces/
+videos/
+screenshots/
+
+# node
+node_modules/
+
+# local state / outputs
+.orch_state.json
+.biotus_state.json
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

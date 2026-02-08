@@ -99,8 +99,8 @@ async def open_city_dropdown(page):
     await ss_main.wait_for(state="visible", timeout=TIMEOUT_MS)
     await ss_main.click(force=True)
 
-    # Ждём открытия контента (в SlimSelect это .ss-content)
-    await page.locator(".ss-content:visible").first.wait_for(state="visible", timeout=TIMEOUT_MS)
+    # Ждём открытия контента (в SlimSelect это .ss-content) — короткое ожидание
+    await page.locator(".ss-content:visible").first.wait_for(state="visible", timeout=min(TIMEOUT_MS, 3000))
 
 
 async def get_selected_city_text(page) -> str:
@@ -121,6 +121,46 @@ async def find_city_search_input(page):
 
 async def find_city_options(page):
     return page.locator(".ss-option:visible")
+
+
+def _norm_city_type_for_compare(s: str) -> str:
+    s = norm(s)
+    if s.startswith("смт") or s.startswith("селище") or s.startswith("с-ще"):
+        return "с-ще"
+    if s.startswith("м"):
+        return "м"
+    if s.startswith("с"):
+        return "с"
+    return s
+
+
+def _extract_city_type_from_selected(txt: str) -> str:
+    # "м. Харків / Харківська обл." -> "м."
+    left = (txt or "").split("/")[0].strip().lower()
+    m = re.match(r"^(м\.?|с\.?|смт\.?|с-ще\.?|селище)", left)
+    return m.group(1) if m else ""
+
+
+def _city_type_matches(selected_text: str, city_type: str) -> bool:
+    if not city_type:
+        return True
+    sel_type = _extract_city_type_from_selected(selected_text)
+    if not sel_type:
+        # UI can omit type; don't fail validation in this case
+        return True
+    return _norm_city_type_for_compare(sel_type) == _norm_city_type_for_compare(city_type)
+
+
+async def _wait_options_visible(options, timeout_ms: int) -> bool:
+    deadline = timeout_ms / 100
+    for _ in range(int(deadline)):
+        try:
+            if await options.count() > 0:
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(0.1)
+    return False
 
 
 async def choose_best_option(
@@ -319,56 +359,52 @@ async def main():
 
         ok_structured = True if is_kyiv else (_contains_all(cur_n, structured_need) if structured_need else True)
         ok_legacy = _contains_all(cur_n, must_tokens) if must_tokens and (not structured_need or is_kyiv) else True
+        ok_type = _city_type_matches(current, CITY_TYPE)
 
-        if ok_city and ok_structured and ok_legacy:
+        if ok_city and ok_structured and ok_legacy and ok_type:
             print(f"OK: city already selected. current='{current}'")
             if not USE_CDP:
                 await browser.close()
             return
 
-        # 2) Открываем dropdown
-        await open_city_dropdown(page)
+        # 2) Открываем dropdown + ввод (retry)
+        options = None
+        last_err = None
+        for attempt in range(1, 4):
+            try:
+                await open_city_dropdown(page)
+                city_input = await find_city_search_input(page)
+                if await city_input.count() == 0:
+                    await page.screenshot(path=str(ART / f"step5_retry_no_input_{attempt}.png"), full_page=True)
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(250)
+                    raise RuntimeError("city input not found")
 
-        # 3) Находим search input и вводим запрос
-        city_input = await find_city_search_input(page)
-        if await city_input.count() == 0:
-            await page.screenshot(path=str(ART / "step5_3_no_city_input.png"), full_page=True)
-            raise RuntimeError(
-                "Не нашёл SlimSelect input для поиска города (.ss-search input). "
-                "См. artifacts/step5_3_no_city_input.png"
-            )
+                await city_input.click(force=True)
+                # Fill should be driven by the actual city name (plus optional type) when structured inputs are used.
+                # CITY_QUERY already follows the precedence rules above.
+                await city_input.fill("")
+                await city_input.fill(CITY_QUERY)
+                await page.wait_for_timeout(200)  # SlimSelect debounce (fast)
 
-        await city_input.click(force=True)
-        # Fill should be driven by the actual city name (plus optional type) when structured inputs are used.
-        # CITY_QUERY already follows the precedence rules above.
-        await city_input.fill("")
-        await city_input.fill(CITY_QUERY)
-        await page.wait_for_timeout(150)  # SlimSelect debounce (faster)
+                options = await find_city_options(page)
+                found = await _wait_options_visible(options, 2500)
+                if not found:
+                    await page.screenshot(path=str(ART / f"step5_retry_no_options_{attempt}.png"), full_page=True)
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(250)
+                    raise RuntimeError("no options")
 
-        # 4) Ждём появления опций (они могут фильтроваться/подгружаться)
-        options = await find_city_options(page)
-
-        found = False
-        # Fast phase (~4s)
-        for _ in range(20):
-            if await options.count() > 0:
-                found = True
+                last_err = None
                 break
-            await page.wait_for_timeout(200)
-        # Slow fallback (~6s)
-        if not found:
-            for _ in range(12):
-                if await options.count() > 0:
-                    found = True
-                    break
-                await page.wait_for_timeout(500)
+            except Exception as e:
+                last_err = e
 
-        await page.screenshot(path=str(ART / "step5_3_city_dropdown.png"), full_page=True)
-
-        if not found:
+        if last_err is not None or options is None:
+            await page.screenshot(path=str(ART / "step5_3_city_dropdown.png"), full_page=True)
             raise RuntimeError(
-                "После ввода города не появились опции SlimSelect (.ss-option). "
-                "См. artifacts/step5_3_city_dropdown.png"
+                "После ввода города не появились опции SlimSelect (.ss-option) "
+                "после 3 попыток. См. artifacts/step5_3_city_dropdown.png"
             )
 
         # 5) Выбираем лучшую опцию
@@ -391,19 +427,22 @@ async def main():
 
         # 6) Ждём, пока SlimSelect зафиксирует выбор (dropdown закроется) — быстро и надёжно
         try:
-            await page.locator(".ss-content:visible").first.wait_for(state="hidden", timeout=min(TIMEOUT_MS, 5000))
+            await page.locator(".ss-content:visible").first.wait_for(state="hidden", timeout=3000)
         except Exception:
             # Fallback: small pause to let UI settle
             await page.wait_for_timeout(200)
 
         # проверяем выбранный текст из ss-single
-        after = await get_selected_city_text(page)
-        if not after:
-            await page.wait_for_timeout(200)
+        after = ""
+        for _ in range(25):  # ~2.5s
             after = await get_selected_city_text(page)
+            if after and norm(CITY_QUERY) in norm(after):
+                break
+            await page.wait_for_timeout(100)
         await page.screenshot(path=str(ART / "step5_3_after_city_selected.png"), full_page=True)
 
-        if norm(CITY_QUERY) not in norm(after):
+        ok_type_after = _city_type_matches(after, CITY_TYPE)
+        if (norm(CITY_QUERY) not in norm(after)) or (not ok_type_after):
             print(f"WARN: city selection may not be fixed. after='{after}'. Check step5_3_after_city_selected.png")
         else:
             mode = "STRUCTURED" if (CITY_AREA or CITY_REGION) else ("ADVANCED" if must_tokens else "SIMPLE")
