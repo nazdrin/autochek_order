@@ -493,14 +493,34 @@ def build_branch_query_from_shipping(shipping_address: str, fallback_address: st
     s = _normalize_spaces(s)
     s_lower = s.casefold()
 
+    def _normalize_no_markers(text: str) -> str:
+        # Normalize various "number" markers to a single "№"
+        t = text
+        t = re.sub(r"(?<!\w)N\s*[º°]\s*", "№", t, flags=re.IGNORECASE)
+        t = re.sub(r"(?<!\w)N\s*[oо]\s*", "№", t, flags=re.IGNORECASE)
+        t = re.sub(r"№\s*", "№", t)
+        return t
+
     def extract_number(ss: str) -> str | None:
-        m = re.search(r"№\s*(\d+)", ss)
-        if m:
-            return m.group(1)
-        m2 = re.search(r"\b(\d{1,6})\b", ss)
+        s_norm = _normalize_no_markers(ss)
+        matches = list(re.finditer(r"№\s*(\d{1,6})", s_norm))
+        if matches:
+            for m in matches:
+                num = m.group(1)
+                if 4 <= len(num) <= 6:
+                    return num
+            return matches[0].group(1)
+        m2 = re.search(r"\b(\d{4,6})\b", s_norm)
         if m2:
             return m2.group(1)
+        m3 = re.search(r"\b(\d{1,3})\b", s_norm)
+        if m3:
+            return m3.group(1)
         return None
+
+    if os.environ.get("ORCH_DEBUG") == "1":
+        dbg_num = extract_number(s)
+        print(f"[ORCH_DEBUG] build_branch_query_from_shipping: src='{src}' num='{dbg_num}'")
 
     def after_colon_tail(ss: str) -> str:
         # If we have "...: address" return only address part.
