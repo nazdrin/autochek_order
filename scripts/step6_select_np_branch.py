@@ -206,7 +206,7 @@ def _build_matcher(kind: str, query: str, must_contain: str):
 
     if kind == "branch" and has_num:
         strict_re = re.compile(
-            rf"^\s*Відділення\s*№\s*{re.escape(num)}(?!\d)",
+            rf"^\s*(?:Мобільне\s+)?Відділення\s*№\s*{re.escape(num)}(?!\d)",
             re.IGNORECASE,
         )
 
@@ -243,10 +243,11 @@ def _build_matcher(kind: str, query: str, must_contain: str):
         if not option_text:
             return False
 
-        tn = _norm(option_text)
+        tn_raw = re.sub(r"\s*\(до [^)]+\)\s*", " ", option_text, flags=re.IGNORECASE)
+        tn_clean = _norm(tn_raw)
 
         for t in must_tokens:
-            if t not in tn:
+            if t not in tn_clean:
                 return False
 
         # строгий номер
@@ -255,7 +256,7 @@ def _build_matcher(kind: str, query: str, must_contain: str):
 
         # --- ADDRESS POINT (ключевой кейс Дорошенка) ---
         if addr_mode:
-            tn_addr = norm_addr(option_text)
+            tn_addr = norm_addr(tn_raw)
             # Must contain all strong tokens (street name etc.)
             if addr_tokens and not all(tok in tn_addr for tok in addr_tokens):
                 return False
@@ -266,10 +267,10 @@ def _build_matcher(kind: str, query: str, must_contain: str):
 
         # обычный пункт
         if kind == "point":
-            return qn in tn
+            return qn in tn_clean
 
         # отделение
-        return qn in tn
+        return qn in tn_clean
 
     return matches, strict_re, num
 
