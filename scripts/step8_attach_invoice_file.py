@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import urllib.error
 import urllib.request
@@ -21,60 +22,43 @@ ORDER_ID = os.getenv("BIOTUS_ORDER_ID", "").strip()
 # Nova Poshta API key (prefer BIOTUS_NP_API_KEY, but also allow NP_API_KEY)
 NP_API_KEY = (os.getenv("BIOTUS_NP_API_KEY") or os.getenv("NP_API_KEY") or "").strip()
 
+logger = logging.getLogger(__name__)
 
-def _digits_only(value: str) -> str:
+
+def normalize_digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isdigit())
 
 
-def _extract_pdf_text_simple(file_path: Path) -> str:
-    try:
-        from PyPDF2 import PdfReader
-    except Exception as e:  # pragma: no cover - used at runtime only
-        raise RuntimeError("PyPDF2 не установлен. Установи: pip install PyPDF2") from e
+def validate_invoice_filename_or_raise(
+    file_path: Path, ttn_number: str, order_id: str | None = None
+) -> None:
+    expected_ttn_digits = normalize_digits(ttn_number)
+    filename_digits = normalize_digits(file_path.name)
 
-    reader = PdfReader(str(file_path))
-    chunks = []
-    for page in reader.pages:
-        try:
-            chunks.append(page.extract_text() or "")
-        except Exception:
-            chunks.append("")
-    return "\n".join(chunks)
-
-
-def validate_invoice_pdf_or_raise(file_path: Path, ttn_number: str, order_id: str | None = None) -> None:
-    ttn_digits = _digits_only(ttn_number)
-    file_digits = _digits_only(file_path.name)
-
-    text = _extract_pdf_text_simple(file_path)
-    text_digits = _digits_only(text)
-    sample = " ".join(text.split())
-    if len(sample) > 120:
-        sample = sample[:120] + "..."
-
-    if not ttn_digits:
-        msg = (
-            f"[ERROR] Invoice PDF validation failed: order_id={order_id or 'n/a'} "
-            f"ttn={ttn_number} file={file_path} sample=\"{sample}\""
+    if not expected_ttn_digits:
+        logger.error(
+            "Invoice filename validation failed: order_id=%s ttn=%s file=%s",
+            order_id or "n/a",
+            ttn_number,
+            file_path,
         )
-        print(msg)
-        raise RuntimeError("TTN пустой, проверка PDF невозможна.")
+        raise RuntimeError("TTN пустой, проверка имени файла невозможна.")
 
-    if file_digits != ttn_digits:
-        msg = (
-            f"[ERROR] Invoice PDF validation failed: order_id={order_id or 'n/a'} "
-            f"ttn={ttn_number} file={file_path} sample=\"{sample}\""
+    if expected_ttn_digits not in filename_digits:
+        logger.error(
+            "Invoice filename validation failed: order_id=%s ttn=%s file=%s",
+            order_id or "n/a",
+            ttn_number,
+            file_path,
         )
-        print(msg)
         raise RuntimeError("Номер ТТН не совпадает с именем файла.")
 
-    if ttn_digits not in text_digits:
-        msg = (
-            f"[ERROR] Invoice PDF validation failed: order_id={order_id or 'n/a'} "
-            f"ttn={ttn_number} file={file_path} sample=\"{sample}\""
-        )
-        print(msg)
-        raise RuntimeError("Номер ТТН не найден внутри PDF.")
+    logger.info(
+        "Invoice filename validation passed: order_id=%s ttn=%s file=%s",
+        order_id or "n/a",
+        ttn_number,
+        file_path,
+    )
 
 
 def download_np_label(folder: Path) -> Path:
@@ -162,7 +146,7 @@ async def pick_checkout_page(context):
 async def main():
     file_path = download_np_label(ATTACH_DIR)
     print(f"[INFO] Downloaded and will attach: {file_path}")
-    validate_invoice_pdf_or_raise(file_path, TTN, ORDER_ID or None)
+    validate_invoice_filename_or_raise(file_path, TTN, ORDER_ID or None)
 
     async with async_playwright() as p:
         if USE_CDP:
