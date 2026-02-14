@@ -9,8 +9,11 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import math
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from zoneinfo import ZoneInfo
 
 import re
 
@@ -37,6 +40,9 @@ STEP9_CONFIRM_SCRIPT = ROOT / "scripts" / "step9_confirm_order.py"
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
 TIMEOUT_SEC = int(os.getenv("ORCH_STEP_TIMEOUT_SEC", "600"))  # общий fallback таймаут
+BIOTUS_TZ = (os.getenv("BIOTUS_TZ") or "Europe/Kyiv").strip() or "Europe/Kyiv"
+BIOTUS_PAUSE_DAY = (os.getenv("BIOTUS_PAUSE_DAY") or "").strip()
+BIOTUS_PAUSE_NIGHT = (os.getenv("BIOTUS_PAUSE_NIGHT") or "").strip()
 
 # Per-step timeouts (seconds). Can be overridden via env ORCH_TIMEOUT_<STEP_KEY>.
 # Example: ORCH_TIMEOUT_STEP6_BRANCH=20
@@ -64,6 +70,65 @@ def _timeout_for_step(step_key: str) -> int:
     except Exception:
         pass
     return TIMEOUT_SEC
+
+
+def parse_windows(spec: str) -> list[tuple[dtime, dtime]]:
+    spec = (spec or "").strip()
+    if not spec:
+        return []
+
+    windows: list[tuple[dtime, dtime]] = []
+    for raw_part in spec.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if "-" not in part:
+            raise ValueError(f"Invalid pause window '{part}': expected HH:MM-HH:MM")
+        start_s, end_s = (x.strip() for x in part.split("-", 1))
+        try:
+            start_t = dtime.fromisoformat(start_s)
+            end_t = dtime.fromisoformat(end_s)
+        except ValueError as e:
+            raise ValueError(f"Invalid pause window '{part}': expected HH:MM-HH:MM") from e
+        windows.append((start_t, end_t))
+    return windows
+
+
+def in_window(now: datetime, windows: list[tuple[dtime, dtime]]) -> bool:
+    now_t = now.time()
+    for start_t, end_t in windows:
+        if start_t <= end_t:
+            if start_t <= now_t < end_t:
+                return True
+        else:
+            # crosses midnight, e.g. 23:00-07:00
+            if now_t >= start_t or now_t < end_t:
+                return True
+    return False
+
+
+def seconds_until_window_end(now: datetime, windows: list[tuple[dtime, dtime]]) -> int:
+    now_t = now.time()
+    candidates: list[int] = []
+    for start_t, end_t in windows:
+        is_active = False
+        if start_t <= end_t:
+            is_active = start_t <= now_t < end_t
+            if is_active:
+                end_dt = datetime.combine(now.date(), end_t, tzinfo=now.tzinfo)
+        else:
+            is_active = now_t >= start_t or now_t < end_t
+            if is_active:
+                if now_t >= start_t:
+                    end_dt = datetime.combine(now.date() + timedelta(days=1), end_t, tzinfo=now.tzinfo)
+                else:
+                    end_dt = datetime.combine(now.date(), end_t, tzinfo=now.tzinfo)
+        if is_active:
+            delta_sec = math.ceil((end_dt - now).total_seconds())
+            candidates.append(max(0, delta_sec))
+    if not candidates:
+        return 0
+    return min(candidates)
 
 STATE_FILE = Path(os.getenv("ORCH_STATE_FILE", str(ROOT / ".orch_state.json")))
 MAX_PROCESSED_IDS = int(os.getenv("ORCH_MAX_PROCESSED_IDS", "200"))
@@ -736,6 +801,18 @@ def main() -> int:
     if not FETCH_SCRIPT.exists():
         print(f"Fetch script not found: {FETCH_SCRIPT}", file=sys.stderr)
         return 2
+    try:
+        tz = ZoneInfo(BIOTUS_TZ)
+    except Exception as e:
+        print(f"Invalid BIOTUS_TZ '{BIOTUS_TZ}': {e}", file=sys.stderr)
+        return 2
+
+    try:
+        pause_day_windows = parse_windows(BIOTUS_PAUSE_DAY)
+        pause_night_windows = parse_windows(BIOTUS_PAUSE_NIGHT)
+    except ValueError as e:
+        print(f"Invalid pause window spec: {e}", file=sys.stderr)
+        return 2
 
     required = [
         ("Step2_3 script", STEP2_3_SCRIPT),
@@ -759,6 +836,24 @@ def main() -> int:
     processed_ids: List[int] = state.get("processed_ids", [])
 
     while True:
+        now = datetime.now(tz)
+        day_active = in_window(now, pause_day_windows)
+        night_active = in_window(now, pause_night_windows)
+        if day_active or night_active:
+            labels: List[str] = []
+            if day_active:
+                labels.append("day")
+            if night_active:
+                labels.append("night")
+            seconds_to_end = seconds_until_window_end(now, pause_day_windows + pause_night_windows)
+            print(
+                f"[ORCH] Pause window active ({'/'.join(labels)}). Sleeping until end: {now.isoformat()} (seconds={seconds_to_end})"
+            )
+            if args.once:
+                return 0
+            time.sleep(seconds_to_end if seconds_to_end > 0 else POLL_SECONDS)
+            continue
+
         try:
             env = os.environ.copy()
             rc, out, err = run_python(FETCH_SCRIPT, env=env, timeout_sec=_timeout_for_step("FETCH"), args=["--raw"])
@@ -815,8 +910,27 @@ def main() -> int:
                         print(f"[ORCH] Got {len(orders)} order(s) but all already processed. Sleeping...")
                 else:
                     print(f"[ORCH] Got {len(orders)} order(s). Will process up to {len(eligible)} this cycle.")
-
+                    paused_during_batch = False
                     for order_id, order in eligible:
+                        now = datetime.now(tz)
+                        day_active = in_window(now, pause_day_windows)
+                        night_active = in_window(now, pause_night_windows)
+                        if day_active or night_active:
+                            labels: List[str] = []
+                            if day_active:
+                                labels.append("day")
+                            if night_active:
+                                labels.append("night")
+                            seconds_to_end = seconds_until_window_end(now, pause_day_windows + pause_night_windows)
+                            print(
+                                f"[ORCH] Pause window active ({'/'.join(labels)}). Sleeping until end: {now.isoformat()} (seconds={seconds_to_end})"
+                            )
+                            if args.once:
+                                return 0
+                            time.sleep(seconds_to_end if seconds_to_end > 0 else POLL_SECONDS)
+                            paused_during_batch = True
+                            break
+
                         print(f"[ORCH] Processing id={order_id}")
                         biotus_items = build_biotus_items(order)
                         print(f"[ORCH] BIOTUS_ITEMS => {biotus_items}")
@@ -868,6 +982,8 @@ def main() -> int:
                         clear_failed(state, int(order_id))
                         save_state(state)
                         print(f"[ORCH] Done pipeline for order id={order_id}.")
+                    if paused_during_batch:
+                        continue
 
         except subprocess.TimeoutExpired:
             notify_stub("[ORCH] Timeout while running a step.")
