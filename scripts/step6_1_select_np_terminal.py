@@ -24,9 +24,40 @@ TERMINAL_MUST_CONTAIN = os.getenv("BIOTUS_TERMINAL_MUST_CONTAIN", "").strip()
 
 # If SalesDrive passes something like "поштомат №48437" we must search by number only.
 _RAW_TERMINAL_QUERY = TERMINAL_QUERY
-_TERMINAL_NUM = re.search(r"\d+", _RAW_TERMINAL_QUERY or "")
-if _TERMINAL_NUM:
-    TERMINAL_QUERY = _TERMINAL_NUM.group(0)
+
+
+def _normalize_number_markers(s: str) -> str:
+    s = s or ""
+    # Normalize number markers to a single symbol so matching/extraction is stable.
+    s = re.sub(r"(?i)\bN\s*[º°]\s*(?=\d)", "№", s)
+    s = re.sub(r"(?i)\bN\s*[oо]\s*(?=\d)", "№", s)
+    s = re.sub(r"№\s*(?=\d)", "№", s)
+    return s
+
+
+def _extract_terminal_number(s: str) -> str | None:
+    s = _normalize_number_markers(s)
+
+    # Priority 1: number after explicit marker №
+    m = re.search(r"№\s*(\d{4,6})(?!\d)", s)
+    if m:
+        return m.group(1)
+
+    # Priority 2: longest (first among longest) standalone 4-6 digit group
+    groups = [m.group(0) for m in re.finditer(r"(?<!\d)\d{4,6}(?!\d)", s)]
+    if not groups:
+        return None
+    max_len = max(len(g) for g in groups)
+    for g in groups:
+        if len(g) == max_len:
+            return g
+    return None
+
+
+_NORMALIZED_TERMINAL_QUERY = _normalize_number_markers(_RAW_TERMINAL_QUERY).strip()
+_EXTRACTED_TERMINAL_NUM = _extract_terminal_number(_RAW_TERMINAL_QUERY)
+STRICT_NUMBER_MODE = bool(_EXTRACTED_TERMINAL_NUM)
+TERMINAL_QUERY = _EXTRACTED_TERMINAL_NUM if STRICT_NUMBER_MODE else _NORMALIZED_TERMINAL_QUERY
 
 # optional: if "1" and query has number -> strict match by №<num>
 TERMINAL_STRICT = os.getenv("BIOTUS_TERMINAL_STRICT", "0") == "1"
@@ -135,11 +166,10 @@ def _tokenize_tokens(s: str) -> list[str]:
 
 
 def _extract_number(s: str) -> str | None:
-    m = re.search(r"\d+", s or "")
-    return m.group(0) if m else None
+    return _extract_terminal_number(s)
 
 
-def _build_terminal_matcher(query: str, must_contain: str):
+def _build_terminal_matcher(query: str, must_contain: str, strict_number_mode: bool = False):
     q_raw = query or ""
     qn = _norm(q_raw)
     must_tokens = _tokenize_tokens(must_contain)
@@ -150,7 +180,7 @@ def _build_terminal_matcher(query: str, must_contain: str):
     # For "№1014" avoid matching 10140
     strict_re = None
     if has_num:
-        strict_re = re.compile(rf"(?:№\s*{re.escape(num)})(?!\d)", re.IGNORECASE)
+        strict_re = re.compile(rf"(?:№\s*)?(?<!\d){re.escape(num)}(?!\d)", re.IGNORECASE)
 
     # For non-number searches: use strong tokens (>=3 chars) from query
     raw_tokens = [t for t in re.split(r"[\s/,\-]+", qn) if t]
@@ -167,7 +197,7 @@ def _build_terminal_matcher(query: str, must_contain: str):
                 return False
 
         # strict by number when we have number and strict enabled OR query looks like number-only
-        if has_num and (TERMINAL_STRICT or qn.isdigit() or "№" in q_raw):
+        if has_num and (strict_number_mode or TERMINAL_STRICT or qn.isdigit() or "№" in q_raw):
             return bool(strict_re and strict_re.search(option_text))
 
         # otherwise token-based
@@ -573,8 +603,15 @@ async def main():
     if not TERMINAL_QUERY:
         raise RuntimeError("BIOTUS_TERMINAL_QUERY is empty. Set it to terminal number/text.")
 
-    matcher = _build_terminal_matcher(TERMINAL_QUERY, TERMINAL_MUST_CONTAIN)
-    query_dbg = f"raw='{_RAW_TERMINAL_QUERY}' normalized='{TERMINAL_QUERY}'"
+    matcher = _build_terminal_matcher(TERMINAL_QUERY, TERMINAL_MUST_CONTAIN, strict_number_mode=STRICT_NUMBER_MODE)
+    query_dbg = (
+        f"raw='{_RAW_TERMINAL_QUERY}' normalized_markers='{_NORMALIZED_TERMINAL_QUERY}' "
+        f"effective='{TERMINAL_QUERY}'"
+    )
+    print(
+        f"DEBUG: query={query_dbg}, strict_number_mode={STRICT_NUMBER_MODE}, "
+        f"extracted_num='{_EXTRACTED_TERMINAL_NUM or ''}'"
+    )
 
     async with async_playwright() as p:
         browser = context = page = None
@@ -638,6 +675,8 @@ async def main():
                     opts = await _wait_terminal_options(page, popup=popup)
                     if not opts:
                         raise RuntimeError("no suggestions")
+                    opts_count = await opts.count()
+                    print(f"DEBUG: options_count={opts_count}, strict_number_mode={STRICT_NUMBER_MODE}")
 
                     # try Enter
                     await page.keyboard.press("Enter")
@@ -658,9 +697,11 @@ async def main():
                             ok = True
 
                     if not ok:
-                        # click a matching option; if none match, click first option (fallback)
-                        count = await opts.count()
+                        # click a matching option; in strict number mode no fallback to first item
+                        count = opts_count
                         chosen = None
+                        chosen_text = ""
+                        matched_option = False
                         for i in range(min(count, 100)):
                             item = opts.nth(i)
                             try:
@@ -671,13 +712,23 @@ async def main():
                                 continue
                             if matcher(txt):
                                 chosen = item
+                                chosen_text = txt
+                                matched_option = True
                                 break
 
                         if chosen is None:
+                            if STRICT_NUMBER_MODE:
+                                await page.screenshot(path=str(ART / "step6_1_no_match_number.png"), full_page=True)
+                                raise RuntimeError(f"no match for terminal number {_EXTRACTED_TERMINAL_NUM}")
                             # fallback: choose first suggestion (useful for address-ish cases)
                             chosen = opts.first
+                            try:
+                                chosen_text = (await chosen.inner_text()).strip()
+                            except Exception:
+                                chosen_text = ""
 
                         await _human_click(page, chosen)
+                        print(f"DEBUG: chosen_text='{chosen_text}'")
                         await page.wait_for_timeout(220)
                         await _wait_popup_collapse(page, inp)
 
@@ -693,10 +744,12 @@ async def main():
                         st2 = _norm(selected_txt2)
                         if _norm(PLACEHOLDER_TERMINAL) in st2:
                             raise RuntimeError("selected value still placeholder")
+                        print(f"DEBUG: selected_text_after_click='{selected_txt2}'")
 
-                        # If we clicked first as fallback, don’t over-reject — just ensure it’s not placeholder.
-                        # But if we had a matcher-hit, enforce it:
-                        if chosen is not opts.first and not matcher(selected_txt2):
+                        # In strict number mode matcher must always pass after selection.
+                        if STRICT_NUMBER_MODE and not matcher(selected_txt2):
+                            raise RuntimeError("selected value mismatch (strict number)")
+                        if (not STRICT_NUMBER_MODE) and matched_option and not matcher(selected_txt2):
                             raise RuntimeError("selected value mismatch")
 
                     # Force-close dropdown and wait until the selected value is visible/stable
