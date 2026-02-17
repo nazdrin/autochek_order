@@ -143,6 +143,123 @@ async def pick_checkout_page(context):
     return await context.new_page()
 
 
+def filename_matches_ttn(name: str, ttn_number: str) -> bool:
+    expected_ttn_digits = normalize_digits(ttn_number)
+    if not expected_ttn_digits:
+        return False
+    return expected_ttn_digits in normalize_digits(name)
+
+
+async def get_attached_file_names(page) -> list[str]:
+    names: list[str] = []
+    items = page.locator(".fileup-file, .fileup-description")
+    count = await items.count()
+    for i in range(count):
+        try:
+            text = (await items.nth(i).inner_text(timeout=1500)).strip()
+        except Exception:
+            continue
+        if text:
+            names.append(" ".join(text.split()))
+
+    # dedupe while preserving order
+    seen = set()
+    unique_names: list[str] = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        unique_names.append(name)
+    return unique_names
+
+
+async def remove_all_attached_files(page, max_rounds: int = 5) -> None:
+    file_items = page.locator(".fileup-file")
+    for _ in range(max_rounds):
+        remove_btns = page.locator('span.fileup-remove[title="Удалить"], .fileup-remove')
+        remove_count = await remove_btns.count()
+        if remove_count == 0:
+            if await file_items.count() == 0:
+                return
+            await page.wait_for_timeout(250)
+            continue
+
+        before_count = await file_items.count()
+
+        # UI updates after each click, so click the first visible each iteration.
+        for _ in range(remove_count):
+            btn = remove_btns.first
+            try:
+                await btn.click(timeout=TIMEOUT_MS)
+            except Exception:
+                break
+            await page.wait_for_timeout(150)
+
+        for _ in range(8):
+            current_count = await file_items.count()
+            if current_count == 0 or current_count < before_count:
+                break
+            await page.wait_for_timeout(250)
+
+    # one last short wait to settle DOM
+    await page.wait_for_timeout(250)
+
+
+async def check_and_close_limit_modal(page) -> bool:
+    limit_candidates = [
+        page.get_by_text("Количество выбранных файлов превышает лимит", exact=False).locator(":visible"),
+        page.get_by_text("превышает лимит (1)", exact=False).locator(":visible"),
+    ]
+    seen_limit = False
+    for loc in limit_candidates:
+        if (await loc.count()) > 0:
+            seen_limit = True
+            break
+    if not seen_limit:
+        return False
+
+    close_btn = page.get_by_role("button", name="Закрыть").locator(":visible").first
+    if await close_btn.count() == 0:
+        close_btn = page.get_by_text("Закрыть", exact=False).locator(":visible").first
+    if await close_btn.count() > 0:
+        try:
+            await close_btn.click(timeout=TIMEOUT_MS)
+        except Exception:
+            pass
+    await page.wait_for_timeout(300)
+    return True
+
+
+async def attach_file_once(page, btn, file_path: Path) -> bool:
+    attached = False
+
+    # 1) основной путь: file chooser
+    try:
+        async with page.expect_file_chooser(timeout=TIMEOUT_MS) as fc_info:
+            await btn.first.click()
+        fc = await fc_info.value
+        await fc.set_files(str(file_path))
+        attached = True
+        print("[INFO] Attached via file chooser")
+    except Exception as e:
+        print(f"[WARN] file chooser not captured: {e}")
+
+    # 2) fallback: прямой input[type=file]
+    if not attached:
+        inp = page.locator('input[type="file"]:visible').first
+        if await inp.count() == 0:
+            inp = page.locator('input[type="file"]').first
+        if await inp.count() == 0:
+            raise RuntimeError("Не нашёл input[type=file] для загрузки файла.")
+        await inp.set_input_files(str(file_path))
+        attached = True
+        print("[INFO] Attached via input[type=file]")
+
+    # даём UI обработать аплоад
+    await page.wait_for_timeout(800)
+    return await check_and_close_limit_modal(page)
+
+
 async def main():
     file_path = download_np_label(ATTACH_DIR)
     print(f"[INFO] Downloaded and will attach: {file_path}")
@@ -169,34 +286,55 @@ async def main():
         if await btn.count() == 0:
             raise RuntimeError('Не нашёл кнопку "Накладний файл" на странице.')
 
-        attached = False
+        limit_modal_seen = False
+        current_attached = await get_attached_file_names(page)
 
-        # 1) основной путь: file chooser
-        try:
-            async with page.expect_file_chooser(timeout=TIMEOUT_MS) as fc_info:
-                await btn.first.click()
-            fc = await fc_info.value
-            await fc.set_files(str(file_path))
-            attached = True
-            print("[INFO] Attached via file chooser")
-        except Exception as e:
-            print(f"[WARN] file chooser not captured: {e}")
+        # Если уже прикреплён файл с текущим TTN, считаем шаг выполненным.
+        if any(filename_matches_ttn(name, TTN) for name in current_attached):
+            print(f"[INFO] Attachment already matches TTN: {current_attached}")
+        else:
+            if current_attached:
+                print(f"[INFO] Removing stale attachment(s): {current_attached}")
+                await remove_all_attached_files(page)
 
-        # 2) fallback: прямой input[type=file]
-        if not attached:
-            inp = page.locator('input[type="file"]:visible').first
-            if await inp.count() == 0:
-                inp = page.locator('input[type="file"]').first
-            if await inp.count() == 0:
-                raise RuntimeError("Не нашёл input[type=file] для загрузки файла.")
-            await inp.set_input_files(str(file_path))
-            attached = True
-            print("[INFO] Attached via input[type=file]")
+            # Одна повторная попытка после модалки лимита.
+            for attempt in range(2):
+                saw_limit = await attach_file_once(page, btn, file_path)
+                limit_modal_seen = limit_modal_seen or saw_limit
+                if saw_limit:
+                    print("[WARN] Limit modal detected; removing attachments and retrying")
+                    await remove_all_attached_files(page)
+                    if attempt == 0:
+                        continue
+                break
 
-        # даём UI обработать аплоад
-        await page.wait_for_timeout(800)
+        # Жёсткая верификация: на странице должен быть файл с текущим TTN.
+        final_attached = await get_attached_file_names(page)
+        if not final_attached:
+            screenshot = "step8_err_attach_limit.png" if limit_modal_seen else "step8_err_no_attachment.png"
+            await page.screenshot(path=screenshot, full_page=True)
+            if limit_modal_seen:
+                raise RuntimeError(
+                    "Модалка лимита была показана, но после ретрая файл не прикрепился."
+                )
+            raise RuntimeError("После операций файл не прикреплён.")
 
-        # удаляем локальный файл
+        if not any(filename_matches_ttn(name, TTN) for name in final_attached):
+            screenshot = (
+                "step8_err_attach_limit.png"
+                if limit_modal_seen
+                else "step8_err_attached_mismatch.png"
+            )
+            await page.screenshot(path=screenshot, full_page=True)
+            if limit_modal_seen:
+                raise RuntimeError(
+                    f"После модалки лимита и ретрая корректный файл не прикрепился: {final_attached}"
+                )
+            raise RuntimeError(
+                f"Прикреплённый файл не соответствует TTN {TTN}: {final_attached}"
+            )
+
+        # удаляем локальный файл только после успешной верификации
         try:
             file_path.unlink()
             print(f"[OK] Deleted local file: {file_path.name}")
