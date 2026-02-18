@@ -143,3 +143,7 @@ BIOTUS_USE_CDP=1 python tools/save_state.py
 BIOTUS_HEADLESS=1 BIOTUS_STATE_FILE=.biotus_state.json python -u scripts/orchestrator.py
 
 BIOTUS_USE_CDP=0 BIOTUS_HEADLESS=1 BIOTUS_STATE_FILE=.biotus_state.json python -u scripts/orchestrator.py
+
+Offline test cart verify:
+
+python -u scripts/dev_cart_verify_test.py

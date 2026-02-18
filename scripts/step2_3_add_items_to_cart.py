@@ -4,11 +4,13 @@ import asyncio
 import os
 import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List
 
 from dotenv import load_dotenv
-from playwright.async_api import async_playwright, TimeoutError as PWTimeout
+from playwright.async_api import TimeoutError as PWTimeout
+from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT / "artifacts"
@@ -18,25 +20,29 @@ load_dotenv(ROOT / ".env")
 
 USE_CDP = os.getenv("BIOTUS_USE_CDP", "0") == "1"
 CDP_ENDPOINT = os.getenv("BIOTUS_CDP_ENDPOINT", "http://127.0.0.1:9222")
+BASE_URL = (os.getenv("BIOTUS_BASE_URL") or "https://opt.biotus.ua").rstrip("/")
 
 AFTER_URL = os.getenv("BIOTUS_AFTER_LOGIN_URL")
 STATE = ROOT / "artifacts" / "storage_state.json"
 
 TIMEOUT_MS = int(os.getenv("BIOTUS_TIMEOUT_MS", "15000"))
 
-# Show cart modal at the end so step4_checkout can click "Оформити".
-# During multi-item adds we still close the modal between items to not block the search.
+# Show cart modal at the end so step4_checkout can click "Оформити" when cart verification is disabled.
 SHOW_CART_MODAL_AT_END = os.getenv("BIOTUS_SHOW_CART_MODAL_AT_END", "1") == "1"
 
-# New format: "SKU=QTY;SKU2=QTY2"
+# New format: "SKU=QTY,SKU2=QTY2"
 ITEMS_RAW = os.getenv("BIOTUS_ITEMS", "").strip()
 
 # Backward compatible:
 SINGLE_SKU = os.getenv("BIOTUS_TEST_SKU", "").strip()
 SINGLE_QTY = int(os.getenv("BIOTUS_QTY", "1"))
 
-PLACEHOLDER_SEARCH_UA = "Пошук"
-PLACEHOLDER_SEARCH_RU = "Поиск"
+CART_VERIFY_ENABLED = os.getenv("BIOTUS_CART_VERIFY", "1") == "1"
+CART_VERIFY_STRICT = os.getenv("BIOTUS_CART_VERIFY_STRICT", "1") == "1"
+CART_VERIFY_SCREENSHOT = os.getenv("BIOTUS_CART_VERIFY_SCREENSHOT", "1") == "1"
+CART_VERIFY_SAVE_OK_HTML = os.getenv("BIOTUS_CART_VERIFY_SAVE_OK_HTML", "0") == "1"
+
+SKU_TOKEN_RE = re.compile(r"(?<![A-Z0-9-])([A-Z0-9]+(?:-[A-Z0-9]+)+)(?![A-Z0-9-])", re.I)
 
 
 @dataclass
@@ -45,31 +51,220 @@ class Item:
     qty: int
 
 
-def parse_items() -> List[Item]:
-    if ITEMS_RAW:
-        items: List[Item] = []
-        parts = [p.strip() for p in re.split(r"[;\n]+", ITEMS_RAW) if p.strip()]
-        for p in parts:
-            if "=" in p:
-                sku, qty_s = p.split("=", 1)
-                sku = sku.strip()
-                qty_s = qty_s.strip()
-                qty = int(qty_s) if qty_s else 1
-            else:
-                sku = p.strip()
-                qty = 1
-            if not sku:
+def _normalize_sku(sku: str) -> str:
+    return (sku or "").strip().upper()
+
+
+def _extract_qty_from_text(text: str) -> int | None:
+    patterns = [
+        r"(?:кількість|кол-?во|qty|quantity)\s*[:xх×]?\s*(\d+)",
+        r"(?:^|\s)[xх×]\s*(\d+)(?:\b|\s|$)",
+        r"\b(\d+)\s*(?:шт|pcs|pieces)\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            try:
+                v = int(m.group(1))
+                if v > 0:
+                    return v
+            except Exception:
                 continue
-            if qty < 1:
-                qty = 1
-            items.append(Item(sku=sku, qty=qty))
-        if not items:
-            raise RuntimeError("BIOTUS_ITEMS задан, но не удалось распарсить ни одного товара.")
-        return items
+    return None
+
+
+def _extract_sku_tokens(text: str) -> List[str]:
+    text = text or ""
+    labeled: List[str] = []
+    for m in re.finditer(r"(?:sku|артикул|код(?:\s+товару)?)\s*[:#№-]?\s*([A-Z0-9]+(?:-[A-Z0-9]+)+)", text, re.I):
+        labeled.append(_normalize_sku(m.group(1)))
+
+    generic = [_normalize_sku(m.group(1)) for m in SKU_TOKEN_RE.finditer(text)]
+    ordered: List[str] = []
+    for sku in labeled + generic:
+        if sku and sku not in ordered:
+            ordered.append(sku)
+    return ordered
+
+
+def parse_expected_items(items_raw: str) -> Dict[str, int]:
+    raw = (items_raw or "").strip()
+    if not raw:
+        return {}
+
+    expected: Dict[str, int] = {}
+    parts = [p.strip() for p in re.split(r"[,;\n]+", raw) if p.strip()]
+    for part in parts:
+        if "=" in part:
+            sku_s, qty_s = part.split("=", 1)
+            sku = _normalize_sku(sku_s)
+            qty_s = qty_s.strip()
+            qty = int(qty_s) if qty_s else 1
+        else:
+            sku = _normalize_sku(part)
+            qty = 1
+
+        if not sku:
+            continue
+        if qty < 1:
+            qty = 1
+        expected[sku] = expected.get(sku, 0) + qty
+
+    return expected
+
+
+def parse_items() -> List[Item]:
+    expected = parse_expected_items(ITEMS_RAW)
+    if expected:
+        return [Item(sku=sku, qty=qty) for sku, qty in expected.items()]
 
     if not SINGLE_SKU:
         raise RuntimeError("Не задано BIOTUS_ITEMS и пустой BIOTUS_TEST_SKU. Нечего добавлять.")
-    return [Item(sku=SINGLE_SKU, qty=SINGLE_QTY)]
+    qty = SINGLE_QTY if SINGLE_QTY > 0 else 1
+    return [Item(sku=_normalize_sku(SINGLE_SKU), qty=qty)]
+
+
+class _CartHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.depth = 0
+        self.open_blocks: List[dict] = []
+        self.completed_blocks: List[dict] = []
+
+    @staticmethod
+    def _attrs_dict(attrs) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for k, v in attrs:
+            out[(k or "").lower()] = (v or "")
+        return out
+
+    @staticmethod
+    def _looks_like_item_tag(tag: str, attrs: Dict[str, str]) -> bool:
+        if tag not in {"tr", "div", "li", "article"}:
+            return False
+        text = " ".join(attrs.get(k, "") for k in ("class", "id", "data-role", "itemprop", "data-th")).lower()
+        if not text:
+            return False
+        if any(x in text for x in ("product-item-name", "product-item-sku", "item-option", "item-options")):
+            return False
+        return bool(
+            re.search(
+                r"(?:\bcart-item\b|\bitem-info\b(?!-)|\bproduct-item\b(?!-)|\bminicart-item\b|\bshopping-cart-item\b|\bquote-item\b)",
+                text,
+            )
+        )
+
+    @staticmethod
+    def _extract_qty_from_attrs(attrs: Dict[str, str]) -> int | None:
+        qty_keys = ("qty", "quantity", "кількість", "кол")
+        for k, v in attrs.items():
+            lk = k.lower()
+            lv = (v or "").strip()
+            if not lv:
+                continue
+            if lk.startswith("data-") and "qty" in lk and lv.isdigit():
+                n = int(lv)
+                if n > 0:
+                    return n
+            if any(mark in lk for mark in qty_keys):
+                if lv.isdigit():
+                    n = int(lv)
+                    if n > 0:
+                        return n
+            if lk == "value" and attrs.get("type", "").lower() in {"number", "text"}:
+                name_blob = " ".join([attrs.get("name", ""), attrs.get("id", ""), attrs.get("class", "")]).lower()
+                if any(mark in name_blob for mark in qty_keys) and lv.isdigit():
+                    n = int(lv)
+                    if n > 0:
+                        return n
+        return None
+
+    def handle_starttag(self, tag, attrs):
+        self.depth += 1
+        attrs_d = self._attrs_dict(attrs)
+
+        if self._looks_like_item_tag(tag, attrs_d):
+            self.open_blocks.append(
+                {
+                    "depth": self.depth,
+                    "text": [],
+                    "qty_candidates": [],
+                }
+            )
+
+        qty_from_attrs = self._extract_qty_from_attrs(attrs_d)
+        if qty_from_attrs is not None:
+            for blk in self.open_blocks:
+                blk["qty_candidates"].append(qty_from_attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_data(self, data):
+        if not data:
+            return
+        for blk in self.open_blocks:
+            blk["text"].append(data)
+
+    def handle_endtag(self, tag):
+        to_close = [blk for blk in self.open_blocks if blk["depth"] == self.depth]
+        for blk in to_close:
+            self.open_blocks.remove(blk)
+            self.completed_blocks.append(blk)
+        self.depth = max(0, self.depth - 1)
+
+
+def parse_cart_html(html: str) -> Dict[str, int]:
+    parser = _CartHTMLParser()
+    parser.feed(html or "")
+
+    found: Dict[str, int] = {}
+    for blk in parser.completed_blocks:
+        text = re.sub(r"\s+", " ", " ".join(blk.get("text", []))).strip()
+        if not text:
+            continue
+
+        qty_candidates = [q for q in blk.get("qty_candidates", []) if isinstance(q, int) and q > 0]
+        qty = qty_candidates[0] if qty_candidates else None
+        if qty is None:
+            qty = _extract_qty_from_text(text)
+        if qty is None:
+            qty = 1
+
+        for sku in _extract_sku_tokens(text):
+            found[sku] = found.get(sku, 0) + qty
+
+    return found
+
+
+async def read_cart_items(page) -> Dict[str, int]:
+    html = await page.content()
+    return parse_cart_html(html)
+
+
+def _validate_cart(expected: Dict[str, int], found: Dict[str, int], *, strict: bool) -> List[str]:
+    errors: List[str] = []
+    for sku, exp_qty in expected.items():
+        got_qty = found.get(sku)
+        if got_qty is None:
+            errors.append(f"SKU={sku}: expected={exp_qty}, found=ABSENT")
+            continue
+
+        if strict:
+            if got_qty != exp_qty:
+                errors.append(f"SKU={sku}: expected={exp_qty}, found={got_qty} (strict ==)")
+        else:
+            if got_qty < exp_qty:
+                errors.append(f"SKU={sku}: expected>={exp_qty}, found={got_qty}")
+
+    return errors
+
+
+def _fmt_items(items: Dict[str, int]) -> str:
+    if not items:
+        return "<empty>"
+    return ", ".join(f"{k}={v}" for k, v in sorted(items.items()))
 
 
 async def _pick_active_page(context):
@@ -255,6 +450,54 @@ async def _open_cart_overlay(page):
         return False
 
 
+async def _goto_cart_page(page):
+    await _dismiss_cart_overlay(page)
+    cart_url = f"{BASE_URL}/checkout/cart"
+    await page.goto(cart_url, wait_until="domcontentloaded")
+    await page.wait_for_timeout(1200)
+
+
+async def _save_cart_html(page, filename: str):
+    html = await page.content()
+    path = ART / filename
+    path.write_text(html, encoding="utf-8")
+
+
+async def verify_cart_or_raise(
+    page,
+    expected: Dict[str, int],
+    *,
+    strict: bool,
+    screenshot_on_fail: bool,
+    save_ok_html: bool,
+    fail_prefix: str,
+    ok_html_name: str,
+):
+    await _goto_cart_page(page)
+    found = await read_cart_items(page)
+    mismatches = _validate_cart(expected, found, strict=strict)
+
+    if mismatches:
+        await _save_cart_html(page, f"{fail_prefix}.html")
+        if screenshot_on_fail:
+            try:
+                await page.screenshot(path=str(ART / f"{fail_prefix}.png"), full_page=True)
+            except Exception:
+                pass
+
+        print("CART VERIFY FAILED")
+        print(f"Expected: {_fmt_items(expected)}")
+        print(f"Found: {_fmt_items(found)}")
+        for line in mismatches:
+            print(f" - {line}")
+        raise RuntimeError("Cart verification failed: " + " | ".join(mismatches))
+
+    if save_ok_html:
+        await _save_cart_html(page, ok_html_name)
+
+    print(f"CART VERIFY OK: {_fmt_items(expected)}")
+
+
 # --- Helper: clear cart if any items present ---
 async def _clear_cart_if_any(page):
     """Очищает корзину в модалке `#confirmOverlay`, если в ней есть позиции.
@@ -386,6 +629,9 @@ async def _click_add_to_cart(page, *, keep_cart_modal_open: bool = False):
 
 async def main():
     items = parse_items()
+    expected = {item.sku: item.qty for item in items}
+    if not expected:
+        raise RuntimeError("BIOTUS_ITEMS задан, но не удалось распарсить ни одного товара.")
 
     async with async_playwright() as p:
         browser = context = page = None
@@ -416,15 +662,25 @@ async def main():
                 await _set_qty(page, it.qty)
                 await page.screenshot(path=str(ART / f"step2_qty_{idx}_{it.sku}.png"), full_page=True)
 
-                keep_open = SHOW_CART_MODAL_AT_END and (idx == len(items))
+                keep_open = SHOW_CART_MODAL_AT_END and not CART_VERIFY_ENABLED and (idx == len(items))
                 await _click_add_to_cart(page, keep_cart_modal_open=keep_open)
                 await page.screenshot(path=str(ART / f"step3_added_{idx}_{it.sku}.png"), full_page=True)
 
                 # small pause between items (UI animations)
                 await page.wait_for_timeout(500)
 
-            # Safety: if we want the cart modal at end but it was not shown for some reason, try to open it.
-            if SHOW_CART_MODAL_AT_END:
+            if CART_VERIFY_ENABLED:
+                await verify_cart_or_raise(
+                    page,
+                    expected,
+                    strict=CART_VERIFY_STRICT,
+                    screenshot_on_fail=CART_VERIFY_SCREENSHOT,
+                    save_ok_html=CART_VERIFY_SAVE_OK_HTML,
+                    fail_prefix="step2_3_cart_verify_failed",
+                    ok_html_name="step2_3_cart_verify_ok.html",
+                )
+            elif SHOW_CART_MODAL_AT_END:
+                # Safety: if we want the cart modal at end but it was not shown for some reason, try to open it.
                 await _open_cart_overlay(page)
                 await page.wait_for_timeout(300)
                 await page.screenshot(path=str(ART / "step_cart_overlay_final.png"), full_page=True)
