@@ -36,6 +36,7 @@ def _to_bool(value: str, default: bool) -> bool:
 
 TIMEOUT_MS = _to_int(os.getenv("SUP2_TIMEOUT_MS", "20000"), 20000)
 HEADLESS = _to_bool(os.getenv("SUP2_HEADLESS", "1"), True)
+STRICT_AVAILABILITY = _to_bool(os.getenv("SUP2_STRICT_AVAILABILITY", "1"), True)
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,25 @@ class Item:
 
 class ItemParseError(RuntimeError):
     pass
+
+
+class AvailabilityError(RuntimeError):
+    def __init__(
+        self,
+        error_code: str,
+        message: str,
+        *,
+        availability_raw: str = "",
+        required_qty: int | None = None,
+        available_qty: int | None = None,
+        failed_item: dict | None = None,
+    ) -> None:
+        super().__init__(f"{error_code}: {message}")
+        self.error_code = error_code
+        self.availability_raw = availability_raw
+        self.required_qty = required_qty
+        self.available_qty = available_qty
+        self.failed_item = failed_item or {}
 
 
 def _normalize_qty(value) -> int:
@@ -207,6 +227,78 @@ async def _set_row_qty(page, row, qty: int) -> None:
     )
 
 
+async def _get_availability_col_idx(page) -> int | None:
+    header_selectors = [
+        "table.os-table thead th",
+        "table.os-table thead td",
+        "table.os-table th",
+        "table.os-table tr:first-child th",
+        "table.os-table tr:first-child td",
+    ]
+    for selector in header_selectors:
+        headers = page.locator(selector)
+        try:
+            count = await headers.count()
+        except Exception:
+            count = 0
+        for i in range(count):
+            try:
+                txt = (await headers.nth(i).inner_text(timeout=TIMEOUT_MS)).strip().lower()
+            except Exception:
+                continue
+            if "наявн" in txt:
+                return i
+    return None
+
+
+async def _read_row_availability(row, availability_col_idx: int | None) -> tuple[str, int | None]:
+    availability_raw = ""
+    tds = row.locator("td")
+    td_count = await tds.count()
+
+    if availability_col_idx is not None and availability_col_idx < td_count:
+        availability_raw = (await tds.nth(availability_col_idx).inner_text(timeout=TIMEOUT_MS)).strip()
+    else:
+        # Fallback for layouts where table header is missing/not accessible.
+        attr_loc = row.locator(
+            "td[data-title*='наяв' i], td[data-title*='nalich' i], "
+            "td[title*='наяв' i], td[title*='nalich' i]"
+        ).first
+        if await attr_loc.count() > 0:
+            availability_raw = (await attr_loc.inner_text(timeout=TIMEOUT_MS)).strip()
+        else:
+            for j in range(min(td_count, 20)):
+                try:
+                    td_text = (await tds.nth(j).inner_text(timeout=TIMEOUT_MS)).strip()
+                except Exception:
+                    continue
+                low = td_text.lower()
+                if "наяв" in low or "налич" in low or re.search(r"\b\d+\s*шт\b", low):
+                    availability_raw = td_text
+                    break
+
+    return availability_raw, _parse_availability_value(availability_raw)
+
+
+def _parse_availability_value(availability_raw: str) -> int | None:
+    low = (availability_raw or "").strip().lower()
+    if not low:
+        return None
+
+    preorder_markers = ("под заказ", "під замовлення", "під заказ")
+    if any(marker in low for marker in preorder_markers):
+        return None
+
+    # Strict rule: only pure integer values mean in-stock quantity.
+    if not re.match(r"^\s*\d+\s*$", availability_raw or ""):
+        return None
+
+    try:
+        return int(low)
+    except Exception:
+        return None
+
+
 def _extract_counter_texts(texts: list[str]) -> list[str]:
     return [t.strip() for t in texts if (t or "").strip()]
 
@@ -292,11 +384,43 @@ async def _read_cart_indicators(page) -> list[str]:
     return values
 
 
-async def _add_item(page, item: Item) -> None:
+async def _add_item(page, item: Item) -> dict:
     await _set_search_sku(page, item.sku)
     await _click_show(page)
+    availability_col_idx = await _get_availability_col_idx(page)
 
-    row = await _wait_for_row_by_sku(page, item.sku)
+    try:
+        row = await _wait_for_row_by_sku(page, item.sku)
+    except Exception:
+        raise AvailabilityError(
+            "NOT_FOUND",
+            f"SKU row not found in table: {item.sku}",
+            required_qty=item.qty,
+            failed_item={"sku": item.sku, "qty": item.qty},
+        )
+
+    availability_raw, available_qty = await _read_row_availability(row, availability_col_idx)
+    if available_qty is None:
+        if STRICT_AVAILABILITY:
+            raise AvailabilityError(
+                "OUT_OF_STOCK",
+                f"sku={item.sku}, qty={item.qty}, availability_raw='{availability_raw}', availability_val={available_qty}",
+                availability_raw=availability_raw,
+                required_qty=item.qty,
+                available_qty=None,
+                failed_item={"sku": item.sku, "qty": item.qty},
+            )
+    elif available_qty < item.qty:
+        if STRICT_AVAILABILITY:
+            raise AvailabilityError(
+                "INSUFFICIENT_STOCK",
+                f"sku={item.sku}, qty={item.qty}, availability_raw='{availability_raw}', availability_val={available_qty}",
+                availability_raw=availability_raw,
+                required_qty=item.qty,
+                available_qty=available_qty,
+                failed_item={"sku": item.sku, "qty": item.qty},
+            )
+
     await _set_row_qty(page, row, item.qty)
 
     before_counters = await _read_cart_indicators(page)
@@ -305,6 +429,12 @@ async def _add_item(page, item: Item) -> None:
     await add_btn.click(timeout=TIMEOUT_MS)
 
     await _wait_added_signal(page, before_counters)
+    return {
+        "sku": item.sku,
+        "qty": item.qty,
+        "availability_raw": availability_raw,
+        "available_qty": available_qty,
+    }
 
 
 async def _run() -> tuple[bool, dict]:
@@ -335,15 +465,22 @@ async def _run() -> tuple[bool, dict]:
 
             for item in items:
                 try:
-                    await _add_item(page, item)
-                    added.append({"sku": item.sku, "qty": item.qty})
+                    add_info = await _add_item(page, item)
+                    added.append(add_info)
                 except Exception as e:
-                    return False, {
+                    payload = {
                         "ok": False,
                         "error": str(e),
                         "failed_item": {"sku": item.sku, "qty": item.qty},
                         "url": page.url or PRODUCTS_URL,
                     }
+                    if isinstance(e, AvailabilityError):
+                        payload["error_code"] = e.error_code
+                        payload["availability_raw"] = e.availability_raw
+                        payload["required_qty"] = e.required_qty
+                        payload["available_qty"] = e.available_qty
+                        payload["failed_item"] = e.failed_item or payload["failed_item"]
+                    return False, payload
 
             return True, {
                 "ok": True,
