@@ -11,10 +11,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.async_api import TimeoutError as PWTimeoutError
 from playwright.async_api import async_playwright
-from supplier2_step2_add_items_to_cart import (
-    _get_availability_col_idx,
-    _read_row_availability,
-)
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -277,6 +273,58 @@ async def _set_row_qty(page, row, qty: int) -> None:
             el.dispatchEvent(new Event('change', { bubbles: true }));
         }"""
     )
+
+
+async def _get_availability_col_idx(page) -> int | None:
+    header_selectors = [
+        "table.os-table thead th",
+        "table.os-table thead td",
+        "table.os-table th",
+        "table.os-table tr:first-child th",
+        "table.os-table tr:first-child td",
+    ]
+    for selector in header_selectors:
+        headers = page.locator(selector)
+        try:
+            count = await headers.count()
+        except Exception:
+            count = 0
+        for i in range(count):
+            try:
+                txt = (await headers.nth(i).inner_text(timeout=TIMEOUT_MS)).strip().lower()
+            except Exception:
+                continue
+            if "наявн" in txt:
+                return i
+    return None
+
+
+async def _read_row_availability(row, availability_col_idx: int | None) -> tuple[str, int | None]:
+    availability_raw = ""
+    tds = row.locator("td")
+    td_count = await tds.count()
+
+    if availability_col_idx is not None and availability_col_idx < td_count:
+        availability_raw = (await tds.nth(availability_col_idx).inner_text(timeout=TIMEOUT_MS)).strip()
+    else:
+        attr_loc = row.locator(
+            "td[data-title*='наяв' i], td[data-title*='nalich' i], "
+            "td[title*='наяв' i], td[title*='nalich' i]"
+        ).first
+        if await attr_loc.count() > 0:
+            availability_raw = (await attr_loc.inner_text(timeout=TIMEOUT_MS)).strip()
+        else:
+            for j in range(min(td_count, 20)):
+                try:
+                    td_text = (await tds.nth(j).inner_text(timeout=TIMEOUT_MS)).strip()
+                except Exception:
+                    continue
+                low = td_text.lower()
+                if "наяв" in low or "налич" in low or re.search(r"\b\d+\s*шт\b", low):
+                    availability_raw = td_text
+                    break
+
+    return availability_raw, _parse_availability_value(availability_raw)
 
 
 async def _read_cart_indicators(page) -> list[str]:
