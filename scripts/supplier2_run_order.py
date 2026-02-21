@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -51,6 +52,9 @@ CLEAR_BASKET = _to_bool(os.getenv("SUP2_CLEAR_BASKET", "1"), True)
 DEBUG_PAUSE_SECONDS = _to_int(os.getenv("SUP2_DEBUG_PAUSE_SECONDS", "0"), 0)
 MAX_DELETE = _to_int(os.getenv("SUP2_MAX_DELETE", "50"), 50)
 STRICT_AVAILABILITY = _to_bool(os.getenv("SUP2_STRICT_AVAILABILITY", "1"), True)
+LABELS_MAX_FILES = _to_int(os.getenv("SUP2_LABELS_MAX_FILES", "50"), 50)
+LABELS_MAX_AGE_DAYS = _to_int(os.getenv("SUP2_LABELS_MAX_AGE_DAYS", "7"), 7)
+DELETE_LABEL_AFTER_ATTACH = _to_bool(os.getenv("SUP2_DELETE_LABEL_AFTER_ATTACH", "1"), True)
 
 
 @dataclass(frozen=True)
@@ -588,7 +592,49 @@ def _download_np_label(folder: Path, ttn: str, api_key: str) -> Path:
         raise RuntimeError("Downloaded PDF file size is zero")
     if ttn not in out_path.name:
         raise RuntimeError("Downloaded file name does not contain TTN")
+    _cleanup_labels_dir(folder, keep_names={out_path.name})
     return out_path
+
+
+def _cleanup_labels_dir(folder: Path, keep_names: set[str] | None = None) -> None:
+    keep_names = keep_names or set()
+    if not folder.exists():
+        return
+
+    files: list[Path] = []
+    for p in folder.glob("label-*.pdf"):
+        if p.is_file():
+            files.append(p)
+    if not files:
+        return
+
+    now = time.time()
+    deleted = 0
+
+    if LABELS_MAX_AGE_DAYS > 0:
+        max_age_sec = LABELS_MAX_AGE_DAYS * 24 * 60 * 60
+        for p in files:
+            if p.name in keep_names:
+                continue
+            try:
+                if now - p.stat().st_mtime > max_age_sec:
+                    p.unlink(missing_ok=True)
+                    deleted += 1
+            except Exception:
+                continue
+
+    if LABELS_MAX_FILES > 0:
+        remaining = [p for p in files if p.exists() and p.name not in keep_names]
+        remaining.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        for p in remaining[LABELS_MAX_FILES:]:
+            try:
+                p.unlink(missing_ok=True)
+                deleted += 1
+            except Exception:
+                continue
+
+    if deleted:
+        print(f"[SUP2] Cleaned old labels: {deleted}")
 
 
 async def _wait_enabled(locator, timeout_ms: int) -> None:
@@ -623,6 +669,12 @@ async def _attach_label_file(page, ttn: str) -> dict:
             "File input value is empty after set_input_files",
             {"file": str(pdf_path)},
         )
+
+    if DELETE_LABEL_AFTER_ATTACH:
+        try:
+            pdf_path.unlink(missing_ok=True)
+        except Exception:
+            pass
     return {"file": str(pdf_path), "input_value": input_value}
 
 
