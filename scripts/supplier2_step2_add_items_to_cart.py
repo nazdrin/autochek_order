@@ -281,6 +281,10 @@ async def _read_row_availability(row, availability_col_idx: int | None) -> tuple
 
 
 def _parse_availability_value(availability_raw: str) -> int | None:
+    # Examples:
+    # - "50+" -> 50
+    # - "7" -> 7
+    # - "Под заказ 2-3 дня" -> None
     low = (availability_raw or "").strip().lower()
     if not low:
         return None
@@ -289,12 +293,19 @@ def _parse_availability_value(availability_raw: str) -> int | None:
     if any(marker in low for marker in preorder_markers):
         return None
 
-    # Strict rule: only pure integer values mean in-stock quantity.
-    if not re.match(r"^\s*\d+\s*$", availability_raw or ""):
+    m_plus = re.match(r"^\s*(\d+)\s*\+\s*$", availability_raw or "")
+    if m_plus:
+        try:
+            return int(m_plus.group(1))
+        except Exception:
+            return None
+
+    m_num = re.match(r"^\s*(\d+)\s*$", availability_raw or "")
+    if not m_num:
         return None
 
     try:
-        return int(low)
+        return int(m_num.group(1))
     except Exception:
         return None
 

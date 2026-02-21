@@ -36,6 +36,7 @@ STEP7_TTN_SCRIPT = ROOT / "scripts" / "step7_fill_ttn.py"
 
 STEP8_ATTACH_SCRIPT = ROOT / "scripts" / "step8_attach_invoice_file.py"
 STEP9_CONFIRM_SCRIPT = ROOT / "scripts" / "step9_confirm_order.py"
+SUP2_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier2_run_order.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -58,6 +59,7 @@ STEP_TIMEOUT_DEFAULTS: Dict[str, int] = {
     "STEP7_TTN": int(os.getenv("ORCH_TIMEOUT_STEP7_TTN", "25")),
     "STEP8_ATTACH": int(os.getenv("ORCH_TIMEOUT_STEP8_ATTACH", "75")),
     "STEP9_CONFIRM": int(os.getenv("ORCH_TIMEOUT_STEP9_CONFIRM", "45")),
+    "SUP2_RUN_ORDER": int(os.getenv("ORCH_TIMEOUT_SUP2_RUN_ORDER", "180")),
     "SALESDRIVE_UPDATE": int(os.getenv("ORCH_TIMEOUT_SALESDRIVE_UPDATE", "30")),
 }
 
@@ -157,6 +159,10 @@ if not DEFAULT_BIOTUS_USE_CDP:
 ORCH_DONE_STATUS_ID = int(os.getenv("ORCH_DONE_STATUS_ID", "4"))
 SALESDRIVE_BASE_URL = (os.getenv("SALESDRIVE_BASE_URL") or "https://petrenko.salesdrive.me").rstrip("/")
 SALESDRIVE_API_KEY = (os.getenv("SALESDRIVE_API_KEY") or "").strip()
+ORCH_HEADLESS = (os.getenv("ORCH_HEADLESS") or "").strip()
+ORCH_SUP2_HEADLESS = (os.getenv("ORCH_SUP2_HEADLESS") or ORCH_HEADLESS or "1").strip()
+ORCH_SUP2_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP2_STORAGE_STATE_FILE") or ".state_supplier2.json").strip()
+ORCH_SUP2_CLEAR_BASKET = (os.getenv("ORCH_SUP2_CLEAR_BASKET") or "1").strip()
 
 
 def build_full_name(order: Dict[str, Any]) -> str:
@@ -247,7 +253,12 @@ class StepError(RuntimeError):
         self.reason = reason
 
 # --- SalesDrive integration ---
-def salesdrive_update_status(order_id: int, status_id: int, comment: str | None = None) -> None:
+def salesdrive_update_status(
+    order_id: int,
+    status_id: int,
+    comment: str | None = None,
+    number_sup: str | None = None,
+) -> None:
     """Update order status in SalesDrive using /api/order/update/. Raises on failure.
     Optionally supports a comment (short, max 800 chars)."""
     if not SALESDRIVE_API_KEY:
@@ -258,6 +269,8 @@ def salesdrive_update_status(order_id: int, status_id: int, comment: str | None 
     if comment:
         # SalesDrive commonly supports "comment"; keep it short.
         data_obj["comment"] = str(comment)[:800]
+    if number_sup and str(number_sup).strip():
+        data_obj["numberSup"] = str(number_sup).strip()
     payload = {
         "id": int(order_id),
         "data": data_obj,
@@ -325,6 +338,23 @@ def parse_orders_from_fetch_output(stdout: str) -> List[Dict[str, Any]]:
     if isinstance(obj, list):
         return obj
     return []
+
+
+def parse_json_from_stdout(stdout: str) -> Any:
+    stdout = (stdout or "").strip()
+    if not stdout:
+        raise ValueError("stdout is empty")
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        cut_idx = None
+        for i, ch in enumerate(stdout):
+            if ch in "{[":
+                cut_idx = i
+                break
+        if cut_idx is None:
+            raise
+        return json.loads(stdout[cut_idx:])
 
 
 def load_state() -> Dict[str, Any]:
@@ -467,6 +497,29 @@ def build_biotus_items(order: Dict[str, Any]) -> str:
         items.append(f"{sku}={qty}")
 
     return ";".join(items)
+
+
+def build_sup2_items(order: Dict[str, Any]) -> str:
+    products = order.get("products") or []
+    items: List[str] = []
+
+    for p in products:
+        desc = str(p.get("description") or "").strip()
+        sku = desc.split(",", 1)[0].strip() if desc else ""
+        if not sku:
+            continue
+
+        amount = p.get("amount")
+        try:
+            qty = int(amount)
+        except Exception:
+            qty = 1
+        if qty < 1:
+            qty = 1
+
+        items.append(f"{sku}:{qty}")
+
+    return ",".join(items)
 
 
 def get_first_delivery_block(order: Dict[str, Any]) -> Dict[str, Any]:
@@ -694,7 +747,7 @@ def choose_np_step(address: str, branch_number: str, shipping_address: str) -> T
     return ("step6_select_np_branch", STEP6_BRANCH_SCRIPT, "BIOTUS_BRANCH_QUERY", query)
 
 
-def process_one_order(order: Dict[str, Any]) -> None:
+def process_one_biotus_order(order: Dict[str, Any]) -> None:
     order_id = order.get("id")
     try:
         order_id_int = int(order_id)
@@ -792,6 +845,96 @@ def process_one_order(order: Dict[str, Any]) -> None:
     print(f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}")
 
 
+def process_one_dobavki_order(order: Dict[str, Any]) -> None:
+    order_id = order.get("id")
+    try:
+        order_id_int = int(order_id)
+    except Exception:
+        raise RuntimeError(f"Invalid order id: {order_id}")
+
+    sup2_items = build_sup2_items(order)
+    if not sup2_items:
+        raise RuntimeError("Не смог сформировать SUP2_ITEMS из order['products'].")
+
+    tracking_number = extract_tracking_number(order)
+    if not tracking_number:
+        raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для SUP2_TTN.")
+
+    if not ORCH_SUP2_STORAGE_STATE_FILE:
+        raise RuntimeError("ORCH_SUP2_STORAGE_STATE_FILE is empty.")
+
+    env = os.environ.copy()
+    env.setdefault("SUP2_HEADLESS", ORCH_SUP2_HEADLESS)
+    env["SUP2_STORAGE_STATE_FILE"] = ORCH_SUP2_STORAGE_STATE_FILE
+    env["SUP2_ITEMS"] = sup2_items
+    env["SUP2_TTN"] = tracking_number
+    env["SUP2_CLEAR_BASKET"] = ORCH_SUP2_CLEAR_BASKET
+    if "SUP2_DEBUG_PAUSE_SECONDS" in os.environ:
+        env["SUP2_DEBUG_PAUSE_SECONDS"] = os.environ["SUP2_DEBUG_PAUSE_SECONDS"]
+
+    print(f"[ORCH] Dobavki SUP2_ITEMS => {sup2_items}")
+    print(f"[ORCH] Dobavki TTN => {tracking_number}")
+
+    step_name = "supplier2_run_order"
+    step_timeout = _timeout_for_step("SUP2_RUN_ORDER")
+    try:
+        rc, out, err = run_python(SUP2_RUN_ORDER_SCRIPT, env=env, timeout_sec=step_timeout)
+    except subprocess.TimeoutExpired as te:
+        raise StepError(step_name, f"timeout after {step_timeout}s") from te
+
+    if out.strip():
+        print(out, end="" if out.endswith("\n") else "\n")
+    if err.strip():
+        print(err, file=sys.stderr, end="" if err.endswith("\n") else "\n")
+
+    payload: Dict[str, Any] | None = None
+    try:
+        parsed = parse_json_from_stdout(out)
+        if isinstance(parsed, dict):
+            payload = parsed
+    except Exception:
+        payload = None
+
+    if rc != 0:
+        if payload:
+            stage = str(payload.get("stage") or step_name)
+            msg = str(payload.get("error") or f"rc={rc}")
+            raise StepError(stage, msg)
+        reason = short_reason(step_name, rc, out, err, None)
+        raise StepError(step_name, reason)
+
+    if not payload:
+        raise StepError(step_name, "No JSON object in supplier2_run_order stdout.")
+    if not bool(payload.get("ok")):
+        stage = str(payload.get("stage") or step_name)
+        msg = str(payload.get("error") or "supplier2_run_order returned ok=false")
+        raise StepError(stage, msg)
+
+    supplier_order_number = str(payload.get("supplier_order_number") or "").strip()
+    if not supplier_order_number:
+        raise StepError(step_name, "supplier_order_number is empty in supplier2_run_order response.")
+
+    salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
+    print(
+        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number}"
+    )
+
+
+def process_one_order(order: Dict[str, Any]) -> None:
+    supplier = str(order.get("supplier") or "").strip()
+    supplier_norm = supplier.casefold()
+
+    if supplier_norm == "dobavki.ua":
+        process_one_dobavki_order(order)
+        return
+
+    if supplier_norm == "biotus":
+        process_one_biotus_order(order)
+        return
+
+    raise RuntimeError(f"Unsupported supplier '{supplier}'. Expected 'Biotus' or 'Dobavki.ua'.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="Сделать один цикл и выйти (для теста)")
@@ -815,6 +958,7 @@ def main() -> int:
         return 2
 
     required = [
+        ("Supplier2 run order script", SUP2_RUN_ORDER_SCRIPT),
         ("Step2_3 script", STEP2_3_SCRIPT),
         ("Step4 script", STEP4_SCRIPT),
         ("Step5 drop tab script", STEP5_DROP_TAB_SCRIPT),
@@ -932,8 +1076,16 @@ def main() -> int:
                             break
 
                         print(f"[ORCH] Processing id={order_id}")
-                        biotus_items = build_biotus_items(order)
-                        print(f"[ORCH] BIOTUS_ITEMS => {biotus_items}")
+                        supplier = str(order.get("supplier") or "").strip()
+                        supplier_norm = supplier.casefold()
+                        if supplier_norm == "biotus":
+                            biotus_items = build_biotus_items(order)
+                            print(f"[ORCH] BIOTUS_ITEMS => {biotus_items}")
+                        elif supplier_norm == "dobavki.ua":
+                            sup2_items = build_sup2_items(order)
+                            print(f"[ORCH] SUP2_ITEMS => {sup2_items}")
+                        else:
+                            print(f"[ORCH] supplier => {supplier}")
 
                         if args.dry_run:
                             print("[ORCH] dry-run enabled, no steps executed.")

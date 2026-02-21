@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -67,6 +68,41 @@ class StageError(RuntimeError):
         super().__init__(message)
         self.stage = stage
         self.details = details or {}
+
+
+def _parse_availability_value(availability_raw: str) -> int | None:
+    # Examples:
+    # - "50+" -> 50
+    # - "7" -> 7
+    # - "Под заказ 2-3 дня" -> None
+    low = (availability_raw or "").strip().lower()
+    if not low:
+        return None
+
+    preorder_markers = ("под заказ", "під замовлення", "під заказ")
+    if any(marker in low for marker in preorder_markers):
+        return None
+
+    m_plus = re.match(r"^\s*(\d+)\s*\+\s*$", availability_raw or "")
+    if m_plus:
+        try:
+            return int(m_plus.group(1))
+        except Exception:
+            return None
+
+    m_num = re.match(r"^\s*(\d+)\s*$", availability_raw or "")
+    if not m_num:
+        return None
+
+    try:
+        return int(m_num.group(1))
+    except Exception:
+        return None
+
+
+async def _debug_pause_if_needed() -> None:
+    if DEBUG_PAUSE_SECONDS > 0:
+        await asyncio.sleep(DEBUG_PAUSE_SECONDS)
 
 
 def _normalize_qty(value) -> int:
@@ -339,7 +375,8 @@ async def _add_items(page, items: list[Item]) -> list[dict]:
                 f"NOT_FOUND: sku={item.sku}, qty={item.qty}",
                 {"error_code": "NOT_FOUND", "failed_item": {"sku": item.sku, "qty": item.qty}},
             )
-        availability_raw, availability_val = await _read_row_availability(row, availability_col_idx)
+        availability_raw, _ = await _read_row_availability(row, availability_col_idx)
+        availability_val = _parse_availability_value(availability_raw)
         if availability_val is None:
             msg = (
                 f"OUT_OF_STOCK: sku={item.sku}, qty={item.qty}, "
@@ -541,6 +578,69 @@ async def _attach_label_file(page, ttn: str) -> dict:
     return {"file": str(pdf_path), "input_value": input_value}
 
 
+async def _submit_order_and_get_number(page) -> str:
+    submit_btn = page.locator(
+        "p.os-button.js-submit-button-client",
+        has_text="Оформити замовлення",
+    ).first
+
+    if await submit_btn.count() == 0:
+        fallback = page.get_by_text("Оформити замовлення", exact=False)
+        fallback_count = await fallback.count()
+        chosen = None
+        for i in range(min(fallback_count, 10)):
+            cand = fallback.nth(i)
+            try:
+                cls = await cand.evaluate("el => String(el.className || '')")
+            except Exception:
+                cls = ""
+            if "os-button" in cls:
+                chosen = cand
+                break
+        if chosen is None and fallback_count > 0:
+            chosen = fallback.first
+        if chosen is None:
+            raise RuntimeError("Submit button 'Оформити замовлення' not found.")
+        submit_btn = chosen
+
+    await submit_btn.wait_for(state="visible", timeout=TIMEOUT_MS)
+    await submit_btn.click(timeout=TIMEOUT_MS)
+
+    try:
+        await page.wait_for_url(re.compile(r".*/client/order/\d+/?"), timeout=TIMEOUT_MS)
+    except PWTimeoutError as e:
+        raise RuntimeError("Submit click did not navigate to /client/order/<digits>/.") from e
+
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_MS)
+    except PWTimeoutError:
+        pass
+    try:
+        await page.wait_for_load_state("networkidle", timeout=TIMEOUT_MS)
+    except PWTimeoutError:
+        pass
+
+    m = re.search(r"/client/order/(\d+)/?", page.url or "")
+    if m:
+        return m.group(1)
+
+    candidates = [
+        page.locator("h1").first,
+        page.get_by_text("Ваш Процес", exact=False).first,
+        page.locator("body").first,
+    ]
+    for loc in candidates:
+        try:
+            txt = (await loc.inner_text(timeout=TIMEOUT_MS)).strip()
+        except Exception:
+            continue
+        m_txt = re.search(r"Ваш\s+Процес\s*(\d+)", txt, flags=re.IGNORECASE)
+        if m_txt:
+            return m_txt.group(1)
+
+    raise RuntimeError("Could not parse supplier order number after submit.")
+
+
 async def _run() -> tuple[bool, dict]:
     if not STORAGE_STATE_FILE:
         raise RuntimeError("SUP2_STORAGE_STATE_FILE is empty.")
@@ -559,6 +659,8 @@ async def _run() -> tuple[bool, dict]:
     page = None
     stage = "init"
     added: list[dict] = []
+    supplier_order_number = ""
+    paused_for_error = False
 
     try:
         async with async_playwright() as p:
@@ -582,8 +684,19 @@ async def _run() -> tuple[bool, dict]:
             stage = "attach_label"
             await _attach_label_file(page, TTN)
 
-            return True, {"ok": True, "ttn": TTN, "added": added, "url": page.url or BASKET_URL}
+            stage = "submit_order"
+            supplier_order_number = await _submit_order_and_get_number(page)
+
+            return True, {
+                "ok": True,
+                "ttn": TTN,
+                "added": added,
+                "supplier_order_number": supplier_order_number,
+                "url": page.url or BASKET_URL,
+            }
     except StageError as e:
+        await _debug_pause_if_needed()
+        paused_for_error = True
         return False, {
             "ok": False,
             "error": str(e),
@@ -592,6 +705,8 @@ async def _run() -> tuple[bool, dict]:
             "details": e.details or {},
         }
     except Exception as e:
+        await _debug_pause_if_needed()
+        paused_for_error = True
         return False, {
             "ok": False,
             "error": str(e),
@@ -601,8 +716,8 @@ async def _run() -> tuple[bool, dict]:
         }
     finally:
         try:
-            if page is not None and DEBUG_PAUSE_SECONDS > 0:
-                await page.wait_for_timeout(DEBUG_PAUSE_SECONDS * 1000)
+            if not paused_for_error:
+                await _debug_pause_if_needed()
         except Exception:
             pass
         try:
