@@ -649,19 +649,55 @@ async def _wait_enabled(locator, timeout_ms: int) -> None:
     raise RuntimeError("File input is not enabled")
 
 
+async def _pick_file_input(page):
+    visible = page.locator("input[type='file']:visible")
+    if await visible.count() > 0:
+        return visible.first
+    any_input = page.locator("input[type='file']")
+    if await any_input.count() > 0:
+        return any_input.first
+    raise RuntimeError("No input[type='file'] found on page.")
+
+
 async def _attach_label_file(page, ttn: str) -> dict:
     if not NP_API_KEY:
         raise StageError("attach_label", "SUP2_NP_API_KEY (or NP_API_KEY) is required.", {})
     pdf_path = _download_np_label(LABELS_DIR, ttn, NP_API_KEY)
 
-    file_input = page.locator("input[type='file']").first
-    await file_input.wait_for(state="attached", timeout=TIMEOUT_MS)
-    try:
-        await file_input.wait_for(state="visible", timeout=TIMEOUT_MS)
-    except Exception:
-        pass
-    await _wait_enabled(file_input, TIMEOUT_MS)
-    await file_input.set_input_files(str(pdf_path))
+    attached = False
+    attach_btn = page.get_by_role("button", name="Накладний файл").locator(":visible").first
+    if await attach_btn.count() == 0:
+        attach_btn = page.get_by_text("Накладний файл", exact=False).locator(":visible").first
+
+    if await attach_btn.count() > 0:
+        try:
+            async with page.expect_file_chooser(timeout=TIMEOUT_MS) as fc_info:
+                await attach_btn.click(timeout=TIMEOUT_MS)
+            fc = await fc_info.value
+            await fc.set_files(str(pdf_path))
+            attached = True
+        except Exception:
+            attached = False
+
+    if not attached:
+        file_input = await _pick_file_input(page)
+        await file_input.wait_for(state="attached", timeout=TIMEOUT_MS)
+        try:
+            await file_input.wait_for(state="visible", timeout=TIMEOUT_MS)
+        except Exception:
+            pass
+        await _wait_enabled(file_input, TIMEOUT_MS)
+        await file_input.set_input_files(str(pdf_path))
+    await page.wait_for_timeout(600)
+
+    if (page.url or "").startswith("chrome-error://") or (page.url or "").startswith("file://"):
+        raise StageError(
+            "attach_label",
+            "File attach navigated browser to an invalid URL.",
+            {"url": page.url or "", "file": str(pdf_path)},
+        )
+
+    file_input = await _pick_file_input(page)
     input_value = (await file_input.input_value(timeout=TIMEOUT_MS)).strip()
     if not input_value:
         raise StageError(
@@ -670,11 +706,6 @@ async def _attach_label_file(page, ttn: str) -> dict:
             {"file": str(pdf_path)},
         )
 
-    if DELETE_LABEL_AFTER_ATTACH:
-        try:
-            pdf_path.unlink(missing_ok=True)
-        except Exception:
-            pass
     return {"file": str(pdf_path), "input_value": input_value}
 
 
@@ -760,6 +791,7 @@ async def _run() -> tuple[bool, dict]:
     stage = "init"
     added: list[dict] = []
     supplier_order_number = ""
+    attach_info: dict | None = None
     paused_for_error = False
 
     try:
@@ -782,10 +814,18 @@ async def _run() -> tuple[bool, dict]:
             await _fill_comment(page, TTN)
 
             stage = "attach_label"
-            await _attach_label_file(page, TTN)
+            attach_info = await _attach_label_file(page, TTN)
 
             stage = "submit_order"
             supplier_order_number = await _submit_order_and_get_number(page)
+
+            if DELETE_LABEL_AFTER_ATTACH and attach_info:
+                file_path_raw = str(attach_info.get("file", "")).strip()
+                if file_path_raw:
+                    try:
+                        Path(file_path_raw).unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
             return True, {
                 "ok": True,
