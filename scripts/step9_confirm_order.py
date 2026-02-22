@@ -1,5 +1,6 @@
 # scripts/step9_confirm_order.py
 import asyncio
+import json
 import os
 import re
 from pathlib import Path
@@ -330,7 +331,49 @@ async def _click_payment_confirm_if_shown(page, timeout_ms: int) -> bool:
     return True
 
 
-async def main():
+async def _extract_order_number_if_success(page) -> tuple[str, str]:
+    warning = ""
+    success_re = re.compile(r".*/checkout/onepage/success(?:[/?#].*)?$")
+
+    # Пытаемся дождаться success URL, но не ломаем успешный шаг, если номер не удалось вытащить.
+    try:
+        await page.wait_for_url(success_re, timeout=min(TIMEOUT_MS, 15000))
+    except Exception:
+        pass
+
+    try:
+        current_url = page.url or ""
+    except Exception:
+        current_url = ""
+
+    if not success_re.match(current_url):
+        return "", "order number not found"
+
+    raw_text = ""
+    try:
+        order_block = page.locator("div.order-number").first
+        if await order_block.count() > 0:
+            raw_text = (await order_block.inner_text(timeout=2000)).strip()
+    except Exception:
+        raw_text = ""
+
+    if not raw_text:
+        try:
+            fallback = page.get_by_text(re.compile(r"Замовлення.*BO-", re.I)).first
+            if await fallback.count() > 0:
+                raw_text = (await fallback.inner_text(timeout=2000)).strip()
+        except Exception:
+            raw_text = ""
+
+    if raw_text:
+        m = re.search(r"\b(BO-\d+)\b", raw_text) or re.search(r"№\s*(BO-\d+)", raw_text)
+        if m:
+            return m.group(1), ""
+
+    return "", "order number not found"
+
+
+async def main() -> dict:
     async with async_playwright() as p:
         if USE_CDP:
             browser = await p.chromium.connect_over_cdp(CDP_ENDPOINT)
@@ -421,10 +464,23 @@ async def main():
         except Exception:
             pass
 
+        order_number, warning = await _extract_order_number_if_success(page)
+
         if not USE_CDP:
             await context.close()
             await browser.close()
 
+        payload = {"ok": True, "order_number": order_number}
+        if warning:
+            payload["warning"] = warning
+        return payload
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        payload = asyncio.run(main())
+        print(json.dumps(payload, ensure_ascii=False))
+        raise SystemExit(0)
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+        raise SystemExit(2)

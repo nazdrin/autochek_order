@@ -822,6 +822,7 @@ def process_one_biotus_order(order: Dict[str, Any]) -> None:
 
     current_step = None
     current_key = None
+    biotus_order_number = ""
     for step_key, step_name, script in steps:
         current_step = step_name
         current_key = step_key
@@ -840,9 +841,26 @@ def process_one_biotus_order(order: Dict[str, Any]) -> None:
             reason = short_reason(step_name, rc, out, err, None)
             raise StepError(step_name, reason)
 
+        if step_name == "step9_confirm_order":
+            try:
+                payload = parse_json_from_stdout(out)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict):
+                biotus_order_number = str(payload.get("order_number") or "").strip()
+                if not biotus_order_number:
+                    warning = str(payload.get("warning") or "order number not found").strip()
+                    print(f"[ORCH] WARN step9_confirm_order: {warning}")
+
     # If all steps succeeded, update SalesDrive order status
-    salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID)
-    print(f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}")
+    if biotus_order_number:
+        salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=biotus_order_number)
+        print(
+            f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={biotus_order_number}"
+        )
+    else:
+        salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID)
+        print(f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}")
 
 
 def process_one_dobavki_order(order: Dict[str, Any]) -> None:
