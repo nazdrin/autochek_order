@@ -90,6 +90,7 @@ def summarize_order(o: Dict[str, Any]) -> Dict[str, Any]:
         "updateAt": o.get("updateAt"),
         "statusId": o.get("statusId"),
         "supplier": o.get("supplier"),
+        "supplierlist": o.get("supplierlist"),
         "phone": phone,
         "trackingNumber": d0.get("trackingNumber"),
         "cityName": d0.get("cityName"),
@@ -131,7 +132,7 @@ def main():
         s = summarize_order(o)
         print(f"--- #{i} ---")
         print(
-            f"id={s['id']} tabletkiOrder={s['tabletkiOrder']} statusId={s['statusId']} supplier={s['supplier']}\n"
+            f"id={s['id']} tabletkiOrder={s['tabletkiOrder']} statusId={s['statusId']} supplier={s['supplier']} supplierlist={s['supplierlist']}\n"
             f"orderTime={s['orderTime']} updateAt={s['updateAt']}\n"
             f"phone={s['phone']} trackingNumber={s['trackingNumber']}\n"
             f"city={s['cityName']} address={s['address']} postpaySum={s['postpaySum']}\n"

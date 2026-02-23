@@ -164,6 +164,83 @@ ORCH_SUP2_HEADLESS = (os.getenv("ORCH_SUP2_HEADLESS") or ORCH_HEADLESS or "1").s
 ORCH_SUP2_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP2_STORAGE_STATE_FILE") or ".state_supplier2.json").strip()
 ORCH_SUP2_CLEAR_BASKET = (os.getenv("ORCH_SUP2_CLEAR_BASKET") or "1").strip()
 
+# Orders are filtered/routed by numeric order["supplierlist"] (via ALLOWED_SUPPLIERS),
+# not by order["supplier"] text. Keep supplier text only for diagnostics/logs.
+
+
+def format_int_set(values: set[int]) -> str:
+    return "{" + ",".join(str(x) for x in sorted(values)) + "}"
+
+
+def parse_allowed_suppliers_env(raw_value: str) -> set[int]:
+    parsed: set[int] = set()
+    raw_value = (raw_value or "").strip()
+    if not raw_value:
+        return parsed
+
+    for token in re.split(r"[;,]", raw_value):
+        part = token.strip()
+        if not part:
+            continue
+        try:
+            parsed.add(int(part))
+        except ValueError:
+            print(
+                f"[ORCH][WARN] Invalid ALLOWED_SUPPLIERS token ignored: {part!r} (raw={raw_value!r})",
+                file=sys.stderr,
+            )
+    return parsed
+
+
+def order_id_for_log(order: Dict[str, Any]) -> str:
+    try:
+        return str(int(order.get("id")))
+    except Exception:
+        return str(order.get("id"))
+
+
+def parse_order_supplierlist(order: Dict[str, Any]) -> tuple[int | None, str]:
+    raw = order.get("supplierlist")
+    if raw is None:
+        return None, "missing field supplierlist"
+    try:
+        return int(raw), ""
+    except Exception:
+        return None, f"invalid supplierlist={raw!r} (cannot convert to int)"
+
+
+def filter_orders_by_supplierlist(orders: List[Dict[str, Any]], allowed_suppliers: set[int]) -> tuple[List[Dict[str, Any]], int]:
+    allowed_orders: List[Dict[str, Any]] = []
+    skipped = 0
+    allowed_repr = format_int_set(allowed_suppliers)
+
+    for order in orders:
+        oid = order_id_for_log(order)
+        supplier_text = str(order.get("supplier") or "").strip()
+        raw_supplierlist = order.get("supplierlist")
+        supplierlist, err = parse_order_supplierlist(order)
+
+        if supplierlist is None:
+            skipped += 1
+            print(
+                f"[ORCH] Filter order_id={oid} supplierlist={raw_supplierlist!r} allowed_set={allowed_repr} => ПРОПУЩЕНО ({err}; supplier={supplier_text!r})"
+            )
+            continue
+
+        if supplierlist not in allowed_suppliers:
+            skipped += 1
+            print(
+                f"[ORCH] Filter order_id={oid} supplierlist={supplierlist} allowed_set={allowed_repr} => ПРОПУЩЕНО (supplierlist not allowed; supplier={supplier_text!r})"
+            )
+            continue
+
+        print(
+            f"[ORCH] Filter order_id={oid} supplierlist={supplierlist} allowed_set={allowed_repr} => ПРИНЯТО (supplier={supplier_text!r})"
+        )
+        allowed_orders.append(order)
+
+    return allowed_orders, skipped
+
 
 def build_full_name(order: Dict[str, Any]) -> str:
     pc = order.get("primaryContact") or {}
@@ -938,19 +1015,28 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
     )
 
 
-def process_one_order(order: Dict[str, Any]) -> None:
+def process_one_order(order: Dict[str, Any]) -> bool:
     supplier = str(order.get("supplier") or "").strip()
-    supplier_norm = supplier.casefold()
+    supplierlist, err = parse_order_supplierlist(order)
+    order_id = order_id_for_log(order)
+    if supplierlist is None:
+        print(
+            f"[ORCH] Safe skip: order_id={order_id} supplierlist={order.get('supplierlist')!r} => {err} (supplier={supplier!r})"
+        )
+        return False
 
-    if supplier_norm == "dobavki.ua":
+    if supplierlist == 41:
         process_one_dobavki_order(order)
-        return
+        return True
 
-    if supplier_norm == "biotus":
+    if supplierlist == 38:
         process_one_biotus_order(order)
-        return
+        return True
 
-    raise RuntimeError(f"Unsupported supplier '{supplier}'. Expected 'Biotus' or 'Dobavki.ua'.")
+    print(
+        f"[ORCH] Safe skip: order_id={order_id} supplierlist={supplierlist} => unsupported routing target (supplier={supplier!r})"
+    )
+    return False
 
 
 def main() -> int:
@@ -993,6 +1079,15 @@ def main() -> int:
             print(f"{label} not found: {p}", file=sys.stderr)
             return 2
 
+    allowed_suppliers = parse_allowed_suppliers_env(os.getenv("ALLOWED_SUPPLIERS", ""))
+    print(f"[ORCH] ALLOWED_SUPPLIERS parsed -> {format_int_set(allowed_suppliers)}")
+    if not allowed_suppliers:
+        print(
+            "[ORCH][ERROR] ALLOWED_SUPPLIERS is empty or not set. Fail-safe mode: no orders will be processed.",
+            file=sys.stderr,
+        )
+        return 2
+
     state = load_state()
     state.setdefault("failed", {})
     processed_ids: List[int] = state.get("processed_ids", [])
@@ -1023,7 +1118,13 @@ def main() -> int:
                 notify_stub(f"salesdrive_fetch_status21.py error rc={rc}: {err.strip()}")
                 raise RuntimeError("Fetch failed")
 
-            orders = parse_orders_from_fetch_output(out)
+            fetched_orders = parse_orders_from_fetch_output(out)
+            filtered_orders, supplier_filtered_skipped = filter_orders_by_supplierlist(fetched_orders, allowed_suppliers)
+            print(
+                f"[ORCH] Orders received: total={len(fetched_orders)} / allowed={len(filtered_orders)} / skipped={supplier_filtered_skipped}"
+            )
+
+            orders = filtered_orders
             if not orders:
                 print("[ORCH] No orders in status=21. Sleeping...")
             else:
@@ -1095,15 +1196,17 @@ def main() -> int:
 
                         print(f"[ORCH] Processing id={order_id}")
                         supplier = str(order.get("supplier") or "").strip()
-                        supplier_norm = supplier.casefold()
-                        if supplier_norm == "biotus":
+                        supplierlist, _ = parse_order_supplierlist(order)
+                        if supplierlist == 38:
                             biotus_items = build_biotus_items(order)
+                            print(f"[ORCH] Routing => Biotus (supplierlist=38, supplier={supplier!r})")
                             print(f"[ORCH] BIOTUS_ITEMS => {biotus_items}")
-                        elif supplier_norm == "dobavki.ua":
+                        elif supplierlist == 41:
                             sup2_items = build_sup2_items(order)
+                            print(f"[ORCH] Routing => Dobavki (supplierlist=41, supplier={supplier!r})")
                             print(f"[ORCH] SUP2_ITEMS => {sup2_items}")
                         else:
-                            print(f"[ORCH] supplier => {supplier}")
+                            print(f"[ORCH] Routing preview skip => supplierlist={supplierlist!r} supplier={supplier!r}")
 
                         if args.dry_run:
                             print("[ORCH] dry-run enabled, no steps executed.")
@@ -1111,7 +1214,7 @@ def main() -> int:
                             continue
 
                         try:
-                            process_one_order(order)
+                            processed = process_one_order(order)
                         except Exception as e:
                             if isinstance(e, StepError):
                                 step = e.step
@@ -1140,6 +1243,10 @@ def main() -> int:
                                 notify_stub(red_reason)
 
                             # continue with next order
+                            continue
+
+                        if not processed:
+                            print(f"[ORCH] Order id={order_id} skipped by routing safety check.")
                             continue
 
                         # success
