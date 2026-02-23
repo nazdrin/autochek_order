@@ -37,6 +37,7 @@ STEP7_TTN_SCRIPT = ROOT / "scripts" / "step7_fill_ttn.py"
 STEP8_ATTACH_SCRIPT = ROOT / "scripts" / "step8_attach_invoice_file.py"
 STEP9_CONFIRM_SCRIPT = ROOT / "scripts" / "step9_confirm_order.py"
 SUP2_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier2_run_order.py"
+SUP3_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier3_run_order.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -60,6 +61,7 @@ STEP_TIMEOUT_DEFAULTS: Dict[str, int] = {
     "STEP8_ATTACH": int(os.getenv("ORCH_TIMEOUT_STEP8_ATTACH", "75")),
     "STEP9_CONFIRM": int(os.getenv("ORCH_TIMEOUT_STEP9_CONFIRM", "45")),
     "SUP2_RUN_ORDER": int(os.getenv("ORCH_TIMEOUT_SUP2_RUN_ORDER", "180")),
+    "SUP3_RUN_ORDER": int(os.getenv("ORCH_TIMEOUT_SUP3_RUN_ORDER", "240")),
     "SALESDRIVE_UPDATE": int(os.getenv("ORCH_TIMEOUT_SALESDRIVE_UPDATE", "30")),
 }
 
@@ -163,6 +165,9 @@ ORCH_HEADLESS = (os.getenv("ORCH_HEADLESS") or "").strip()
 ORCH_SUP2_HEADLESS = (os.getenv("ORCH_SUP2_HEADLESS") or ORCH_HEADLESS or "1").strip()
 ORCH_SUP2_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP2_STORAGE_STATE_FILE") or ".state_supplier2.json").strip()
 ORCH_SUP2_CLEAR_BASKET = (os.getenv("ORCH_SUP2_CLEAR_BASKET") or "1").strip()
+ORCH_SUP3_HEADLESS = (os.getenv("ORCH_SUP3_HEADLESS") or ORCH_HEADLESS or "1").strip()
+ORCH_SUP3_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP3_STORAGE_STATE_FILE") or ".state_supplier3.json").strip()
+ORCH_SUP3_CLEAR_BASKET = (os.getenv("ORCH_SUP3_CLEAR_BASKET") or "1").strip()
 
 # Orders are filtered/routed by numeric order["supplierlist"] (via ALLOWED_SUPPLIERS),
 # not by order["supplier"] text. Keep supplier text only for diagnostics/logs.
@@ -335,6 +340,7 @@ def salesdrive_update_status(
     status_id: int,
     comment: str | None = None,
     number_sup: str | None = None,
+    products: List[Dict[str, Any]] | None = None,
 ) -> None:
     """Update order status in SalesDrive using /api/order/update/. Raises on failure.
     Optionally supports a comment (short, max 800 chars)."""
@@ -348,6 +354,10 @@ def salesdrive_update_status(
         data_obj["comment"] = str(comment)[:800]
     if number_sup and str(number_sup).strip():
         data_obj["numberSup"] = str(number_sup).strip()
+    if isinstance(products, list):
+        cleaned_products = [p for p in products if isinstance(p, dict)]
+        if cleaned_products:
+            data_obj["products"] = cleaned_products
     payload = {
         "id": int(order_id),
         "data": data_obj,
@@ -597,6 +607,41 @@ def build_sup2_items(order: Dict[str, Any]) -> str:
         items.append(f"{sku}:{qty}")
 
     return ",".join(items)
+
+
+def build_sup3_items(order: Dict[str, Any]) -> str:
+    # DSN supplier3 uses the same SKU:QTY format as supplier2.
+    return build_sup2_items(order)
+
+
+def build_supplier3_salesdrive_products(order: Dict[str, Any], items_summary: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+    products = order.get("products") or []
+    summary = items_summary if isinstance(items_summary, dict) else {}
+    out: List[Dict[str, Any]] = []
+
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        desc = str(p.get("description") or "").strip()
+        sku = desc.split(",", 1)[0].strip() if desc else ""
+        item_payload: Dict[str, Any] = {
+            "id": str(p.get("id") or ""),
+            "name": p.get("name") or "",
+            "costPerItem": p.get("costPerItem"),
+            "amount": p.get("amount"),
+            "description": desc,
+            "discount": p.get("discount") if p.get("discount") is not None else "",
+            "sku": sku,
+        }
+        if sku and sku in summary:
+            row_info = summary.get(sku)
+            if isinstance(row_info, dict):
+                expenses = row_info.get("price_uah")
+                if isinstance(expenses, int):
+                    item_payload["expenses"] = expenses
+        out.append(item_payload)
+
+    return out
 
 
 def get_first_delivery_block(order: Dict[str, Any]) -> Dict[str, Any]:
@@ -1015,6 +1060,94 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
     )
 
 
+def process_one_supplier3_order(order: Dict[str, Any]) -> None:
+    order_id = order.get("id")
+    try:
+        order_id_int = int(order_id)
+    except Exception:
+        raise RuntimeError(f"Invalid order id: {order_id}")
+
+    sup3_items = build_sup3_items(order)
+    if not sup3_items:
+        raise RuntimeError("Не смог сформировать SUP3_ITEMS из order['products'].")
+
+    tracking_number = extract_tracking_number(order)
+    if not tracking_number:
+        raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для SUP3_TTN.")
+
+    if not ORCH_SUP3_STORAGE_STATE_FILE:
+        raise RuntimeError("ORCH_SUP3_STORAGE_STATE_FILE is empty.")
+
+    env = os.environ.copy()
+    env.setdefault("SUP3_HEADLESS", ORCH_SUP3_HEADLESS)
+    env["SUP3_STAGE"] = "run"
+    env["SUP3_STORAGE_STATE_FILE"] = ORCH_SUP3_STORAGE_STATE_FILE
+    env["SUP3_ITEMS"] = sup3_items
+    env["SUP3_TTN"] = tracking_number
+    env["SUP3_CLEAR_BASKET"] = ORCH_SUP3_CLEAR_BASKET
+    if "SUP3_DEBUG_PAUSE_SECONDS" in os.environ:
+        env["SUP3_DEBUG_PAUSE_SECONDS"] = os.environ["SUP3_DEBUG_PAUSE_SECONDS"]
+    if "SUP3_DEBUG_PAUSE" in os.environ and "SUP3_DEBUG_PAUSE_SECONDS" not in env:
+        env["SUP3_DEBUG_PAUSE"] = os.environ["SUP3_DEBUG_PAUSE"]
+
+    print(f"[ORCH] DSN SUP3_ITEMS => {sup3_items}")
+    print(f"[ORCH] DSN TTN => {tracking_number}")
+
+    step_name = "supplier3_run_order"
+    step_timeout = _timeout_for_step("SUP3_RUN_ORDER")
+    try:
+        rc, out, err = run_python(SUP3_RUN_ORDER_SCRIPT, env=env, timeout_sec=step_timeout)
+    except subprocess.TimeoutExpired as te:
+        raise StepError(step_name, f"timeout after {step_timeout}s") from te
+
+    if out.strip():
+        print(out, end="" if out.endswith("\n") else "\n")
+    if err.strip():
+        print(err, file=sys.stderr, end="" if err.endswith("\n") else "\n")
+
+    payload: Dict[str, Any] | None = None
+    try:
+        parsed = parse_json_from_stdout(out)
+        if isinstance(parsed, dict):
+            payload = parsed
+    except Exception:
+        payload = None
+
+    if rc != 0:
+        if payload:
+            stage = str(payload.get("stage") or step_name)
+            msg = str(payload.get("error") or f"rc={rc}")
+            raise StepError(stage, msg)
+        reason = short_reason(step_name, rc, out, err, None)
+        raise StepError(step_name, reason)
+
+    if not payload:
+        raise StepError(step_name, "No JSON object in supplier3_run_order stdout.")
+    if not bool(payload.get("ok")):
+        stage = str(payload.get("stage") or step_name)
+        msg = str(payload.get("error") or "supplier3_run_order returned ok=false")
+        raise StepError(stage, msg)
+
+    details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+    checkout_info = details.get("checkout_ttn") if isinstance(details.get("checkout_ttn"), dict) else {}
+    add_items_info = details.get("add_items") if isinstance(details.get("add_items"), dict) else {}
+
+    supplier_order_number = ""
+    if isinstance(checkout_info, dict):
+        supplier_order_number = str(checkout_info.get("supplier_order_number") or "").strip()
+    if not supplier_order_number:
+        supplier_order_number = str(payload.get("supplier_order_number") or "").strip()
+    if not supplier_order_number:
+        raise StepError(step_name, "supplier_order_number is empty in supplier3_run_order response.")
+
+    items_summary = add_items_info.get("items_summary") if isinstance(add_items_info, dict) else {}
+    salesdrive_products = build_supplier3_salesdrive_products(order, items_summary if isinstance(items_summary, dict) else {})
+    salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number, products=salesdrive_products)
+    print(
+        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number}, products={len(salesdrive_products)}"
+    )
+
+
 def process_one_order(order: Dict[str, Any]) -> bool:
     supplier = str(order.get("supplier") or "").strip()
     supplierlist, err = parse_order_supplierlist(order)
@@ -1027,6 +1160,10 @@ def process_one_order(order: Dict[str, Any]) -> bool:
 
     if supplierlist == 41:
         process_one_dobavki_order(order)
+        return True
+
+    if supplierlist == 39:
+        process_one_supplier3_order(order)
         return True
 
     if supplierlist == 38:
@@ -1063,6 +1200,7 @@ def main() -> int:
 
     required = [
         ("Supplier2 run order script", SUP2_RUN_ORDER_SCRIPT),
+        ("Supplier3 run order script", SUP3_RUN_ORDER_SCRIPT),
         ("Step2_3 script", STEP2_3_SCRIPT),
         ("Step4 script", STEP4_SCRIPT),
         ("Step5 drop tab script", STEP5_DROP_TAB_SCRIPT),
@@ -1201,6 +1339,10 @@ def main() -> int:
                             biotus_items = build_biotus_items(order)
                             print(f"[ORCH] Routing => Biotus (supplierlist=38, supplier={supplier!r})")
                             print(f"[ORCH] BIOTUS_ITEMS => {biotus_items}")
+                        elif supplierlist == 39:
+                            sup3_items = build_sup3_items(order)
+                            print(f"[ORCH] Routing => DSN (supplierlist=39, supplier={supplier!r})")
+                            print(f"[ORCH] SUP3_ITEMS => {sup3_items}")
                         elif supplierlist == 41:
                             sup2_items = build_sup2_items(order)
                             print(f"[ORCH] Routing => Dobavki (supplierlist=41, supplier={supplier!r})")
