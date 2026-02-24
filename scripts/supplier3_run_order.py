@@ -451,12 +451,12 @@ async def _search_by_sku(page, sku: str) -> None:
         pass
 
     enter_sent = False
-    for mode in ("locator_enter", "keyboard_enter", "form_submit", "form_submit_button_click"):
+    target_search_re = re.compile(r"/katalog/search/\?q=", re.IGNORECASE)
+    # Keep a small fallback chain, but avoid long "thinking" loops.
+    for mode in ("locator_enter", "form_submit", "form_submit_button_click"):
         try:
             if mode == "locator_enter":
                 await search_input.press("Enter", timeout=1500)
-            elif mode == "keyboard_enter":
-                await page.keyboard.press("Enter")
             elif mode == "form_submit":
                 await search_input.evaluate(
                     """(el) => {
@@ -486,9 +486,9 @@ async def _search_by_sku(page, sku: str) -> None:
                     raise RuntimeError("search submit button not found")
             print(f"[SUP3] add_items: search submit via {mode}")
             enter_sent = True
-            # Give JS handlers a short chance to navigate/update before trying another mode.
-            await page.wait_for_timeout(400)
-            if (page.url or "") != start_url:
+            # Give JS handlers a short chance; stop early on visible results page signal.
+            await page.wait_for_timeout(250)
+            if (page.url or "") != start_url or target_search_re.search(page.url or ""):
                 break
         except Exception:
             continue
@@ -503,19 +503,11 @@ async def _search_by_sku(page, sku: str) -> None:
         search_url = f"{SUP3_BASE_URL.rstrip('/')}/katalog/search/?q={urllib.parse.quote_plus(sku)}"
         print(f"[SUP3] add_items: search fallback goto {search_url}")
         await page.goto(search_url, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=min(5000, SUP3_TIMEOUT_MS))
-        except PWTimeoutError:
-            pass
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=SUP3_TIMEOUT_MS)
     except PWTimeoutError:
         pass
-    try:
-        await page.wait_for_load_state("networkidle", timeout=min(5000, SUP3_TIMEOUT_MS))
-    except PWTimeoutError:
-        pass
-    await page.wait_for_timeout(500)
+    await page.wait_for_timeout(250)
 
 
 async def _wait_product_row_by_sku(page, sku: str):
@@ -523,6 +515,7 @@ async def _wait_product_row_by_sku(page, sku: str):
         "input.counter-field.j-buy-button-counter-input[type='number'], "
         "input.j-buy-button-counter-input[type='number'], input.counter-field[type='number'], input[type='number']"
     )
+    product_scope = "table.productsTable, .productsTable, main, .content, body"
     candidate_selectors = [
         ("tr.j-product-row by td", page.locator("tr.j-product-row", has=page.locator(f"td:has-text('{sku}')")).first),
         ("tr.j-product-row by text", page.locator("tr.j-product-row", has_text=sku).first),
@@ -613,6 +606,49 @@ async def _wait_product_row_by_sku(page, sku: str):
                     print("[SUP3] add_items: row found via single visible qty-input fallback")
                     return qloc
 
+        # Last practical fallback for DSN search pages: if there is exactly one visible qty input
+        # inside the content area, use its nearest ancestor regardless of SKU text.
+        if visible_qty_inputs == 1:
+            for qi in range(min(qcount, 20)):
+                qloc = qty_inputs.nth(qi)
+                try:
+                    if not await qloc.is_visible():
+                        continue
+                except Exception:
+                    continue
+                anc_any = qloc.locator(
+                    "xpath=ancestor::tr[1] | ancestor::li[1] | ancestor::article[1] | ancestor::div[contains(@class,'product')][1] | ancestor::div[contains(@class,'item')][1]"
+                ).first
+                try:
+                    if await anc_any.count() > 0:
+                        print("[SUP3] add_items: row found via single visible qty-input + generic ancestor fallback")
+                        return anc_any
+                    print("[SUP3] add_items: row found via single visible qty-input direct fallback")
+                    return qloc
+                except Exception:
+                    print("[SUP3] add_items: row found via single visible qty-input direct fallback")
+                    return qloc
+
+        # Another fallback: first visible purchasable row in products table on search page.
+        try:
+            table_rows = page.locator("table.productsTable tbody tr, table.productsTable tr")
+            table_count = await table_rows.count()
+        except Exception:
+            table_count = 0
+            table_rows = None
+        if table_rows is not None and table_count > 0:
+            for i in range(min(table_count, 50)):
+                cand = table_rows.nth(i)
+                try:
+                    if not await cand.is_visible():
+                        continue
+                    row_qty = cand.locator(qty_input_selector).first
+                    if await row_qty.count() > 0:
+                        print(f"[SUP3] add_items: row found via first visible productsTable row with qty idx={i}")
+                        return cand
+                except Exception:
+                    continue
+
         try:
             count = await rows.count()
         except Exception:
@@ -641,6 +677,11 @@ async def _wait_product_row_by_sku(page, sku: str):
                 except Exception:
                     pass
             scrolled_once = True
+        else:
+            try:
+                await page.mouse.wheel(0, 1000)
+            except Exception:
+                pass
         await page.wait_for_timeout(120)
     return None
 
@@ -709,9 +750,11 @@ async def _set_row_qty_fallback(row, target_qty: int) -> bool:
         try:
             if current < target_qty and await plus_btn.count() > 0:
                 await plus_btn.click(timeout=1500)
+                print(f"[SUP3] add_items: set_qty fallback plus -> target={target_qty}")
                 await detect_and_fail_unavailable_modal(page, "add_items.set_qty_fallback.plus")
             elif current > target_qty and await minus_btn.count() > 0:
                 await minus_btn.click(timeout=1500)
+                print(f"[SUP3] add_items: set_qty fallback minus -> target={target_qty}")
                 await detect_and_fail_unavailable_modal(page, "add_items.set_qty_fallback.minus")
             else:
                 break
@@ -728,37 +771,90 @@ async def _set_row_qty(row, qty: int) -> None:
     page = row.page
     qty_input = row.locator(
         "input.counter-field.j-buy-button-counter-input[type='number'], "
-        "input.j-buy-button-counter-input[type='number'], input.counter-field[type='number']"
+        "input.j-buy-button-counter-input[type='number'], input.counter-field[type='number'], input[type='number']"
     ).first
-    await qty_input.wait_for(state="visible", timeout=SUP3_TIMEOUT_MS)
-    await qty_input.click(timeout=SUP3_TIMEOUT_MS)
-    await page.keyboard.press(_select_all_shortcut())
-    await qty_input.type(str(qty), delay=20, timeout=SUP3_TIMEOUT_MS)
+    await qty_input.wait_for(state="attached", timeout=SUP3_TIMEOUT_MS)
     try:
-        await qty_input.press("Enter", timeout=1000)
+        await qty_input.scroll_into_view_if_needed(timeout=1000)
     except Exception:
         pass
     try:
-        await qty_input.dispatch_event("input")
-        await qty_input.dispatch_event("change")
+        await qty_input.wait_for(state="visible", timeout=min(5000, SUP3_TIMEOUT_MS))
     except Exception:
         pass
-    await detect_and_fail_unavailable_modal(page, "add_items.set_qty.after_input")
-    await page.wait_for_timeout(250)
-    await detect_and_fail_unavailable_modal(page, "add_items.set_qty.after_wait")
 
+    async def _read_qty_value() -> tuple[str, str]:
+        try:
+            v = await qty_input.input_value(timeout=1200)
+        except Exception:
+            v = ""
+        return v, re.sub(r"\D", "", v or "")
+
+    before_raw, before_digits = await _read_qty_value()
+    print(f"[SUP3] add_items: set_qty start target={qty} current={before_raw!r}")
+
+    # Attempt 1: direct fill + change events (fast path)
     try:
-        val = await qty_input.input_value(timeout=1500)
+        await qty_input.click(timeout=min(3000, SUP3_TIMEOUT_MS), force=True)
+        await page.keyboard.press(_select_all_shortcut())
+        await page.keyboard.press("Backspace")
     except Exception:
-        val = ""
-    val_digits = re.sub(r"\D", "", val or "")
-    if val_digits == str(qty):
+        pass
+    try:
+        await qty_input.fill(str(qty), timeout=min(3000, SUP3_TIMEOUT_MS))
+        try:
+            await qty_input.dispatch_event("input")
+            await qty_input.dispatch_event("change")
+        except Exception:
+            pass
+        try:
+            await qty_input.press("Enter", timeout=800)
+        except Exception:
+            try:
+                await qty_input.blur()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    await detect_and_fail_unavailable_modal(page, "add_items.set_qty.after_fill")
+    await page.wait_for_timeout(180)
+    await detect_and_fail_unavailable_modal(page, "add_items.set_qty.after_fill_wait")
+    val1_raw, val1_digits = await _read_qty_value()
+    print(f"[SUP3] add_items: set_qty after fill current={val1_raw!r}")
+    if val1_digits == str(qty):
         return
 
+    # Attempt 2: JS set value + events (helps on some reactive inputs)
+    try:
+        await qty_input.evaluate(
+            """(el, value) => {
+                el.focus();
+                el.value = String(value);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.blur();
+            }""",
+            str(qty),
+        )
+    except Exception:
+        pass
+    await detect_and_fail_unavailable_modal(page, "add_items.set_qty.after_js")
+    await page.wait_for_timeout(180)
+    val2_raw, val2_digits = await _read_qty_value()
+    print(f"[SUP3] add_items: set_qty after js current={val2_raw!r}")
+    if val2_digits == str(qty):
+        return
+
+    # Attempt 3: +/- fallback
     ok = await _set_row_qty_fallback(row, qty)
     if not ok:
-        raise RuntimeError(f"Could not set qty={qty}; current_value={val!r}")
+        raise RuntimeError(
+            f"Could not set qty={qty}; current_before={before_raw!r}; after_fill={val1_raw!r}; after_js={val2_raw!r}"
+        )
     await detect_and_fail_unavailable_modal(page, "add_items.set_qty.after_fallback")
+    final_raw, _ = await _read_qty_value()
+    print(f"[SUP3] add_items: set_qty final current={final_raw!r}")
 
 
 async def _add_items(page) -> dict:

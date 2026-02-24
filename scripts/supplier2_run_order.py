@@ -27,6 +27,8 @@ NP_API_KEY = (
     or ""
 ).strip()
 LABELS_DIR = ROOT / "supplier2_labels"
+SUPPLIER_RESULT_JSON_PREFIX = "SUPPLIER_RESULT_JSON="
+SUBMIT_CHECKPOINT_FILE = ROOT / ".supplier2_submit_checkpoint.json"
 
 
 def _to_int(value: str, default: int) -> int:
@@ -68,6 +70,22 @@ class StageError(RuntimeError):
         super().__init__(message)
         self.stage = stage
         self.details = details or {}
+
+
+def _write_submit_checkpoint(ttn: str, url: str, submitted: bool, order_number: str = "") -> None:
+    payload = {
+        "ts": int(time.time()),
+        "ttn": str(ttn or ""),
+        "url": str(url or ""),
+        "submitted": bool(submitted),
+        "order_number": str(order_number or ""),
+    }
+    try:
+        tmp = SUBMIT_CHECKPOINT_FILE.with_suffix(SUBMIT_CHECKPOINT_FILE.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, SUBMIT_CHECKPOINT_FILE)
+    except Exception:
+        pass
 
 
 def _parse_availability_value(availability_raw: str) -> int | None:
@@ -709,7 +727,7 @@ async def _attach_label_file(page, ttn: str) -> dict:
     return {"file": str(pdf_path), "input_value": input_value}
 
 
-async def _submit_order_and_get_number(page) -> str:
+async def _submit_order_and_get_number(page, ttn: str) -> str:
     submit_btn = page.locator(
         "p.os-button.js-submit-button-client",
         has_text="Оформити замовлення",
@@ -736,11 +754,16 @@ async def _submit_order_and_get_number(page) -> str:
 
     await submit_btn.wait_for(state="visible", timeout=TIMEOUT_MS)
     await submit_btn.click(timeout=TIMEOUT_MS)
+    _write_submit_checkpoint(ttn=ttn, url=page.url or "", submitted=True)
 
     try:
         await page.wait_for_url(re.compile(r".*/client/order/\d+/?"), timeout=TIMEOUT_MS)
     except PWTimeoutError as e:
-        raise RuntimeError("Submit click did not navigate to /client/order/<digits>/.") from e
+        raise StageError(
+            "post_submit_failed",
+            "Submit click may have created supplier order, but no success navigation was detected.",
+            {"submitted": True, "ttn": ttn, "url": page.url or ""},
+        ) from e
 
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_MS)
@@ -753,7 +776,9 @@ async def _submit_order_and_get_number(page) -> str:
 
     m = re.search(r"/client/order/(\d+)/?", page.url or "")
     if m:
-        return m.group(1)
+        order_no = m.group(1)
+        _write_submit_checkpoint(ttn=ttn, url=page.url or "", submitted=True, order_number=order_no)
+        return order_no
 
     candidates = [
         page.locator("h1").first,
@@ -767,9 +792,15 @@ async def _submit_order_and_get_number(page) -> str:
             continue
         m_txt = re.search(r"Ваш\s+Процес\s*(\d+)", txt, flags=re.IGNORECASE)
         if m_txt:
-            return m_txt.group(1)
+            order_no = m_txt.group(1)
+            _write_submit_checkpoint(ttn=ttn, url=page.url or "", submitted=True, order_number=order_no)
+            return order_no
 
-    raise RuntimeError("Could not parse supplier order number after submit.")
+    raise StageError(
+        "post_submit_failed",
+        "Supplier order was likely submitted, but order number could not be parsed.",
+        {"submitted": True, "ttn": ttn, "url": page.url or ""},
+    )
 
 
 async def _run() -> tuple[bool, dict]:
@@ -792,6 +823,7 @@ async def _run() -> tuple[bool, dict]:
     added: list[dict] = []
     supplier_order_number = ""
     attach_info: dict | None = None
+    submitted = False
     paused_for_error = False
 
     try:
@@ -817,7 +849,8 @@ async def _run() -> tuple[bool, dict]:
             attach_info = await _attach_label_file(page, TTN)
 
             stage = "submit_order"
-            supplier_order_number = await _submit_order_and_get_number(page)
+            supplier_order_number = await _submit_order_and_get_number(page, TTN)
+            submitted = True
 
             if DELETE_LABEL_AFTER_ATTACH and attach_info:
                 file_path_raw = str(attach_info.get("file", "")).strip()
@@ -830,6 +863,7 @@ async def _run() -> tuple[bool, dict]:
             return True, {
                 "ok": True,
                 "ttn": TTN,
+                "submitted": submitted,
                 "added": added,
                 "supplier_order_number": supplier_order_number,
                 "url": page.url or BASKET_URL,
@@ -842,6 +876,7 @@ async def _run() -> tuple[bool, dict]:
             "error": str(e),
             "stage": e.stage or stage,
             "url": page.url if page is not None else BASKET_URL,
+            "submitted": bool((e.details or {}).get("submitted")) or submitted,
             "details": e.details or {},
         }
     except Exception as e:
@@ -852,6 +887,7 @@ async def _run() -> tuple[bool, dict]:
             "error": str(e),
             "stage": stage,
             "url": page.url if page is not None else BASKET_URL,
+            "submitted": submitted,
             "details": {},
         }
     finally:
@@ -892,7 +928,7 @@ def main() -> int:
         payload = {"ok": False, "error": str(e), "stage": "init", "url": BASKET_URL, "details": {}}
         ok = False
 
-    print(json.dumps(payload, ensure_ascii=False))
+    print(SUPPLIER_RESULT_JSON_PREFIX + json.dumps(payload, ensure_ascii=False))
     return 0 if ok else 2
 
 

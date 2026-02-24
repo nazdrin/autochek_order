@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
 import urllib.parse
 import urllib.request
+import uuid
 import math
 from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
@@ -141,6 +144,7 @@ MAX_PROCESSED_IDS = int(os.getenv("ORCH_MAX_PROCESSED_IDS", "200"))
 BATCH_SIZE = int(os.getenv("ORCH_BATCH_SIZE", "5"))
 BACKOFF_BASE_SEC = int(os.getenv("ORCH_BACKOFF_BASE_SEC", "60"))
 BACKOFF_MAX_SEC = int(os.getenv("ORCH_BACKOFF_MAX_SEC", "3600"))
+ORCH_IN_PROGRESS_TTL_SEC = int(os.getenv("ORCH_IN_PROGRESS_TTL_SEC", str(6 * 3600)))
 
 # New orchestrator failure control constants
 ORCH_MAX_ATTEMPTS = int(os.getenv("ORCH_MAX_ATTEMPTS", "3"))
@@ -168,9 +172,88 @@ ORCH_SUP2_CLEAR_BASKET = (os.getenv("ORCH_SUP2_CLEAR_BASKET") or "1").strip()
 ORCH_SUP3_HEADLESS = (os.getenv("ORCH_SUP3_HEADLESS") or ORCH_HEADLESS or "1").strip()
 ORCH_SUP3_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP3_STORAGE_STATE_FILE") or ".state_supplier3.json").strip()
 ORCH_SUP3_CLEAR_BASKET = (os.getenv("ORCH_SUP3_CLEAR_BASKET") or "1").strip()
+ORCH_LOCK_FILE = Path(os.getenv("ORCH_LOCK_FILE", str(ROOT / ".orchestrator.lock")))
+RUN_INSTANCE_ID = uuid.uuid4().hex[:12]
+HOSTNAME = socket.gethostname()
+PID = os.getpid()
+SUPPLIER_RESULT_JSON_PREFIX = "SUPPLIER_RESULT_JSON="
 
 # Orders are filtered/routed by numeric order["supplierlist"] (via ALLOWED_SUPPLIERS),
 # not by order["supplier"] text. Keep supplier text only for diagnostics/logs.
+
+
+_INSTANCE_LOCK_HANDLE = None
+_INSTANCE_LOCK_KIND = None
+
+
+def acquire_single_instance_lock() -> None:
+    global _INSTANCE_LOCK_HANDLE, _INSTANCE_LOCK_KIND
+    ORCH_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(ORCH_LOCK_FILE, "a+b")
+    try:
+        fh.seek(0)
+        fh.write(f"pid={PID} host={HOSTNAME} run={RUN_INSTANCE_ID}\n".encode("utf-8"))
+        fh.flush()
+    except Exception:
+        pass
+
+    try:
+        if os.name == "nt":
+            import msvcrt  # type: ignore
+
+            fh.seek(0)
+            try:
+                fh.write(b" ")
+                fh.flush()
+                fh.seek(0)
+            except Exception:
+                pass
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            _INSTANCE_LOCK_KIND = "msvcrt"
+        else:
+            import fcntl  # type: ignore
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _INSTANCE_LOCK_KIND = "fcntl"
+    except Exception as e:
+        try:
+            fh.close()
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Another orchestrator instance is running (lock_file={ORCH_LOCK_FILE}, pid={PID}, host={HOSTNAME}, run={RUN_INSTANCE_ID}): {e}"
+        ) from e
+
+    _INSTANCE_LOCK_HANDLE = fh
+    print(
+        f"[ORCH] acquired_lock run={RUN_INSTANCE_ID} pid={PID} host={HOSTNAME} lock={ORCH_LOCK_FILE} state={STATE_FILE}",
+        flush=True,
+    )
+
+
+def release_single_instance_lock() -> None:
+    global _INSTANCE_LOCK_HANDLE, _INSTANCE_LOCK_KIND
+    fh = _INSTANCE_LOCK_HANDLE
+    if fh is None:
+        return
+    try:
+        if _INSTANCE_LOCK_KIND == "nt" or _INSTANCE_LOCK_KIND == "msvcrt":
+            import msvcrt  # type: ignore
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        elif _INSTANCE_LOCK_KIND == "fcntl":
+            import fcntl  # type: ignore
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        fh.close()
+    except Exception:
+        pass
+    _INSTANCE_LOCK_HANDLE = None
+    _INSTANCE_LOCK_KIND = None
 
 
 def format_int_set(values: set[int]) -> str:
@@ -431,26 +514,61 @@ def parse_json_from_stdout(stdout: str) -> Any:
     stdout = (stdout or "").strip()
     if not stdout:
         raise ValueError("stdout is empty")
+    # Fast path: entire stdout is JSON.
     try:
         return json.loads(stdout)
     except json.JSONDecodeError:
-        cut_idx = None
-        for i, ch in enumerate(stdout):
-            if ch in "{[":
-                cut_idx = i
-                break
-        if cut_idx is None:
-            raise
-        return json.loads(stdout[cut_idx:])
+        pass
+
+    # Common case for our supplier scripts: logs + final JSON on the last line.
+    lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
+    for line in reversed(lines):
+        if not line or line[0] not in "{[":
+            continue
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+    # Fallback: try every possible JSON-looking start from the end and pick the first parsable suffix.
+    starts: List[int] = []
+    for i, ch in enumerate(stdout):
+        if ch in "{[":
+            starts.append(i)
+    for idx in reversed(starts):
+        chunk = stdout[idx:].strip()
+        try:
+            return json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+
+    raise ValueError("No JSON object found in stdout")
+
+
+def parse_supplier_result_json_from_stdout(stdout: str, *, prefix: str = SUPPLIER_RESULT_JSON_PREFIX) -> Dict[str, Any]:
+    stdout = (stdout or "")
+    lines = stdout.splitlines()
+    for line in reversed(lines):
+        s = line.strip()
+        if not s.startswith(prefix):
+            continue
+        raw = s[len(prefix) :].strip()
+        if not raw:
+            raise ValueError("Supplier result marker found but JSON payload is empty")
+        obj = json.loads(raw)
+        if not isinstance(obj, dict):
+            raise ValueError("Supplier result payload is not a JSON object")
+        return obj
+    raise ValueError(f"Supplier result marker '{prefix}' not found in stdout")
 
 
 def load_state() -> Dict[str, Any]:
     if not STATE_FILE.exists():
-        return {"processed_ids": [], "failed": {}}
+        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}}
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {"processed_ids": [], "failed": {}}
+            return {"processed_ids": [], "failed": {}, "in_progress_orders": {}}
         ids = data.get("processed_ids")
         if not isinstance(ids, list):
             ids = []
@@ -466,9 +584,13 @@ def load_state() -> Dict[str, Any]:
         if not isinstance(failed, dict):
             failed = {}
         data["failed"] = failed
+        in_progress = data.get("in_progress_orders")
+        if not isinstance(in_progress, dict):
+            in_progress = {}
+        data["in_progress_orders"] = in_progress
         return data
     except Exception:
-        return {"processed_ids": [], "failed": {}}
+        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}}
 def _now_ts() -> int:
     return int(time.time())
 
@@ -479,7 +601,7 @@ def _backoff_seconds(fail_count: int) -> int:
     return min(sec, BACKOFF_MAX_SEC)
 
 
-def mark_failed(state: Dict[str, Any], order_id: int, step: str, reason: str) -> None:
+def mark_failed(state: Dict[str, Any], order_id: int, step: str, reason: str, *, force_terminal: bool = False) -> None:
     failed: Dict[str, Any] = state.setdefault("failed", {})
     key = str(order_id)
     entry = failed.get(key) or {}
@@ -489,7 +611,7 @@ def mark_failed(state: Dict[str, Any], order_id: int, step: str, reason: str) ->
         cnt = 0
     cnt += 1
     terminal = False
-    if ORCH_MAX_ATTEMPTS > 0 and cnt >= ORCH_MAX_ATTEMPTS:
+    if force_terminal or (ORCH_MAX_ATTEMPTS > 0 and cnt >= ORCH_MAX_ATTEMPTS):
         terminal = True
     wait_sec = _backoff_seconds(cnt)
     # If terminal, disable future retries by setting next_ts far in the future
@@ -507,6 +629,11 @@ def mark_failed(state: Dict[str, Any], order_id: int, step: str, reason: str) ->
         }
     )
     failed[key] = entry
+
+
+def is_supplier2_order(order: Dict[str, Any]) -> bool:
+    supplierlist, _ = parse_order_supplierlist(order)
+    return supplierlist == 41
 
 
 # Helpers for terminal/attempts
@@ -555,9 +682,48 @@ def is_backoff_active(state: Dict[str, Any], order_id: int) -> Tuple[bool, int]:
 
 def save_state(state: Dict[str, Any]) -> None:
     try:
-        STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, STATE_FILE)
     except Exception as e:
         notify_stub(f"Failed to save state file {STATE_FILE}: {e}")
+
+
+def mark_in_progress(state: Dict[str, Any], order_id: int, supplier_id: int | None) -> None:
+    in_progress: Dict[str, Any] = state.setdefault("in_progress_orders", {})
+    in_progress[str(order_id)] = {
+        "ts": _now_ts(),
+        "supplier": supplier_id,
+        "run": RUN_INSTANCE_ID,
+        "pid": PID,
+        "host": HOSTNAME,
+    }
+
+
+def clear_in_progress(state: Dict[str, Any], order_id: int) -> None:
+    in_progress = state.get("in_progress_orders")
+    if isinstance(in_progress, dict):
+        in_progress.pop(str(order_id), None)
+
+
+def is_in_progress_active(state: Dict[str, Any], order_id: int, ttl_sec: int = ORCH_IN_PROGRESS_TTL_SEC) -> Tuple[bool, int]:
+    in_progress = state.get("in_progress_orders")
+    if not isinstance(in_progress, dict):
+        return False, 0
+    entry = in_progress.get(str(order_id))
+    if not isinstance(entry, dict):
+        return False, 0
+    try:
+        ts = int(entry.get("ts") or 0)
+    except Exception:
+        ts = 0
+    if ts <= 0:
+        return False, 0
+    age = max(0, _now_ts() - ts)
+    if age < max(0, ttl_sec):
+        return True, max(0, ttl_sec - age)
+    return False, 0
 
 
 def build_biotus_items(order: Dict[str, Any]) -> str:
@@ -1014,6 +1180,7 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
 
     print(f"[ORCH] Dobavki SUP2_ITEMS => {sup2_items}")
     print(f"[ORCH] Dobavki TTN => {tracking_number}")
+    print(f"[ORCH] start supplier2 order_id={order_id_int} run={RUN_INSTANCE_ID}", flush=True)
 
     step_name = "supplier2_run_order"
     step_timeout = _timeout_for_step("SUP2_RUN_ORDER")
@@ -1029,7 +1196,7 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
 
     payload: Dict[str, Any] | None = None
     try:
-        parsed = parse_json_from_stdout(out)
+        parsed = parse_supplier_result_json_from_stdout(out)
         if isinstance(parsed, dict):
             payload = parsed
     except Exception:
@@ -1038,19 +1205,34 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
     if rc != 0:
         if payload:
             stage = str(payload.get("stage") or step_name)
+            submitted = bool(payload.get("submitted"))
             msg = str(payload.get("error") or f"rc={rc}")
+            if submitted:
+                msg = f"{msg} (submitted=true; supplier order may already be created)"
             raise StepError(stage, msg)
         reason = short_reason(step_name, rc, out, err, None)
         raise StepError(step_name, reason)
 
     if not payload:
-        raise StepError(step_name, "No JSON object in supplier2_run_order stdout.")
+        raise StepError(step_name, "No SUPPLIER_RESULT_JSON marker in supplier2_run_order stdout.")
     if not bool(payload.get("ok")):
         stage = str(payload.get("stage") or step_name)
         msg = str(payload.get("error") or "supplier2_run_order returned ok=false")
+        submitted = bool(payload.get("submitted"))
+        print(
+            f"[ORCH] supplier2 result order_id={order_id_int} ok=false submitted={submitted} stage={stage} error={msg}",
+            flush=True,
+        )
+        if submitted:
+            msg = f"{msg} (submitted=true; supplier order may already be created)"
         raise StepError(stage, msg)
 
     supplier_order_number = str(payload.get("supplier_order_number") or "").strip()
+    submitted = bool(payload.get("submitted"))
+    print(
+        f"[ORCH] supplier2 result order_id={order_id_int} ok=true submitted={submitted} supplier_order_number={supplier_order_number!r}",
+        flush=True,
+    )
     if not supplier_order_number:
         raise StepError(step_name, "supplier_order_number is empty in supplier2_run_order response.")
 
@@ -1142,9 +1324,10 @@ def process_one_supplier3_order(order: Dict[str, Any]) -> None:
 
     items_summary = add_items_info.get("items_summary") if isinstance(add_items_info, dict) else {}
     salesdrive_products = build_supplier3_salesdrive_products(order, items_summary if isinstance(items_summary, dict) else {})
-    salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number, products=salesdrive_products)
+    # TEMP: do not send products payload for supplier3 until SalesDrive payload format is finalized.
+    salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
     print(
-        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number}, products={len(salesdrive_products)}"
+        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number} (products prepared={len(salesdrive_products)}, not sent)"
     )
 
 
@@ -1177,6 +1360,13 @@ def process_one_order(order: Dict[str, Any]) -> bool:
 
 
 def main() -> int:
+    try:
+        acquire_single_instance_lock()
+    except Exception as e:
+        print(f"[ORCH] {e}", file=sys.stderr, flush=True)
+        return 2
+    atexit.register(release_single_instance_lock)
+    print(f"[ORCH] start run={RUN_INSTANCE_ID} pid={PID} host={HOSTNAME} state={STATE_FILE}", flush=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="Сделать один цикл и выйти (для теста)")
     ap.add_argument("--dry-run", action="store_true", help="Не запускать step2_3, только вывести BIOTUS_ITEMS")
@@ -1228,6 +1418,7 @@ def main() -> int:
 
     state = load_state()
     state.setdefault("failed", {})
+    state.setdefault("in_progress_orders", {})
     processed_ids: List[int] = state.get("processed_ids", [])
 
     while True:
@@ -1263,6 +1454,8 @@ def main() -> int:
             )
 
             orders = filtered_orders
+            for o in orders:
+                print(f"[ORCH] fetched order_id={order_id_for_log(o)} supplierlist={o.get('supplierlist')!r}", flush=True)
             if not orders:
                 print("[ORCH] No orders in status=21. Sleeping...")
             else:
@@ -1274,11 +1467,18 @@ def main() -> int:
                     except Exception:
                         continue
                     if oid in processed_ids:
+                        print(f"[ORCH] skip due to processed order_id={oid}", flush=True)
                         continue
                     if is_terminal_failed(state, oid):
+                        print(f"[ORCH] skip due to failed(terminal) order_id={oid}", flush=True)
+                        continue
+                    in_prog_active, in_prog_left = is_in_progress_active(state, oid)
+                    if in_prog_active:
+                        print(f"[ORCH] skip due to in_progress order_id={oid} ttl_left={in_prog_left}s", flush=True)
                         continue
                     backoff_active, wait_left = is_backoff_active(state, oid)
                     if backoff_active:
+                        print(f"[ORCH] skip due to backoff order_id={oid} wait_left={wait_left}s", flush=True)
                         continue
                     eligible.append((oid, o))
                     if len(eligible) >= BATCH_SIZE:
@@ -1356,6 +1556,9 @@ def main() -> int:
                             continue
 
                         try:
+                            mark_in_progress(state, int(order_id), supplierlist if isinstance(supplierlist, int) else None)
+                            print(f"[ORCH] order lock acquired order_id={order_id} supplierlist={supplierlist!r}", flush=True)
+                            save_state(state)
                             processed = process_one_order(order)
                         except Exception as e:
                             if isinstance(e, StepError):
@@ -1366,7 +1569,9 @@ def main() -> int:
                                 reason = f"{type(e).__name__}: {str(e)}".strip()
 
                             # Record failure and decide if it became terminal
-                            mark_failed(state, int(order_id), step, reason)
+                            force_terminal = is_supplier2_order(order)
+                            mark_failed(state, int(order_id), step, reason, force_terminal=force_terminal)
+                            clear_in_progress(state, int(order_id))
                             save_state(state)
 
                             fail_count = get_fail_count(state, int(order_id))
@@ -1375,6 +1580,8 @@ def main() -> int:
                             # Do NOT send intermediate notifications. Only notify + change status when terminal.
                             if became_terminal:
                                 red_reason = f"{ORCH_FAIL_MARK} Order {order_id} failed after {fail_count} attempt(s). Last step: {step}. Reason: {reason}"
+                                if force_terminal and "submitted=true" in reason:
+                                    red_reason = f"{red_reason}\nWARNING: supplier2 submit likely succeeded; check supplier site manually before retry."
                                 # Try to set SalesDrive status to FAIL status with a short red comment.
                                 try:
                                     salesdrive_update_status(int(order_id), ORCH_FAIL_STATUS_ID, comment=red_reason)
@@ -1388,6 +1595,8 @@ def main() -> int:
                             continue
 
                         if not processed:
+                            clear_in_progress(state, int(order_id))
+                            save_state(state)
                             print(f"[ORCH] Order id={order_id} skipped by routing safety check.")
                             continue
 
@@ -1398,6 +1607,7 @@ def main() -> int:
                         state["processed_ids"] = processed_ids
                         state["last_processed_id"] = int(order_id)
                         state["last_processed_at"] = _now_ts()
+                        clear_in_progress(state, int(order_id))
                         clear_failed(state, int(order_id))
                         save_state(state)
                         print(f"[ORCH] Done pipeline for order id={order_id}.")
