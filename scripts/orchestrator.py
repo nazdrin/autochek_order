@@ -639,6 +639,11 @@ def is_supplier2_order(order: Dict[str, Any]) -> bool:
     return supplierlist == 41
 
 
+def is_supplier3_order(order: Dict[str, Any]) -> bool:
+    supplierlist, _ = parse_order_supplierlist(order)
+    return supplierlist == 39
+
+
 # Helpers for terminal/attempts
 def is_terminal_failed(state: Dict[str, Any], order_id: int) -> bool:
     failed = state.get("failed")
@@ -1573,6 +1578,14 @@ def main() -> int:
 
                             # Record failure and decide if it became terminal
                             force_terminal = is_supplier2_order(order)
+                            # DSN-specific fail-safe: if checkout/TTN/attach step fails (e.g. DSN dropped auth on checkout),
+                            # send FAIL status immediately and stop auto-retries to avoid stuck/repeat processing.
+                            if is_supplier3_order(order) and step in {
+                                "checkout_ttn",
+                                "attach_invoice_label",
+                                "submit_checkout_order",
+                            }:
+                                force_terminal = True
                             mark_failed(state, int(order_id), step, reason, force_terminal=force_terminal)
                             clear_in_progress(state, int(order_id))
                             save_state(state)
