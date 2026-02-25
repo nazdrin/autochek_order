@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from playwright.async_api import TimeoutError as PWTimeoutError
@@ -455,6 +456,370 @@ async def detect_and_fail_unavailable_modal(page, step_name: str) -> None:
                 raise RuntimeError(f"{step_name}: DSN modal: items not added to cart / unavailable")
 
 
+async def _find_dsn_search_input(page):
+    candidates = [
+        ("input.search__input", page.locator("input.search__input").first),
+        ("form[action*='/katalog/search'] input[type='text']", page.locator("form[action*='/katalog/search'] input[type='text']").first),
+        ("input[name='q']", page.locator("input[name='q']").first),
+    ]
+    for label, loc in candidates:
+        try:
+            if await loc.count() > 0:
+                await loc.wait_for(state="visible", timeout=min(6000, SUP3_TIMEOUT_MS))
+                return loc, label
+        except Exception:
+            continue
+    raise RuntimeError("SEARCH_INPUT_NOT_FOUND")
+
+
+async def _wait_search_dropdown(page) -> tuple[Any, str]:
+    candidates = [
+        ("ul.search-results__list", page.locator("ul.search-results__list").first),
+        (".search-results", page.locator(".search-results").first),
+        (".search-results__items", page.locator(".search-results__items").first),
+    ]
+    deadline = asyncio.get_running_loop().time() + min(10.0, SUP3_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        for label, loc in candidates:
+            try:
+                if await loc.count() > 0 and await loc.is_visible():
+                    return loc, label
+            except Exception:
+                continue
+        await page.wait_for_timeout(120)
+    raise RuntimeError("SEARCH_NO_RESULTS")
+
+
+async def _search_open_product_card(page, sku: str) -> None:
+    # Safety: previous cart modal may still be open and intercept clicks.
+    try:
+        if bool(await _safe_is_visible(page.locator("section#cart").first)) or bool(
+            await _safe_is_visible(page.locator("#modal-overlay").first)
+        ):
+            try:
+                close_btn = page.locator("section#cart a.popup-close, section#cart .popup-close").first
+                if await close_btn.count() > 0:
+                    print("[SUP3] add_items: pre-search closing stale cart modal")
+                    await close_btn.click(timeout=min(2000, SUP3_TIMEOUT_MS), force=True)
+            except Exception:
+                pass
+            try:
+                await _ensure_cart_modal_closed(page)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    search_input, input_sel = await _find_dsn_search_input(page)
+    print(f"[SUP3] add_items: search sku={sku} input={input_sel}")
+    await search_input.click(timeout=min(3000, SUP3_TIMEOUT_MS))
+    try:
+        await page.keyboard.press(_select_all_shortcut())
+        await page.keyboard.press("Backspace")
+    except Exception:
+        pass
+    await search_input.fill(sku, timeout=min(4000, SUP3_TIMEOUT_MS))
+    try:
+        await search_input.dispatch_event("input")
+        await search_input.dispatch_event("change")
+    except Exception:
+        pass
+
+    dropdown, dd_label = await _wait_search_dropdown(page)
+    print(f"[SUP3] add_items: dropdown ready via {dd_label}")
+    link_candidates = [
+        ("li.search-results__item a.search-results__link", dropdown.locator("li.search-results__item a.search-results__link").first),
+        (".search-results a[href]", dropdown.locator(".search-results a[href], a[href]").first),
+    ]
+    chosen = None
+    chosen_label = ""
+    for label, loc in link_candidates:
+        try:
+            if await loc.count() > 0:
+                chosen = loc
+                chosen_label = label
+                break
+        except Exception:
+            continue
+    if chosen is None:
+        raise RuntimeError("SEARCH_NO_RESULTS")
+
+    print(f"[SUP3] add_items: click dropdown item via {chosen_label}")
+    try:
+        async with page.expect_navigation(wait_until="domcontentloaded", timeout=min(12000, SUP3_TIMEOUT_MS)):
+            await chosen.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
+    except Exception:
+        await chosen.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=min(8000, SUP3_TIMEOUT_MS))
+        except Exception:
+            pass
+
+
+async def _wait_product_card_ready(page) -> None:
+    ready_candidates = [
+        ("price", page.locator("div.product-price__item").first),
+        ("buy_btn", page.get_by_role("button", name=re.compile(r"Купити", re.I)).first),
+        ("buy_text", page.locator("button:has-text('Купити'), a:has-text('Купити')").first),
+        ("qty_input", page.locator("input.counter-field, input.j-product-counter, input[type='number'][data-step], input[type='number']").first),
+    ]
+    deadline = asyncio.get_running_loop().time() + min(12.0, SUP3_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        for label, loc in ready_candidates:
+            try:
+                if await loc.count() > 0 and await loc.is_visible():
+                    print(f"[SUP3] add_items: product card ready via {label}")
+                    return
+            except Exception:
+                continue
+        await page.wait_for_timeout(120)
+    raise RuntimeError("PRODUCT_CARD_NOT_READY")
+
+
+async def _detect_product_card_out_of_stock(page) -> str:
+    checks = [
+        page.locator("td.productsTable-cell.__status.__unavailable, .__unavailable").first,
+        page.locator("text=/Немає в наявності|Нет в наличии/i").first,
+    ]
+    for loc in checks:
+        try:
+            if await loc.count() > 0 and await loc.is_visible():
+                txt = (await loc.inner_text(timeout=800)).strip()
+                return txt or "Немає в наявності"
+        except Exception:
+            continue
+    # disabled buy button
+    buy_btns = page.locator("button:has-text('Купити'), a:has-text('Купити')")
+    try:
+        cnt = await buy_btns.count()
+    except Exception:
+        cnt = 0
+    for i in range(min(cnt, 5)):
+        b = buy_btns.nth(i)
+        try:
+            if not await b.is_visible():
+                continue
+            disabled_attr = await b.get_attribute("disabled")
+            aria_dis = (await b.get_attribute("aria-disabled") or "").strip().lower()
+            if disabled_attr is not None or aria_dis == "true":
+                return "Купити disabled"
+        except Exception:
+            continue
+    return ""
+
+
+async def _find_product_card_qty_input(page):
+    candidates = [
+        ("input.counter-field", page.locator("input.counter-field").first),
+        ("input.j-product-counter", page.locator("input.j-product-counter").first),
+        ("input[type='number'][data-step]", page.locator("input[type='number'][data-step]").first),
+        ("visible number input", page.locator("input[type='number']").filter(has_not=page.locator("section#cart input[type='number']")).first),
+    ]
+    for label, loc in candidates:
+        try:
+            if await loc.count() > 0:
+                await loc.wait_for(state="attached", timeout=min(4000, SUP3_TIMEOUT_MS))
+                return loc, label
+        except Exception:
+            continue
+    raise RuntimeError("QTY_INPUT_NOT_FOUND")
+
+
+async def _find_product_card_buy_button(page):
+    candidates = [
+        ("button role Купити", page.get_by_role("button", name=re.compile(r"Купити", re.I)).first),
+        ("button:has-text('Купити')", page.locator("button:has-text('Купити')").first),
+        ("a:has-text('Купити')", page.locator("a:has-text('Купити')").first),
+    ]
+    for label, loc in candidates:
+        try:
+            if await loc.count() > 0 and await loc.is_visible():
+                return loc, label
+        except Exception:
+            continue
+    raise RuntimeError("BUY_BUTTON_NOT_FOUND")
+
+
+async def _set_product_card_qty(page, qty: int) -> None:
+    qty_input, qty_sel = await _find_product_card_qty_input(page)
+    print(f"[SUP3] add_items: set product qty target={qty} via {qty_sel}")
+    try:
+        await qty_input.scroll_into_view_if_needed(timeout=1000)
+    except Exception:
+        pass
+    await qty_input.click(timeout=min(3000, SUP3_TIMEOUT_MS), force=True)
+
+    async def _read_val() -> int:
+        try:
+            raw = await qty_input.input_value(timeout=1000)
+        except Exception:
+            raw = ""
+        try:
+            return int(re.sub(r"\D", "", raw or "") or "0")
+        except Exception:
+            return 0
+
+    # Try direct fill first.
+    try:
+        await qty_input.fill(str(qty), timeout=min(2500, SUP3_TIMEOUT_MS))
+        try:
+            await qty_input.dispatch_event("input")
+            await qty_input.dispatch_event("change")
+        except Exception:
+            pass
+        try:
+            await qty_input.press("Enter", timeout=700)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    await detect_and_fail_unavailable_modal(page, "add_items.card_qty.after_fill")
+    await page.wait_for_timeout(120)
+    if await _read_val() == qty:
+        return
+
+    # JS fallback
+    try:
+        await qty_input.evaluate(
+            """(el, value) => {
+                el.focus();
+                el.value = String(value);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            str(qty),
+        )
+    except Exception:
+        pass
+    await detect_and_fail_unavailable_modal(page, "add_items.card_qty.after_js")
+    await page.wait_for_timeout(120)
+    if await _read_val() == qty:
+        return
+
+    # +/- fallback: normalize to 1, then click plus (qty-1) times.
+    plus = page.locator("button.counter-btn.__plus, button.counter-btn_plus, .counter-btn.__plus, .counter-btn_plus").first
+    minus = page.locator("button.counter-btn.__minus, .counter-btn.__minus").first
+    cur = await _read_val()
+    for _ in range(20):
+        if cur <= 1:
+            break
+        try:
+            if await minus.count() == 0:
+                break
+            await minus.click(timeout=1000)
+            await page.wait_for_timeout(100)
+            await detect_and_fail_unavailable_modal(page, "add_items.card_qty.minus")
+            cur = await _read_val()
+        except Exception:
+            break
+    cur = await _read_val()
+    while cur < qty:
+        if await plus.count() == 0:
+            break
+        await plus.click(timeout=1000)
+        await page.wait_for_timeout(100)
+        await detect_and_fail_unavailable_modal(page, "add_items.card_qty.plus")
+        cur = await _read_val()
+        if cur >= qty:
+            break
+    if cur != qty:
+        raise RuntimeError(f"SET_QTY_FAILED current={cur} target={qty}")
+
+
+async def _wait_cart_modal_visible(page):
+    candidates = [
+        ("section#cart", page.locator("section#cart").first),
+        (".popup__cart", page.locator(".popup__cart").first),
+        (".popup-block", page.locator(".popup-block").first),
+    ]
+    deadline = asyncio.get_running_loop().time() + min(10.0, SUP3_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        for label, loc in candidates:
+            try:
+                if await loc.count() > 0 and await loc.is_visible():
+                    return loc, label
+            except Exception:
+                continue
+        await page.wait_for_timeout(120)
+    raise RuntimeError("CART_MODAL_NOT_VISIBLE")
+
+
+async def _ensure_cart_modal_closed(page) -> None:
+    overlay = page.locator("#modal-overlay.overlay, #modal-overlay").first
+    cart_modal = page.locator("section#cart").first
+    deadline = asyncio.get_running_loop().time() + min(6.0, SUP3_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        overlay_visible = False
+        modal_visible = False
+        try:
+            overlay_visible = bool(await _safe_is_visible(overlay))
+        except Exception:
+            overlay_visible = False
+        try:
+            modal_visible = bool(await _safe_is_visible(cart_modal))
+        except Exception:
+            modal_visible = False
+        if not overlay_visible and not modal_visible:
+            return
+        await page.wait_for_timeout(100)
+    raise RuntimeError("CART_MODAL_NOT_CLOSED")
+
+
+async def _cart_modal_continue_or_checkout(page, *, last_item: bool) -> bool:
+    cart_modal, modal_sel = await _wait_cart_modal_visible(page)
+    print(f"[SUP3] add_items: cart modal visible via {modal_sel}")
+    if last_item:
+        checkout_links = [
+            ("cart modal checkout", cart_modal.locator("a:has-text('Оформити замовлення'), button:has-text('Оформити замовлення')").first),
+            ("page checkout", page.locator("a:has-text('Оформити замовлення'), button:has-text('Оформити замовлення')").first),
+        ]
+        for label, loc in checkout_links:
+            try:
+                if await loc.count() == 0:
+                    continue
+                print(f"[SUP3] add_items: click checkout from modal via {label}")
+                try:
+                    async with page.expect_navigation(url=re.compile(r".*/checkout/.*"), wait_until="domcontentloaded", timeout=min(12000, SUP3_TIMEOUT_MS)):
+                        await loc.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
+                except Exception:
+                    await loc.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
+                    await page.wait_for_url(re.compile(r".*/checkout/.*"), timeout=min(12000, SUP3_TIMEOUT_MS))
+                return True
+            except Exception:
+                continue
+        raise RuntimeError("CHECKOUT_BUTTON_NOT_FOUND_IN_CART_MODAL")
+
+    continue_candidates = [
+        ("Повернутись до покупок", cart_modal.locator("a:has-text('Повернутись до покупок'), button:has-text('Повернутись до покупок')").first),
+        ("Вернуться к покупкам", cart_modal.locator("a:has-text('Вернуться к покупкам'), button:has-text('Вернуться к покупкам')").first),
+        ("popup-close", cart_modal.locator("a.popup-close, .popup-close").first),
+    ]
+    for label, loc in continue_candidates:
+        try:
+            if await loc.count() == 0:
+                continue
+            print(f"[SUP3] add_items: close cart modal via {label}")
+            await loc.click(timeout=min(3000, SUP3_TIMEOUT_MS), force=True)
+            try:
+                await _ensure_cart_modal_closed(page)
+                return False
+            except Exception:
+                # fallback extra close click if "return to shopping" did not close overlay
+                try:
+                    popup_close = cart_modal.locator("a.popup-close, .popup-close").first
+                    if await popup_close.count() > 0:
+                        print("[SUP3] add_items: fallback close cart modal via popup-close")
+                        await popup_close.click(timeout=min(2000, SUP3_TIMEOUT_MS), force=True)
+                        await _ensure_cart_modal_closed(page)
+                        return False
+                except Exception:
+                    pass
+                continue
+        except Exception:
+            continue
+    raise RuntimeError("RETURN_TO_SHOPPING_NOT_FOUND")
+
+
 async def _search_by_sku(page, sku: str) -> None:
     search_input = page.locator('input.search__input[name="q"], input[name="q"]').first
     await search_input.wait_for(state="visible", timeout=SUP3_TIMEOUT_MS)
@@ -877,10 +1242,9 @@ async def _set_row_qty(row, qty: int) -> None:
     print(f"[SUP3] add_items: set_qty final current={final_raw!r}")
 
 
-async def _add_items(page) -> dict:
+async def _add_items(page, *, verify_auth: bool = True) -> dict:
     stage = "add_items"
     items = _parse_sup3_items()
-    warnings: list[str] = []
     items_summary: dict[str, dict] = {}
 
     async def _raise_add_items_error(message: str, *, error_code: str | None = None, failed_item: dict | None = None) -> None:
@@ -896,56 +1260,55 @@ async def _add_items(page) -> dict:
             details["error_code"] = error_code
         if failed_item:
             details["failed_item"] = failed_item
-        if warnings:
-            details["warnings"] = list(warnings)
         if screenshot_path:
             details["screenshot"] = screenshot_path
         raise StageError(stage, message, details)
 
-    # We assume valid storage_state session for this stage.
-    already, checks = await _is_logged_in(page)
-    if not already:
-        raise StageError(stage, "Not authorized: session is not logged in.", {"checks": checks})
+    # In standalone add_items stage we verify auth explicitly.
+    if verify_auth:
+        already, checks = await _is_logged_in(page)
+        if not already:
+            raise StageError(stage, "Not authorized: session is not logged in.", {"checks": checks})
 
-    await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
+    # Avoid redundant navigation if we are already on DSN page and search input is available.
+    need_goto_home = True
     try:
-        await page.wait_for_load_state("networkidle", timeout=min(5000, SUP3_TIMEOUT_MS))
-    except PWTimeoutError:
-        pass
+        current_url = page.url or ""
+    except Exception:
+        current_url = ""
+    if current_url.startswith(SUP3_BASE_URL.rstrip("/")):
+        try:
+            search_probe = page.locator("input.search__input, input[name='q']").first
+            if await search_probe.count() > 0 and await search_probe.is_visible():
+                need_goto_home = False
+        except Exception:
+            need_goto_home = True
+    if need_goto_home:
+        await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
     await _best_effort_close_popups(page)
 
-    for item in items:
+    checkout_opened_from_cart = False
+    for idx, item in enumerate(items):
         sku = item.sku
         qty = item.qty
-        await _search_by_sku(page, sku)
-
-        # Wait for results table to appear (best-effort; some pages render quickly or cache).
-        products_table = page.locator("table.productsTable, .productsTable").first
         try:
-            await products_table.wait_for(state="attached", timeout=min(5000, SUP3_TIMEOUT_MS))
-        except Exception:
-            pass
-
-        row = await _wait_product_row_by_sku(page, sku)
-        if row is None:
-            await _raise_add_items_error(
-                f"NOT_FOUND: sku={sku}, qty={qty}",
-                error_code="NOT_FOUND",
-                failed_item={"sku": sku, "qty": qty},
-            )
-
-        unavailable, unavailable_text = await _is_row_unavailable(row)
-        if unavailable:
-            await _raise_add_items_error(
-                f"OUT_OF_STOCK: sku={sku}, qty={qty}: {unavailable_text or 'Немає в наявності'}",
-                error_code="OUT_OF_STOCK",
-                failed_item={"sku": sku, "qty": qty},
-            )
-
-        price_uah, price_raw = await _extract_row_price(row, sku, warnings)
-
-        try:
-            await _set_row_qty(row, qty)
+            print(f"[SUP3] add_items: processing sku={sku} qty={qty} ({idx+1}/{len(items)})")
+            await _search_open_product_card(page, sku)
+            await _wait_product_card_ready(page)
+            unavailable_text = await _detect_product_card_out_of_stock(page)
+            if unavailable_text:
+                await _raise_add_items_error(
+                    f"OUT_OF_STOCK: sku={sku}, qty={qty}: {unavailable_text}",
+                    error_code="OUT_OF_STOCK",
+                    failed_item={"sku": sku, "qty": qty},
+                )
+            await _set_product_card_qty(page, qty)
+            await detect_and_fail_unavailable_modal(page, f"add_items.sku={sku}.before_buy")
+            buy_btn, buy_sel = await _find_product_card_buy_button(page)
+            print(f"[SUP3] add_items: click buy sku={sku} via {buy_sel}")
+            await buy_btn.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
+            await detect_and_fail_unavailable_modal(page, f"add_items.sku={sku}.after_buy_click")
+            checkout_opened_from_cart = await _cart_modal_continue_or_checkout(page, last_item=(idx == len(items) - 1))
         except Exception as e:
             err_text = str(e)
             if "DSN modal: items not added to cart / unavailable" in err_text:
@@ -960,7 +1323,6 @@ async def _add_items(page) -> dict:
                 failed_item={"sku": sku, "qty": qty},
             )
 
-        await page.wait_for_timeout(250)
         try:
             await detect_and_fail_unavailable_modal(page, f"add_items.sku={sku}.post_qty_wait")
         except RuntimeError as e:
@@ -971,23 +1333,23 @@ async def _add_items(page) -> dict:
             )
         items_summary[sku] = {
             "qty": qty,
-            "price_uah": price_uah,
-            "price_raw": price_raw,
+            "price_uah": None,
+            "price_raw": "",
         }
-        print(f"[SUP3] add_items: sku={sku} qty={qty} price_uah={price_uah} price_raw={price_raw!r}")
+        print(f"[SUP3] add_items: sku={sku} qty={qty} added_to_cart")
 
     result = {
         "ok": True,
         "stage": stage,
         "url": page.url or SUP3_BASE_URL,
+        "items": [{"sku": i.sku, "qty": i.qty} for i in items],
         "items_summary": items_summary,
+        "checkout_opened": bool(checkout_opened_from_cart and "/checkout/" in (page.url or "")),
     }
-    if warnings:
-        result["warnings"] = warnings
     return result
 
 
-async def _open_cart_modal(page) -> None:
+async def _open_cart_modal(page, *, open_timeout_ms: int | None = None) -> None:
     await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
     await page.wait_for_timeout(150)
     await _best_effort_close_popups(page)
@@ -1046,7 +1408,8 @@ async def _open_cart_modal(page) -> None:
     empty_markers = cart_modal.locator(".cart-empty, .popup__empty, .empty, text=порож").first
     overlay = page.locator("div#modal-overlay.overlay").first
 
-    deadline = asyncio.get_running_loop().time() + (SUP3_TIMEOUT_MS / 1000.0)
+    effective_timeout_ms = open_timeout_ms if isinstance(open_timeout_ms, int) and open_timeout_ms > 0 else SUP3_TIMEOUT_MS
+    deadline = asyncio.get_running_loop().time() + (effective_timeout_ms / 1000.0)
     while asyncio.get_running_loop().time() < deadline:
         modal_visible = await _safe_is_visible(cart_modal)
         overlay_visible = await _safe_is_visible(overlay)
@@ -1263,7 +1626,9 @@ async def _clear_basket(page, *, stage_name: str = "clear_basket") -> dict:
         raise StageError(stage, message, details)
 
     try:
-        await _open_cart_modal(page)
+        # DSN often does not open cart modal at all when basket is empty.
+        # Use a short timeout here to avoid a long stall before add_items.
+        await _open_cart_modal(page, open_timeout_ms=min(2500, SUP3_TIMEOUT_MS))
     except StageError as e:
         # DSN may not open cart modal when basket is empty; treat this as non-fatal and continue pipeline.
         if e.stage == stage and "Cart modal did not appear" in str(e):
@@ -1274,7 +1639,8 @@ async def _clear_basket(page, *, stage_name: str = "clear_basket") -> dict:
                 "skipped": "cart_empty_or_not_opened",
             }
             print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
-            await _debug_pause_if_needed(page)
+            if stage_name == "clear_cart":
+                await _debug_pause_if_needed(page)
             return result
         raise
     cart_modal = page.locator("section#cart.popup__cart, section#cart").first
@@ -1289,7 +1655,8 @@ async def _clear_basket(page, *, stage_name: str = "clear_basket") -> dict:
         if row_count <= 0:
             result = {"ok": True, "cleared": cleared, "url": page.url or SUP3_BASE_URL}
             print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
-            await _debug_pause_if_needed(page)
+            if stage_name == "clear_cart":
+                await _debug_pause_if_needed(page)
             return result
 
         row = rows.first
@@ -1554,10 +1921,14 @@ async def _checkout_ttn_stage(page) -> dict:
     if not already:
         raise StageError(stage, "Not authorized: session is not logged in.", {"checks": checks})
 
-    await _assert_cart_not_empty(page)
-    checkout_clicked = await _click_checkout_button(page)
-    if "/checkout/" not in (page.url or ""):
-        raise StageError(stage, "Did not reach checkout", {"url": page.url or SUP3_BASE_URL})
+    if "/checkout/" in (page.url or ""):
+        checkout_clicked = False
+        print("[SUP3] checkout_ttn: already on checkout page, skip cart->checkout click")
+    else:
+        await _assert_cart_not_empty(page)
+        checkout_clicked = await _click_checkout_button(page)
+        if "/checkout/" not in (page.url or ""):
+            raise StageError(stage, "Did not reach checkout", {"url": page.url or SUP3_BASE_URL})
 
     await _best_effort_close_popups(page)
     radio_selected = await _ensure_own_ttn_selected(page)
@@ -1583,6 +1954,7 @@ async def _checkout_ttn_stage(page) -> dict:
         "ok": True,
         "stage": stage,
         "url": page.url or SUP3_BASE_URL,
+        "numberSup": str(supplier_order_number),
         "checkout_clicked": checkout_clicked,
         "radio_selected": bool(radio_selected),
         "ttn_set": bool(ttn_set),
@@ -2017,7 +2389,7 @@ async def _run() -> tuple[bool, dict]:
                 clear_basket_result = await _clear_basket(page)
 
             if SUP3_STAGE == "run" and SUP3_ITEMS.strip():
-                add_items_result = await _add_items(page)
+                add_items_result = await _add_items(page, verify_auth=False)
             if SUP3_STAGE == "run" and SUP3_TTN:
                 stage = "checkout_ttn"
                 checkout_ttn_result = await _checkout_ttn_stage(page)
@@ -2042,6 +2414,14 @@ async def _run() -> tuple[bool, dict]:
                 result["details"]["add_items"] = add_items_result
             if checkout_ttn_result is not None:
                 result["details"]["checkout_ttn"] = checkout_ttn_result
+                result["numberSup"] = str(
+                    checkout_ttn_result.get("numberSup")
+                    or checkout_ttn_result.get("number_sup")
+                    or checkout_ttn_result.get("supplier_order_number")
+                    or ""
+                )
+            if add_items_result is not None and isinstance(add_items_result.get("items"), list):
+                result["items"] = add_items_result.get("items")
             return True, result
     except StageError as e:
         if page is not None:
