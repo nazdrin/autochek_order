@@ -121,11 +121,10 @@ def main():
 
     orders = fetch_orders(base_url, api_key, args.status, args.limit, args.max_pages)
 
-    print(f"\n✅ SalesDrive orders fetched: {len(orders)} (statusId={args.status})\n")
-
     if args.raw:
         print(json.dumps({"data": orders}, ensure_ascii=False, indent=2))
         return
+    print(f"\n[OK] SalesDrive orders fetched: {len(orders)} (statusId={args.status})\n")
 
     # печатаем короткий, читаемый итог по каждому заказу
     for i, o in enumerate(orders, start=1):
@@ -147,7 +146,7 @@ def main():
         print()
 
     if not orders:
-        print("ℹ️ Заказов с таким статусом не найдено.")
+        print("[INFO] Заказов с таким статусом не найдено.")
 
 
 if __name__ == "__main__":

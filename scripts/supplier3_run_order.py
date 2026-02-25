@@ -313,11 +313,20 @@ async def _submit_checkout_order_and_get_number(page) -> str:
     if not navigated and not success_visible:
         raise StageError(stage, "Did not reach checkout complete", {"url": page.url or SUP3_BASE_URL, "selector": sel_used})
 
-    m = re.search(r"/checkout/complete/(\d+)/?", page.url or "")
-    if m:
-        order_number = m.group(1)
-        print(f"[SUP3] checkout submit: order number => {order_number}")
-        return order_number
+    # IMPORTANT: DSN URL /checkout/complete/<id>/ is NOT the supplier order number.
+    # Extract number only from page text like "Замовлення №157482".
+    try:
+        await page.wait_for_timeout(150)
+        order_text_loc = page.locator("text=/Замовлення\\s*№\\s*\\d+/").first
+        if await order_text_loc.count() > 0:
+            txt = (await order_text_loc.inner_text(timeout=min(3000, SUP3_TIMEOUT_MS))).strip()
+            m_txt = re.search(r"Замовлення\s*№\s*(\d+)", txt, flags=re.IGNORECASE)
+            if m_txt:
+                order_number = m_txt.group(1)
+                print(f"[SUP3] supplier order number extracted from page text => {order_number}")
+                return order_number
+    except Exception:
+        pass
 
     text_candidates = [success_section, page.locator("body").first]
     for loc in text_candidates:
@@ -330,10 +339,21 @@ async def _submit_checkout_order_and_get_number(page) -> str:
         m_txt = re.search(r"Замовлення\s*№\s*(\d+)", txt, flags=re.IGNORECASE)
         if m_txt:
             order_number = m_txt.group(1)
-            print(f"[SUP3] checkout submit: order number => {order_number}")
+            print(f"[SUP3] supplier order number extracted from page text => {order_number}")
             return order_number
 
-    raise StageError(stage, "Supplier order number not found", {"url": page.url or SUP3_BASE_URL})
+    # Fallback by HTML source (still no URL-based extraction).
+    try:
+        html = await page.content()
+    except Exception:
+        html = ""
+    m_html = re.search(r"Замовлення\s*№\s*(\d+)", html or "", flags=re.IGNORECASE)
+    if m_html:
+        order_number = m_html.group(1)
+        print(f"[SUP3] supplier order number extracted from page text => {order_number}")
+        return order_number
+
+    raise RuntimeError("Could not extract supplier order number from page text")
 
 
 async def _safe_is_visible(locator) -> bool | None:
@@ -1569,6 +1589,7 @@ async def _checkout_ttn_stage(page) -> dict:
         "label_attached": True,
         "label_file": str(label_path),
         "attach_invoice_label": attach_info,
+        "number_sup": str(supplier_order_number),
         "supplier_order_number": str(supplier_order_number),
     }
 

@@ -463,12 +463,15 @@ def salesdrive_update_status(
 
 
 def run_python(script: Path, env: Dict[str, str], timeout_sec: int, args: List[str] | None = None) -> Tuple[int, str, str]:
-    cmd = [sys.executable, "-u", str(script)]
+    cmd = [sys.executable, "-X", "utf8", "-u", str(script)]
     if args:
         cmd += args
+    env2 = dict(env or {})
+    env2["PYTHONIOENCODING"] = "utf-8"
+    env2["PYTHONUTF8"] = "1"
     p = subprocess.run(
         cmd,
-        env=env,
+        env=env2,
         capture_output=True,
         text=True,
         timeout=timeout_sec,
