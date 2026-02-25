@@ -769,12 +769,41 @@ async def _cart_modal_continue_or_checkout(page, *, last_item: bool) -> bool:
     cart_modal, modal_sel = await _wait_cart_modal_visible(page)
     print(f"[SUP3] add_items: cart modal visible via {modal_sel}")
     if last_item:
+        async def _wait_checkout_opened_short() -> bool:
+            deadline = asyncio.get_running_loop().time() + 2.5
+            while asyncio.get_running_loop().time() < deadline:
+                if "/checkout/" in (page.url or ""):
+                    return True
+                try:
+                    if await page.locator("form#checkout-form, section.checkout, .checkout").count() > 0:
+                        return True
+                except Exception:
+                    pass
+                await page.wait_for_timeout(80)
+            return "/checkout/" in (page.url or "")
+
         checkout_links = [
-            ("cart modal checkout", cart_modal.locator("a:has-text('Оформити замовлення'), button:has-text('Оформити замовлення')").first),
-            ("page checkout", page.locator("a:has-text('Оформити замовлення'), button:has-text('Оформити замовлення')").first),
+            (
+                "cart modal checkout",
+                cart_modal.locator(
+                    "a:has-text('Оформити замовлення'), button:has-text('Оформити замовлення')"
+                ).first,
+            ),
+            # Page-level fallback restricted to visible overlay/cart subtree to avoid clicking checkout page submit.
+            (
+                "page cart popup checkout",
+                page.locator(
+                    "section#cart a:has-text('Оформити замовлення'), section#cart button:has-text('Оформити замовлення'), "
+                    ".popup__cart a:has-text('Оформити замовлення'), .popup__cart button:has-text('Оформити замовлення')"
+                ).first,
+            ),
         ]
         for label, loc in checkout_links:
             try:
+                # If previous click already navigated to checkout, stop immediately.
+                if "/checkout/" in (page.url or ""):
+                    print("[SUP3] add_items: checkout already opened after previous click")
+                    return True
                 if await loc.count() == 0:
                     continue
                 print(f"[SUP3] add_items: click checkout from modal via {label}")
@@ -783,10 +812,25 @@ async def _cart_modal_continue_or_checkout(page, *, last_item: bool) -> bool:
                         await loc.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
                 except Exception:
                     await loc.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
-                    await page.wait_for_url(re.compile(r".*/checkout/.*"), timeout=min(12000, SUP3_TIMEOUT_MS))
-                return True
+                    try:
+                        await page.wait_for_url(re.compile(r".*/checkout/.*"), timeout=min(12000, SUP3_TIMEOUT_MS))
+                    except Exception:
+                        # Navigation may already be completed before wait starts.
+                        if "/checkout/" not in (page.url or ""):
+                            # Give DSN a short extra window before treating click as failed.
+                            if not await _wait_checkout_opened_short():
+                                raise
+                if "/checkout/" in (page.url or ""):
+                    return True
+                if await _wait_checkout_opened_short():
+                    return True
             except Exception:
+                if "/checkout/" in (page.url or "") or await _wait_checkout_opened_short():
+                    print("[SUP3] add_items: checkout opened despite click exception")
+                    return True
                 continue
+        if "/checkout/" in (page.url or "") or await _wait_checkout_opened_short():
+            return True
         raise RuntimeError("CHECKOUT_BUTTON_NOT_FOUND_IN_CART_MODAL")
 
     continue_candidates = [
@@ -1917,14 +1961,16 @@ async def _checkout_ttn_stage(page) -> dict:
     if not SUP3_TTN:
         raise StageError(stage, "SUP3_TTN is required")
 
-    already, checks = await _is_logged_in(page)
-    if not already:
-        raise StageError(stage, "Not authorized: session is not logged in.", {"checks": checks})
-
     if "/checkout/" in (page.url or ""):
+        already, checks = await _is_logged_in(page, navigate=False)
+        if not already:
+            raise StageError(stage, "Not authorized: session is not logged in.", {"checks": checks})
         checkout_clicked = False
         print("[SUP3] checkout_ttn: already on checkout page, skip cart->checkout click")
     else:
+        already, checks = await _is_logged_in(page)
+        if not already:
+            raise StageError(stage, "Not authorized: session is not logged in.", {"checks": checks})
         await _assert_cart_not_empty(page)
         checkout_clicked = await _click_checkout_button(page)
         if "/checkout/" not in (page.url or ""):
@@ -1984,10 +2030,11 @@ async def _login_trigger(page):
     return page.get_by_text("Вхід", exact=True).first
 
 
-async def _is_logged_in(page) -> tuple[bool, dict]:
-    await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
-    await page.wait_for_timeout(150)
-    await _best_effort_close_popups(page)
+async def _is_logged_in(page, *, navigate: bool = True) -> tuple[bool, dict]:
+    if navigate:
+        await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
+        await page.wait_for_timeout(150)
+        await _best_effort_close_popups(page)
     login_visible = False
     logout_visible = False
     stable_no_login_hits = 0
