@@ -89,6 +89,10 @@ def _select_all_shortcut() -> str:
     return "Meta+A" if sys.platform == "darwin" else "Control+A"
 
 
+def _digits_only(value: str) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
 def _state_path() -> Path:
     if not SUP3_STORAGE_STATE_FILE:
         raise RuntimeError("SUP3_STORAGE_STATE_FILE is empty.")
@@ -640,6 +644,23 @@ async def _find_product_card_buy_button(page):
     raise RuntimeError("BUY_BUTTON_NOT_FOUND")
 
 
+async def _get_product_card_title(page) -> str:
+    candidates = [
+        page.locator("h1.product-card__title, h1.product__title, h1[itemprop='name']").first,
+        page.locator("h1").first,
+    ]
+    for loc in candidates:
+        try:
+            if await loc.count() == 0:
+                continue
+            txt = re.sub(r"\s+", " ", (await loc.inner_text(timeout=1500)) or "").strip()
+            if txt:
+                return txt
+        except Exception:
+            continue
+    return ""
+
+
 async def _set_product_card_qty(page, qty: int) -> None:
     qty_input, qty_sel = await _find_product_card_qty_input(page)
     print(f"[SUP3] add_items: set product qty target={qty} via {qty_sel}")
@@ -671,6 +692,10 @@ async def _set_product_card_qty(page, qty: int) -> None:
             await qty_input.press("Enter", timeout=700)
         except Exception:
             pass
+        try:
+            await qty_input.blur()
+        except Exception:
+            pass
     except Exception:
         pass
     await detect_and_fail_unavailable_modal(page, "add_items.card_qty.after_fill")
@@ -686,6 +711,7 @@ async def _set_product_card_qty(page, qty: int) -> None:
                 el.value = String(value);
                 el.dispatchEvent(new Event('input', { bubbles: true }));
                 el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.blur();
             }""",
             str(qty),
         )
@@ -742,6 +768,223 @@ async def _wait_cart_modal_visible(page):
                 continue
         await page.wait_for_timeout(120)
     raise RuntimeError("CART_MODAL_NOT_VISIBLE")
+
+
+def _normalize_match_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
+
+
+async def _read_cart_row_qty(row) -> int | None:
+    qty_input = row.locator(
+        "input.counter-field.j-buy-button-counter-input, "
+        "input.j-buy-button-counter-input, "
+        "input.counter-field, "
+        "input[type='number'], "
+        "input[type='text']"
+    ).first
+    try:
+        if await qty_input.count() > 0:
+            raw = await qty_input.input_value(timeout=1000)
+            digits = re.sub(r"\D", "", raw or "")
+            if digits:
+                return int(digits)
+    except Exception:
+        pass
+    try:
+        row_text = (await row.inner_text(timeout=1000)) or ""
+    except Exception:
+        row_text = ""
+    for pat in (r"\b(\d+)\s*шт\b", r"\bx\s*(\d+)\b", r"\bкількість\D*(\d+)\b"):
+        m = re.search(pat, row_text, flags=re.IGNORECASE)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                continue
+    return None
+
+
+async def _find_cart_row(page, *, sku: str, product_title: str = ""):
+    rows = page.locator(
+        "section#cart tr.cart-item, section#cart table.cart-items tbody tr, "
+        ".popup__cart tr.cart-item, .popup__cart table.cart-items tbody tr"
+    )
+    sku_norm = _normalize_match_text(sku)
+    title_norm = _normalize_match_text(product_title)
+    try:
+        count = await rows.count()
+    except Exception:
+        count = 0
+    best_row = None
+    title_match_row = None
+    title_match_snippets: list[str] = []
+    for i in range(min(count, 50)):
+        row = rows.nth(i)
+        try:
+            txt = (await row.inner_text(timeout=1000)).strip()
+        except Exception:
+            continue
+        txt_low = txt.casefold()
+        txt_norm = _normalize_match_text(txt)
+        if sku.casefold() in txt_low or (sku_norm and sku_norm in txt_norm):
+            return row
+        if product_title and (product_title.casefold() in txt_low or (title_norm and title_norm in txt_norm)):
+            if title_match_row is None:
+                title_match_row = row
+                title_match_snippets.append(txt[:180])
+            else:
+                title_match_snippets.append(txt[:180])
+                raise RuntimeError(
+                    "CART_ROW_AMBIGUOUS_TITLE_MATCH "
+                    f"sku={sku} title={product_title!r} "
+                    f"matches={len(title_match_snippets)} snippets={title_match_snippets[:3]!r}"
+                )
+        if best_row is None and count == 1:
+            best_row = row
+    if title_match_row is not None:
+        return title_match_row
+
+    # Fallback: DSN popup may render items as div rows (not <tr>).
+    qty_inputs = page.locator(
+        "section#cart input.counter-field, section#cart input.j-quantity-p, section#cart input.j-buy-button-counter-input, "
+        ".popup__cart input.counter-field, .popup__cart input.j-quantity-p, .popup__cart input.j-buy-button-counter-input"
+    )
+    try:
+        qcount = await qty_inputs.count()
+    except Exception:
+        qcount = 0
+
+    visible_qty_inputs = 0
+    single_visible_row = None
+    title_match_anc = None
+    title_match_anc_snippets: list[str] = []
+    for i in range(min(qcount, 50)):
+        q = qty_inputs.nth(i)
+        try:
+            if not await q.is_visible():
+                continue
+        except Exception:
+            continue
+        visible_qty_inputs += 1
+        try:
+            anc = q.locator(
+                "xpath=ancestor::tr[1] | ancestor::li[1] | ancestor::article[1] | "
+                "ancestor::div[contains(@class,'cart')][1] | ancestor::div[contains(@class,'item')][1] | "
+                "ancestor::div[contains(@class,'product')][1]"
+            ).first
+            if await anc.count() == 0:
+                continue
+            txt = re.sub(r"\s+", " ", (await anc.inner_text(timeout=1000)) or "").strip()
+        except Exception:
+            continue
+        txt_low = txt.casefold()
+        txt_norm = _normalize_match_text(txt)
+        if sku.casefold() in txt_low or (sku_norm and sku_norm in txt_norm):
+            print("[SUP3] add_items: cart row found via qty-input ancestor + sku match")
+            return anc
+        if product_title and (product_title.casefold() in txt_low or (title_norm and title_norm in txt_norm)):
+            if title_match_anc is None:
+                title_match_anc = anc
+                title_match_anc_snippets.append(txt[:180])
+            else:
+                title_match_anc_snippets.append(txt[:180])
+                raise RuntimeError(
+                    "CART_ROW_AMBIGUOUS_TITLE_MATCH "
+                    f"sku={sku} title={product_title!r} "
+                    f"matches={len(title_match_anc_snippets)} snippets={title_match_anc_snippets[:3]!r}"
+                )
+        if single_visible_row is None:
+            single_visible_row = anc
+
+    if title_match_anc is not None:
+        print("[SUP3] add_items: cart row found via qty-input ancestor + title match")
+        return title_match_anc
+
+    if visible_qty_inputs == 1 and single_visible_row is not None:
+        print("[SUP3] add_items: cart row found via single visible qty-input ancestor fallback")
+        return single_visible_row
+
+    return best_row if count == 1 else None
+
+
+async def _verify_and_fix_cart_modal_qty(page, sku: str, expected_qty: int, *, product_title: str = "") -> dict:
+    stage = "add_items"
+    deadline = asyncio.get_running_loop().time() + min(4.0, SUP3_TIMEOUT_MS / 1000.0)
+    last_seen_qty = None
+    row = None
+    while asyncio.get_running_loop().time() < deadline:
+        await _wait_cart_modal_visible(page)
+        try:
+            row = await _find_cart_row(page, sku=sku, product_title=product_title)
+        except RuntimeError as e:
+            if "CART_ROW_AMBIGUOUS_TITLE_MATCH" in str(e):
+                raise StageError(
+                    stage,
+                    f"CART_ROW_AMBIGUOUS: {e}",
+                    {"sku": sku, "product_title": product_title, "expected_qty": expected_qty},
+                ) from e
+            raise
+        if row is not None:
+            qty = await _read_cart_row_qty(row)
+            if qty is not None:
+                last_seen_qty = qty
+                if qty == expected_qty:
+                    print(f"[SUP3] add_items: cart modal qty verified sku={sku} qty={qty}")
+                    return {
+                        "sku": sku,
+                        "product_title": product_title,
+                        "expected_qty": expected_qty,
+                        "actual_qty": qty,
+                        "fixed_in_cart": False,
+                    }
+        try:
+            loader = page.locator("section#cart .j-cart-loader").first
+            if await loader.count() > 0 and await loader.is_visible():
+                await page.wait_for_timeout(120)
+                continue
+        except Exception:
+            pass
+        await page.wait_for_timeout(100)
+
+    if row is None:
+        raise StageError(
+            stage,
+            f"CART_QTY_VERIFY_FAILED: cart row not found for sku={sku}",
+            {"sku": sku, "product_title": product_title, "expected_qty": expected_qty},
+        )
+
+    print(
+        f"[SUP3] add_items: cart modal qty mismatch sku={sku} expected={expected_qty} "
+        f"actual={last_seen_qty}; trying to fix in cart row"
+    )
+    await _set_row_qty(row, expected_qty)
+
+    settle_deadline = asyncio.get_running_loop().time() + min(2.5, SUP3_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < settle_deadline:
+        qty_after = await _read_cart_row_qty(row)
+        if qty_after == expected_qty:
+            print(f"[SUP3] add_items: cart modal qty fixed sku={sku} qty={qty_after}")
+            return {
+                "sku": sku,
+                "product_title": product_title,
+                "expected_qty": expected_qty,
+                "actual_qty": qty_after,
+                "fixed_in_cart": True,
+            }
+        await page.wait_for_timeout(100)
+
+    qty_after = await _read_cart_row_qty(row)
+    raise StageError(
+        stage,
+        f"CART_QTY_VERIFY_FAILED: sku={sku} expected={expected_qty} actual={qty_after}",
+        {
+            "sku": sku,
+            "product_title": product_title,
+            "expected_qty": expected_qty,
+            "actual_qty": qty_after,
+            "actual_before_fix": last_seen_qty,
+        },
+    )
 
 
 async def _ensure_cart_modal_closed(page) -> None:
@@ -1161,8 +1404,11 @@ async def _is_row_unavailable(row) -> tuple[bool, str]:
 async def _set_row_qty_fallback(row, target_qty: int) -> bool:
     page = row.page
     qty_input = row.locator(
-        "input.counter-field.j-buy-button-counter-input[type='number'], "
-        "input.j-buy-button-counter-input[type='number'], input.counter-field[type='number']"
+        "input.counter-field.j-buy-button-counter-input, "
+        "input.j-buy-button-counter-input, "
+        "input.counter-field, "
+        "input[type='number'], "
+        "input[type='text']"
     ).first
     plus_btn = row.locator("a.counter-btn_plus, .counter-btn_plus").first
     minus_btn = row.locator("a.counter-btn_minus, .counter-btn_minus").first
@@ -1199,8 +1445,11 @@ async def _set_row_qty_fallback(row, target_qty: int) -> bool:
 async def _set_row_qty(row, qty: int) -> None:
     page = row.page
     qty_input = row.locator(
-        "input.counter-field.j-buy-button-counter-input[type='number'], "
-        "input.j-buy-button-counter-input[type='number'], input.counter-field[type='number'], input[type='number']"
+        "input.counter-field.j-buy-button-counter-input, "
+        "input.j-buy-button-counter-input, "
+        "input.counter-field, "
+        "input[type='number'], "
+        "input[type='text']"
     ).first
     await qty_input.wait_for(state="attached", timeout=SUP3_TIMEOUT_MS)
     try:
@@ -1332,6 +1581,8 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
     await _best_effort_close_popups(page)
 
     checkout_opened_from_cart = False
+    expected_cart_qty_by_sku: dict[str, int] = {}
+    cart_qty_checks: list[dict[str, Any]] = []
     for idx, item in enumerate(items):
         sku = item.sku
         qty = item.qty
@@ -1346,12 +1597,26 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
                     error_code="OUT_OF_STOCK",
                     failed_item={"sku": sku, "qty": qty},
                 )
-            await _set_product_card_qty(page, qty)
+            # DSN can visually show changed qty on product card but still add qty=1 to cart.
+            # Use cart modal row qty as the source of truth and set/verify there after "buy".
+            print(f"[SUP3] add_items: skip product card qty set for sku={sku}; will set qty in cart modal => {qty}")
             await detect_and_fail_unavailable_modal(page, f"add_items.sku={sku}.before_buy")
             buy_btn, buy_sel = await _find_product_card_buy_button(page)
+            product_title = await _get_product_card_title(page)
+            if product_title:
+                print(f"[SUP3] add_items: product title for cart match => {product_title}")
             print(f"[SUP3] add_items: click buy sku={sku} via {buy_sel}")
             await buy_btn.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
             await detect_and_fail_unavailable_modal(page, f"add_items.sku={sku}.after_buy_click")
+            expected_cart_qty = int(expected_cart_qty_by_sku.get(sku) or 0) + int(qty)
+            cart_qty_check = await _verify_and_fix_cart_modal_qty(
+                page,
+                sku,
+                expected_cart_qty,
+                product_title=product_title,
+            )
+            cart_qty_checks.append(cart_qty_check)
+            expected_cart_qty_by_sku[sku] = expected_cart_qty
             checkout_opened_from_cart = await _cart_modal_continue_or_checkout(page, last_item=(idx == len(items) - 1))
         except Exception as e:
             err_text = str(e)
@@ -1388,6 +1653,7 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
         "url": page.url or SUP3_BASE_URL,
         "items": [{"sku": i.sku, "qty": i.qty} for i in items],
         "items_summary": items_summary,
+        "cart_qty_checks": cart_qty_checks,
         "checkout_opened": bool(checkout_opened_from_cart and "/checkout/" in (page.url or "")),
     }
     return result
@@ -1876,6 +2142,20 @@ async def _click_checkout_button(page) -> bool:
 
 async def _ensure_own_ttn_selected(page) -> bool:
     stage = "checkout_ttn"
+    ttn_input_probe = page.locator(
+        "dt.form-head:has-text('Вказати номер накладної') >> xpath=following-sibling::dd[1]//input"
+    ).first
+
+    async def _ttn_input_enabled() -> bool:
+        try:
+            await ttn_input_probe.wait_for(state="visible", timeout=min(1200, SUP3_TIMEOUT_MS))
+            return bool(await ttn_input_probe.is_enabled())
+        except Exception:
+            return False
+
+    if await _ttn_input_enabled():
+        return True
+
     label_candidates = [
         page.get_by_text(re.compile(r"своя\s+накладн", re.I)).first,
         page.locator("label:has-text('своя накладна'), label:has-text('Своя накладна')").first,
@@ -1892,42 +2172,52 @@ async def _ensure_own_ttn_selected(page) -> bool:
         except Exception:
             continue
 
-    ttn_input_probe = page.locator(
-        "dt.form-head:has-text('Вказати номер накладної') >> xpath=following-sibling::dd[1]//input"
-    ).first
-
-    radio_checked = False
-    try:
-        radios = page.locator("input[type='radio']")
-        cnt = await radios.count()
-        for i in range(min(cnt, 20)):
-            r = radios.nth(i)
-            try:
-                if await r.is_checked():
-                    radio_checked = True
-                    break
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    try:
-        await ttn_input_probe.wait_for(state="visible", timeout=min(2500, SUP3_TIMEOUT_MS))
-        enabled = await ttn_input_probe.is_enabled()
-    except Exception:
-        enabled = False
-
-    if radio_checked or enabled:
+    if await _ttn_input_enabled():
         return True
     raise StageError(stage, "Own TTN option not selectable")
 
 
-async def _fill_ttn_input(page, ttn: str) -> bool:
-    stage = "checkout_ttn"
-    selectors_tried = [
+def _checkout_ttn_selectors_tried() -> list[str]:
+    return [
         "dt.form-head[Вказати номер накладної] -> following-sibling dd input",
         "input[name*='ttn']",
     ]
+
+
+async def _get_checkout_ttn_input(page):
+    head = page.locator("dt.form-head", has_text="Вказати номер накладної").first
+    inp = head.locator("xpath=following-sibling::dd[1]//input").first
+    if await inp.count() == 0:
+        inp = page.locator("input[name*='ttn' i], input[id*='ttn' i]").first
+    return inp
+
+
+def _ttn_value_matches(actual: str, expected_ttn: str) -> bool:
+    actual_digits = _digits_only(actual)
+    expected_digits = _digits_only(expected_ttn)
+    if not expected_digits:
+        return False
+    return expected_digits in actual_digits
+
+
+async def _read_checkout_ttn_input_value(page, *, wait_visible_ms: int = 2000) -> str:
+    stage = "checkout_ttn"
+    selectors_tried = _checkout_ttn_selectors_tried()
+    inp = await _get_checkout_ttn_input(page)
+    try:
+        await inp.wait_for(state="visible", timeout=min(wait_visible_ms, SUP3_TIMEOUT_MS))
+        if not await inp.is_enabled():
+            raise StageError(stage, "TTN input not found", {"url": page.url or SUP3_BASE_URL, "selectors_tried": selectors_tried})
+        return await inp.input_value(timeout=min(1500, SUP3_TIMEOUT_MS))
+    except StageError:
+        raise
+    except Exception:
+        raise StageError(stage, "TTN input not found", {"url": page.url or SUP3_BASE_URL, "selectors_tried": selectors_tried})
+
+
+async def _fill_ttn_input(page, ttn: str) -> bool:
+    stage = "checkout_ttn"
+    selectors_tried = _checkout_ttn_selectors_tried()
     head = page.locator("dt.form-head", has_text="Вказати номер накладної").first
     inp = head.locator("xpath=following-sibling::dd[1]//input").first
     if await inp.count() == 0:
@@ -1950,10 +2240,44 @@ async def _fill_ttn_input(page, ttn: str) -> bool:
     except Exception:
         raise StageError(stage, "TTN input not found", {"url": page.url or SUP3_BASE_URL, "selectors_tried": selectors_tried})
 
-    if ttn not in (current or ""):
-        raise StageError(stage, "TTN input not found", {"url": page.url or SUP3_BASE_URL, "selectors_tried": selectors_tried})
+    if not _ttn_value_matches(current or "", ttn):
+        raise StageError(stage, "TTN value was not saved in input", {"url": page.url or SUP3_BASE_URL, "selectors_tried": selectors_tried, "current_value": str(current or "")})
     print(f"[SUP3] checkout_ttn: TTN set => {ttn}")
     return True
+
+
+async def _ensure_ttn_still_present_before_submit(page, ttn: str) -> dict:
+    stage = "checkout_ttn"
+    radio_selected = await _ensure_own_ttn_selected(page)
+    current = await _read_checkout_ttn_input_value(page, wait_visible_ms=2500)
+    if _ttn_value_matches(current or "", ttn):
+        print(f"[SUP3] checkout_ttn: TTN still present before submit => {ttn}")
+        return {
+            "radio_selected": bool(radio_selected),
+            "ttn_verified_before_submit": True,
+            "ttn_refilled_before_submit": False,
+            "ttn_value_before_submit": str(current or ""),
+        }
+
+    print(
+        f"[SUP3] checkout_ttn: TTN missing/changed before submit, refilling "
+        f"(expected={ttn!r}, current={str(current or '')!r})"
+    )
+    await _fill_ttn_input(page, ttn)
+    current_after = await _read_checkout_ttn_input_value(page, wait_visible_ms=1500)
+    if not _ttn_value_matches(current_after or "", ttn):
+        raise StageError(
+            stage,
+            "TTN value lost before submit",
+            {"expected_ttn": ttn, "current_value": str(current_after or ""), "url": page.url or SUP3_BASE_URL},
+        )
+    print(f"[SUP3] checkout_ttn: TTN restored before submit => {ttn}")
+    return {
+        "radio_selected": bool(radio_selected),
+        "ttn_verified_before_submit": True,
+        "ttn_refilled_before_submit": True,
+        "ttn_value_before_submit": str(current_after or ""),
+    }
 
 
 async def _checkout_ttn_stage(page) -> dict:
@@ -1991,6 +2315,7 @@ async def _checkout_ttn_stage(page) -> dict:
         label_size = 0
     print(f"[SUP3] label downloaded: {label_path} size={label_size}")
     attach_info = await _attach_invoice_label_file(page, label_path)
+    pre_submit_ttn_check = await _ensure_ttn_still_present_before_submit(page, SUP3_TTN)
     supplier_order_number = await _submit_checkout_order_and_get_number(page)
 
     if (os.getenv("SUP3_DEBUG_PAUSE") or "").strip() == "1":
@@ -2002,8 +2327,11 @@ async def _checkout_ttn_stage(page) -> dict:
         "url": page.url or SUP3_BASE_URL,
         "numberSup": str(supplier_order_number),
         "checkout_clicked": checkout_clicked,
-        "radio_selected": bool(radio_selected),
+        "radio_selected": bool(pre_submit_ttn_check.get("radio_selected", radio_selected)),
         "ttn_set": bool(ttn_set),
+        "ttn_verified_before_submit": bool(pre_submit_ttn_check.get("ttn_verified_before_submit")),
+        "ttn_refilled_before_submit": bool(pre_submit_ttn_check.get("ttn_refilled_before_submit")),
+        "ttn_value_before_submit": str(pre_submit_ttn_check.get("ttn_value_before_submit") or ""),
         "label_attached": True,
         "label_file": str(label_path),
         "attach_invoice_label": attach_info,

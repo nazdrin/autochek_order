@@ -1322,6 +1322,14 @@ def process_one_supplier3_order(order: Dict[str, Any]) -> None:
     checkout_info = details.get("checkout_ttn") if isinstance(details.get("checkout_ttn"), dict) else {}
     add_items_info = details.get("add_items") if isinstance(details.get("add_items"), dict) else {}
 
+    if checkout_info:
+        if not bool(checkout_info.get("ttn_set")):
+            raise StepError(step_name, "supplier3_run_order did not confirm TTN input fill (ttn_set=false).")
+        if not bool(checkout_info.get("ttn_verified_before_submit")):
+            raise StepError(step_name, "supplier3_run_order did not confirm TTN presence before submit.")
+        if not bool(checkout_info.get("label_attached")):
+            raise StepError(step_name, "supplier3_run_order did not confirm invoice label attach.")
+
     supplier_order_number = ""
     if isinstance(checkout_info, dict):
         supplier_order_number = str(checkout_info.get("supplier_order_number") or "").strip()
@@ -1585,6 +1593,8 @@ def main() -> int:
                                 "attach_invoice_label",
                                 "submit_checkout_order",
                             }:
+                                force_terminal = True
+                            if is_supplier3_order(order) and step == "add_items" and "CART_ROW_AMBIGUOUS" in reason:
                                 force_terminal = True
                             mark_failed(state, int(order_id), step, reason, force_terminal=force_terminal)
                             clear_in_progress(state, int(order_id))
