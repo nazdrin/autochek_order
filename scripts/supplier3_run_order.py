@@ -909,7 +909,7 @@ async def _find_cart_row(page, *, sku: str, product_title: str = ""):
 
 async def _verify_and_fix_cart_modal_qty(page, sku: str, expected_qty: int, *, product_title: str = "") -> dict:
     stage = "add_items"
-    deadline = asyncio.get_running_loop().time() + min(4.0, SUP3_TIMEOUT_MS / 1000.0)
+    deadline = asyncio.get_running_loop().time() + min(5.0, SUP3_TIMEOUT_MS / 1000.0)
     last_seen_qty = None
     row = None
     while asyncio.get_running_loop().time() < deadline:
