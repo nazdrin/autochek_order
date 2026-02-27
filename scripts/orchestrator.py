@@ -1586,15 +1586,11 @@ def main() -> int:
 
                             # Record failure and decide if it became terminal
                             force_terminal = is_supplier2_order(order)
-                            # DSN-specific fail-safe: if checkout/TTN/attach step fails (e.g. DSN dropped auth on checkout),
-                            # send FAIL status immediately and stop auto-retries to avoid stuck/repeat processing.
-                            if is_supplier3_order(order) and step in {
-                                "checkout_ttn",
-                                "attach_invoice_label",
-                                "submit_checkout_order",
-                            }:
-                                force_terminal = True
-                            if is_supplier3_order(order) and step == "add_items" and "CART_ROW_AMBIGUOUS" in reason:
+                            # DSN-specific fail-safe:
+                            # keep terminal-on-first-failure only for final submit step to avoid duplicate orders.
+                            # For add_items/checkout_ttn/attach_invoice_label we allow regular retries
+                            # controlled by ORCH_MAX_ATTEMPTS + backoff.
+                            if is_supplier3_order(order) and step in {"submit_checkout_order"}:
                                 force_terminal = True
                             mark_failed(state, int(order_id), step, reason, force_terminal=force_terminal)
                             clear_in_progress(state, int(order_id))
