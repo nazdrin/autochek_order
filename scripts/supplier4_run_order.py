@@ -3,6 +3,8 @@ import json
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,6 +45,13 @@ SUP4_ATTACH_DIR = (os.getenv("SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 SUP4_PAUSE_SEC = _to_int(os.getenv("SUP4_PAUSE_SEC", "0"), 0)
 SUP4_STAGE = (os.getenv("SUP4_STAGE") or "run").strip().lower() or "run"
 SUP4_FORCE_LOGIN = _to_bool(os.getenv("SUP4_FORCE_LOGIN", "0"), False)
+SUP4_SKIP_SUBMIT = _to_bool(os.getenv("SUP4_SKIP_SUBMIT", "0"), False)
+SUP4_NP_API_KEY = (
+    os.getenv("SUP4_NP_API_KEY")
+    or os.getenv("NP_API_KEY")
+    or os.getenv("BIOTUS_NP_API_KEY")
+    or ""
+).strip()
 
 
 class StageError(RuntimeError):
@@ -238,6 +247,11 @@ async def _open_cart_modal(page) -> None:
             return await modal.is_visible()
         except Exception:
             return False
+
+    # If cart modal is already open, do not click basket again.
+    # Re-clicking basket while modal is open can produce stray clicks behind overlay.
+    if await _visible():
+        return
 
     basket_candidates = [
         "a.basket__link.j-basket-link",
@@ -960,9 +974,50 @@ def _pick_label_file(ttn: str) -> Path:
     return files[0]
 
 
+def _download_np_label_sup4(folder: Path, ttn: str, api_key: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    out_path = folder / f"label-{ttn}.pdf"
+    url = (
+        "https://my.novaposhta.ua/orders/printMarking100x100/"
+        f"orders[]/{ttn}/type/pdf/apiKey/{api_key}/zebra"
+    )
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=max(10, SUP4_TIMEOUT_MS / 1000)) as resp:
+            status = getattr(resp, "status", 200)
+            if status and int(status) >= 400:
+                raise RuntimeError(f"Nova Poshta API returned status {status}")
+            data = resp.read()
+            if not data:
+                raise RuntimeError("Downloaded PDF is empty")
+            out_path.write_bytes(data)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"NP API HTTP {e.code}: {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"NP API connection error: {e}") from e
+
+    if not out_path.exists():
+        raise RuntimeError("Downloaded PDF file does not exist")
+    if out_path.stat().st_size <= 0:
+        raise RuntimeError("Downloaded PDF file size is zero")
+    return out_path
+
+
+def _resolve_label_file(ttn: str) -> Path:
+    # Prefer direct download by NP API (same behavior as supplier3), fallback to local files.
+    if SUP4_NP_API_KEY:
+        try:
+            p = _download_np_label_sup4(_attach_dir_path(), ttn, SUP4_NP_API_KEY)
+            print(f"[SUP4] label downloaded: {p.name}")
+            return p
+        except Exception as e:
+            print(f"[SUP4] label download failed, fallback to local file: {e}")
+    return _pick_label_file(ttn)
+
+
 async def _attach_label_file(page, ttn: str) -> dict:
     stage = "attach_invoice_label"
-    fpath = _pick_label_file(ttn)
+    fpath = _resolve_label_file(ttn)
     inp = page.locator("input[type='file'][name*='invoiceFileName'], input[type='file'].j-ignore, input[type='file']").first
     try:
         await inp.wait_for(state="attached", timeout=min(6000, SUP4_TIMEOUT_MS))
@@ -981,36 +1036,159 @@ async def _attach_label_file(page, ttn: str) -> dict:
 
 async def _submit_checkout(page) -> None:
     stage = "submit_checkout_order"
+    async def _ensure_agreement_checked() -> None:
+        # Some themes use custom agreement controls near submit text.
+        checkbox_candidates = [
+            page.locator(".checkout-user-agreement input[type='checkbox']").first,
+            page.locator("input[type='checkbox'][name*='agreement' i], input[type='checkbox'][name*='userAgreement' i]").first,
+        ]
+        for chk in checkbox_candidates:
+            try:
+                if await chk.count() == 0:
+                    continue
+                checked = False
+                try:
+                    checked = await chk.is_checked()
+                except Exception:
+                    checked = False
+                if checked:
+                    return
+                try:
+                    await chk.check(timeout=min(2200, SUP4_TIMEOUT_MS), force=True)
+                except Exception:
+                    try:
+                        await chk.click(timeout=min(2200, SUP4_TIMEOUT_MS), force=True)
+                    except Exception:
+                        try:
+                            await chk.evaluate(
+                                """(el) => {
+                                    el.checked = true;
+                                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                }"""
+                            )
+                        except Exception:
+                            pass
+                await page.wait_for_timeout(120)
+                return
+            except Exception:
+                continue
+
+        # Fallback: click custom agreement wrappers/labels.
+        wrapper_candidates = [
+            page.locator(".checkout-user-agreement").first,
+            page.locator(".checkout-user-agreement__default").first,
+            page.locator("label:has-text('Підтверджуючи замовлення')").first,
+            page.get_by_text(re.compile(r"Підтверджуючи замовлення", re.I)).first,
+        ]
+        for w in wrapper_candidates:
+            try:
+                if await w.count() == 0:
+                    continue
+                await w.click(timeout=min(2200, SUP4_TIMEOUT_MS), force=True)
+                await page.wait_for_timeout(120)
+                return
+            except Exception:
+                continue
+
     sels = [
         "button.btn.j-submit.btn_submit._special",
         "button.btn.j-submit._special",
         "button.btn.j-submit",
         "button:has-text('Оформити замовлення')",
     ]
+    await _ensure_agreement_checked()
     for sel in sels:
         btn = page.locator(sel).first
         try:
-            if await btn.count() > 0 and await btn.is_visible():
-                await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS), force=True)
-                print("[SUP4] submitted")
-                return
+            if await btn.count() == 0:
+                continue
+            try:
+                await btn.wait_for(state="visible", timeout=min(3500, SUP4_TIMEOUT_MS))
+            except Exception:
+                pass
+            try:
+                await btn.scroll_into_view_if_needed(timeout=1200)
+            except Exception:
+                pass
+            for mode in ("normal", "force", "js"):
+                try:
+                    await _ensure_agreement_checked()
+                    if mode == "js":
+                        await btn.evaluate("(el) => el.click()")
+                    elif mode == "force":
+                        await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS), force=True)
+                    else:
+                        await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS))
+                    # Treat click as successful only if completion signals appear shortly.
+                    signal_deadline = asyncio.get_running_loop().time() + 4.8
+                    while asyncio.get_running_loop().time() < signal_deadline:
+                        url = page.url or ""
+                        if "/checkout/complete/" in url:
+                            print(f"[SUP4] submitted via {sel}/{mode}")
+                            return
+                        try:
+                            if await page.locator("text=/Ваше\\s+замовлення\\s+отримано/i").count() > 0:
+                                print(f"[SUP4] submitted via {sel}/{mode}")
+                                return
+                        except Exception:
+                            pass
+                        try:
+                            if await page.locator("text=/Замовлення\\s*[№Nº]\\s*\\d+/i").count() > 0:
+                                print(f"[SUP4] submitted via {sel}/{mode}")
+                                return
+                        except Exception:
+                            pass
+                        await page.wait_for_timeout(150)
+                except Exception:
+                    continue
         except Exception:
             continue
-    raise StageError(stage, "Submit button not found")
+
+    # Collect validation hints if submit stayed on checkout.
+    error_text = ""
+    try:
+        candidates = page.locator(".field-error, .error, .form-error, .checkout-error, .invalid-feedback")
+        count = await candidates.count()
+        msgs = []
+        for i in range(min(count, 5)):
+            t = re.sub(r"\s+", " ", (await candidates.nth(i).inner_text(timeout=700)) or "").strip()
+            if t:
+                msgs.append(t)
+        if msgs:
+            error_text = "; ".join(msgs)
+    except Exception:
+        pass
+    raise StageError(
+        stage,
+        "Submit click did not lead to checkout complete",
+        {"url": page.url, "validation": error_text},
+    )
 
 
 async def _wait_complete_and_parse_number(page) -> str:
     stage = "submit_checkout_order"
-    try:
-        await page.wait_for_url(re.compile(r"/checkout/complete/"), timeout=min(15000, SUP4_TIMEOUT_MS + 8000))
-    except Exception:
-        pass
-
-    block = page.locator("section.checkout-complete, .checkout-success, .checkout-main").first
-    try:
-        await block.wait_for(state="visible", timeout=min(10000, SUP4_TIMEOUT_MS))
-    except Exception:
-        pass
+    # Wait until either checkout/complete URL or success texts become visible.
+    complete_ready = False
+    deadline = asyncio.get_running_loop().time() + min(20.0, (SUP4_TIMEOUT_MS + 10000) / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        url = page.url or ""
+        if "/checkout/complete/" in url:
+            complete_ready = True
+            break
+        try:
+            if await page.locator("text=/Ваше\\s+замовлення\\s+отримано/i").count() > 0:
+                complete_ready = True
+                break
+        except Exception:
+            pass
+        try:
+            if await page.locator("text=/Замовлення\\s*[№Nº]\\s*\\d+/i").count() > 0:
+                complete_ready = True
+                break
+        except Exception:
+            pass
+        await page.wait_for_timeout(180)
 
     body_text = ""
     try:
@@ -1018,17 +1196,27 @@ async def _wait_complete_and_parse_number(page) -> str:
     except Exception:
         body_text = ""
 
-    m = re.search(r"Замовлення\s*[№NºNo]*\s*(\d{3,})", body_text, flags=re.IGNORECASE)
+    # IMPORTANT: parse supplier number from text only, never from URL.
+    m = re.search(r"Замовлення\s*[№Nº]\s*(\d{3,})", body_text, flags=re.IGNORECASE)
     if not m:
-        # fallback to dedicated header fragment
         try:
-            txt = await page.locator("text=/Замовлення\\s*[№NºNo]\\s*\\d+/i").first.inner_text(timeout=2000)
+            txt = await page.locator("text=/Замовлення\\s*[№Nº]\\s*\\d+/i").first.inner_text(timeout=2500)
             m = re.search(r"(\d{3,})", txt or "")
         except Exception:
             m = None
+    if not m:
+        try:
+            html = await page.content()
+        except Exception:
+            html = ""
+        m = re.search(r"Замовлення\s*[№Nº]\s*(\d{3,})", html or "", flags=re.IGNORECASE)
 
     if not m:
-        raise StageError(stage, "Could not parse supplier order number on complete page", {"url": page.url})
+        raise StageError(
+            stage,
+            "Could not parse supplier order number on complete page",
+            {"url": page.url, "complete_ready": complete_ready},
+        )
 
     number = m.group(1)
     print(f"[SUP4] complete page parsed with order number: {number}")
@@ -1040,6 +1228,20 @@ async def _checkout_and_submit(page, ttn: str) -> dict:
     own_selected = await _ensure_own_ttn_selected(page)
     await _fill_ttn(page, ttn)
     attach_info = await _attach_label_file(page, ttn)
+    if SUP4_SKIP_SUBMIT:
+        print("[SUP4] submit skipped by SUP4_SKIP_SUBMIT=1")
+        if SUP4_PAUSE_SEC > 0:
+            await page.wait_for_timeout(SUP4_PAUSE_SEC * 1000)
+        return {
+            "ok": True,
+            "radio_selected": bool(own_selected),
+            "ttn_set": True,
+            "ttn_verified_before_submit": True,
+            "label_attached": True,
+            "attach_invoice_label": attach_info,
+            "submitted": False,
+            "supplier_order_number": "",
+        }
     await _submit_checkout(page)
     supplier_number = await _wait_complete_and_parse_number(page)
 
@@ -1053,6 +1255,7 @@ async def _checkout_and_submit(page, ttn: str) -> dict:
         "ttn_verified_before_submit": True,
         "label_attached": True,
         "attach_invoice_label": attach_info,
+        "submitted": True,
         "supplier_order_number": supplier_number,
     }
 
