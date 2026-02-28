@@ -21,6 +21,17 @@ from zoneinfo import ZoneInfo
 import re
 
 from dotenv import load_dotenv
+from supplier5_zoohub import (
+    build_zoohub_body,
+    build_zoohub_salesdrive_products,
+    build_zoohub_subject,
+    download_label_pdf,
+    parse_to_emails,
+    parse_zoohub_items,
+    send_zoohub_email,
+    zoohub_dry_run_enabled,
+    zoohub_number_sup_value,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -42,6 +53,7 @@ STEP9_CONFIRM_SCRIPT = ROOT / "scripts" / "step9_confirm_order.py"
 SUP2_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier2_run_order.py"
 SUP3_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier3_run_order.py"
 SUP4_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier4_run_order.py"
+SUP5_ZOOHUB_SCRIPT = ROOT / "scripts" / "supplier5_zoohub.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -180,6 +192,7 @@ ORCH_SUP4_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP4_STORAGE_STATE_FILE") or ".s
 ORCH_SUP4_CLEAR_BASKET = (os.getenv("ORCH_SUP4_CLEAR_BASKET") or "1").strip()
 ORCH_SUP4_ATTACH_DIR = (os.getenv("ORCH_SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 ORCH_SUP4_PAUSE_SEC = (os.getenv("ORCH_SUP4_PAUSE_SEC") or "0").strip()
+ORCH_SUP5_SUPPLIERLIST = int(os.getenv("ORCH_SUP5_SUPPLIERLIST", "47"))
 ORCH_LOCK_FILE = Path(os.getenv("ORCH_LOCK_FILE", str(ROOT / ".orchestrator.lock")))
 RUN_INSTANCE_ID = uuid.uuid4().hex[:12]
 HOSTNAME = socket.gethostname()
@@ -575,11 +588,11 @@ def parse_supplier_result_json_from_stdout(stdout: str, *, prefix: str = SUPPLIE
 
 def load_state() -> Dict[str, Any]:
     if not STATE_FILE.exists():
-        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}}
+        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}, "zoohub_sent": {}}
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {"processed_ids": [], "failed": {}, "in_progress_orders": {}}
+            return {"processed_ids": [], "failed": {}, "in_progress_orders": {}, "zoohub_sent": {}}
         ids = data.get("processed_ids")
         if not isinstance(ids, list):
             ids = []
@@ -599,9 +612,13 @@ def load_state() -> Dict[str, Any]:
         if not isinstance(in_progress, dict):
             in_progress = {}
         data["in_progress_orders"] = in_progress
+        zoohub_sent = data.get("zoohub_sent")
+        if not isinstance(zoohub_sent, dict):
+            zoohub_sent = {}
+        data["zoohub_sent"] = zoohub_sent
         return data
     except Exception:
-        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}}
+        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}, "zoohub_sent": {}}
 def _now_ts() -> int:
     return int(time.time())
 
@@ -655,6 +672,11 @@ def is_supplier3_order(order: Dict[str, Any]) -> bool:
 def is_supplier4_order(order: Dict[str, Any]) -> bool:
     supplierlist, _ = parse_order_supplierlist(order)
     return supplierlist == ORCH_SUP4_SUPPLIERLIST
+
+
+def is_supplier5_order(order: Dict[str, Any]) -> bool:
+    supplierlist, _ = parse_order_supplierlist(order)
+    return supplierlist == ORCH_SUP5_SUPPLIERLIST
 
 
 # Helpers for terminal/attempts
@@ -1447,7 +1469,104 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
     )
 
 
-def process_one_order(order: Dict[str, Any]) -> bool:
+def process_one_zoohub_order(order: Dict[str, Any], state: Dict[str, Any]) -> None:
+    step_name = "zoohub_pipeline"
+    order_id = order.get("id")
+    try:
+        order_id_int = int(order_id)
+    except Exception:
+        raise RuntimeError(f"Invalid order id: {order_id}")
+
+    tracking_number = extract_tracking_number(order)
+    if not tracking_number:
+        raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для ZOOHUB_TTN.")
+
+    items = parse_zoohub_items(order)
+    products_payload = build_zoohub_salesdrive_products(order)
+    recipients = parse_to_emails()
+    subject = build_zoohub_subject(items)
+    body = build_zoohub_body(order_id_int, tracking_number, items)
+    dry_run = zoohub_dry_run_enabled()
+    number_sup_value = zoohub_number_sup_value()
+
+    zoohub_sent: Dict[str, Any] = state.setdefault("zoohub_sent", {})
+    sent_key = str(order_id_int)
+    sent_entry = zoohub_sent.get(sent_key)
+
+    # If email was already sent before, never send it again. Only retry SalesDrive status update.
+    if isinstance(sent_entry, dict):
+        print(
+            f"[ORCH] Zoohub email already sent for order_id={order_id_int}; skip send and retry status update only."
+        )
+        salesdrive_update_status(
+            order_id_int,
+            ORCH_DONE_STATUS_ID,
+            number_sup=number_sup_value,
+            products=products_payload,
+        )
+        print(
+            f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={number_sup_value}"
+        )
+        return
+
+    if dry_run:
+        print(
+            f"[ORCH] ZOOHUB_DRY_RUN=1: would send email order_id={order_id_int} to={','.join(recipients)} subject={subject!r} ttn={tracking_number}"
+        )
+        return
+
+    try:
+        pdf_path = download_label_pdf(tracking_number)
+    except Exception as e:
+        raise StepError("zoohub_label_download", f"Label download failed: {e}") from e
+
+    print(
+        f"[ORCH] Zoohub email prepared: order_id={order_id_int} to={','.join(recipients)} subject={subject!r} pdf={pdf_path}"
+    )
+    if not products_payload:
+        print(f"[ORCH] Zoohub WARN: no product ids for SalesDrive products payload order_id={order_id_int}; status update will be sent without products")
+
+    try:
+        send_zoohub_email(subject=subject, body=body, recipients=recipients, pdf_path=pdf_path)
+        print(f"[ORCH] Zoohub email sent for order_id={order_id_int}")
+    except Exception as e:
+        raise StepError("zoohub_email_send", str(e)) from e
+
+    # Persist sent marker BEFORE status update to prevent duplicate emails on later retries.
+    zoohub_sent[sent_key] = {
+        "ts": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+        "ttn": tracking_number,
+        "subject": subject,
+        "pdf": str(pdf_path),
+    }
+    state["zoohub_sent"] = zoohub_sent
+    save_state(state)
+
+    try:
+        salesdrive_update_status(
+            order_id_int,
+            ORCH_DONE_STATUS_ID,
+            number_sup=number_sup_value,
+            products=products_payload,
+        )
+    except Exception as e:
+        raise StepError("zoohub_status_update", str(e)) from e
+
+    print(
+        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={number_sup_value}"
+    )
+
+    # Optional cleanup for sent PDF
+    delete_label = (os.getenv("ZOOHUB_DELETE_LABEL_AFTER_SEND") or "").strip() in {"1", "true", "yes", "on"}
+    if delete_label:
+        try:
+            Path(str(pdf_path)).unlink(missing_ok=True)
+            print(f"[ORCH] Zoohub label deleted after send: {pdf_path}")
+        except Exception:
+            pass
+
+
+def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None) -> bool:
     supplier = str(order.get("supplier") or "").strip()
     supplierlist, err = parse_order_supplierlist(order)
     order_id = order_id_for_log(order)
@@ -1467,6 +1586,12 @@ def process_one_order(order: Dict[str, Any]) -> bool:
 
     if supplierlist == ORCH_SUP4_SUPPLIERLIST:
         process_one_supplier4_order(order)
+        return True
+
+    if supplierlist == ORCH_SUP5_SUPPLIERLIST:
+        if state is None:
+            raise RuntimeError("state is required for supplierlist=47")
+        process_one_zoohub_order(order, state)
         return True
 
     if supplierlist == 38:
@@ -1512,6 +1637,7 @@ def main() -> int:
         ("Supplier2 run order script", SUP2_RUN_ORDER_SCRIPT),
         ("Supplier3 run order script", SUP3_RUN_ORDER_SCRIPT),
         ("Supplier4 run order script", SUP4_RUN_ORDER_SCRIPT),
+        ("Supplier5 Zoohub script", SUP5_ZOOHUB_SCRIPT),
         ("Step2_3 script", STEP2_3_SCRIPT),
         ("Step4 script", STEP4_SCRIPT),
         ("Step5 drop tab script", STEP5_DROP_TAB_SCRIPT),
@@ -1540,6 +1666,7 @@ def main() -> int:
     state = load_state()
     state.setdefault("failed", {})
     state.setdefault("in_progress_orders", {})
+    state.setdefault("zoohub_sent", {})
     processed_ids: List[int] = state.get("processed_ids", [])
 
     while True:
@@ -1668,6 +1795,8 @@ def main() -> int:
                             sup4_items = build_sup4_items(order)
                             print(f"[ORCH] Routing => Monsterlab (supplierlist={ORCH_SUP4_SUPPLIERLIST}, supplier={supplier!r})")
                             print(f"[ORCH] SUP4_ITEMS => {sup4_items}")
+                        elif supplierlist == ORCH_SUP5_SUPPLIERLIST:
+                            print(f"[ORCH] Routing => Zoohub (supplierlist={ORCH_SUP5_SUPPLIERLIST}, supplier={supplier!r})")
                         elif supplierlist == 41:
                             sup2_items = build_sup2_items(order)
                             print(f"[ORCH] Routing => Dobavki (supplierlist=41, supplier={supplier!r})")
@@ -1684,7 +1813,7 @@ def main() -> int:
                             mark_in_progress(state, int(order_id), supplierlist if isinstance(supplierlist, int) else None)
                             print(f"[ORCH] order lock acquired order_id={order_id} supplierlist={supplierlist!r}", flush=True)
                             save_state(state)
-                            processed = process_one_order(order)
+                            processed = process_one_order(order, state=state)
                         except Exception as e:
                             if isinstance(e, StepError):
                                 step = e.step
@@ -1692,6 +1821,7 @@ def main() -> int:
                             else:
                                 step = "pipeline"
                                 reason = f"{type(e).__name__}: {str(e)}".strip()
+                            print(f"[ORCH] order failed order_id={order_id} step={step} reason={reason}", flush=True)
 
                             # Record failure and decide if it became terminal
                             force_terminal = is_supplier2_order(order)
@@ -1703,6 +1833,8 @@ def main() -> int:
                                 force_terminal = True
                             if is_supplier4_order(order) and step in {"submit_checkout_order"}:
                                 force_terminal = True
+                            if is_supplier5_order(order) and step in {"zoohub_email_send"}:
+                                force_terminal = True
                             mark_failed(state, int(order_id), step, reason, force_terminal=force_terminal)
                             clear_in_progress(state, int(order_id))
                             save_state(state)
@@ -1712,7 +1844,10 @@ def main() -> int:
 
                             # Do NOT send intermediate notifications. Only notify + change status when terminal.
                             if became_terminal:
-                                red_reason = f"{ORCH_FAIL_MARK} Order {order_id} failed after {fail_count} attempt(s). Last step: {step}. Reason: {reason}"
+                                fail_mark = ORCH_FAIL_MARK
+                                if is_supplier5_order(order):
+                                    fail_mark = "FAIL"
+                                red_reason = f"{fail_mark} Order {order_id} failed after {fail_count} attempt(s). Last step: {step}. Reason: {reason}"
                                 if force_terminal and "submitted=true" in reason:
                                     red_reason = f"{red_reason}\nWARNING: supplier2 submit likely succeeded; check supplier site manually before retry."
                                 # Try to set SalesDrive status to FAIL status with a short red comment.
