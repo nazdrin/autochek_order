@@ -54,6 +54,7 @@ SUP2_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier2_run_order.py"
 SUP3_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier3_run_order.py"
 SUP4_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier4_run_order.py"
 SUP5_ZOOHUB_SCRIPT = ROOT / "scripts" / "supplier5_zoohub.py"
+SUP2_EXPORT_PRODUCTS_SCRIPT = ROOT / "scripts" / "supplier2_export_products.py"
 
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
@@ -193,6 +194,10 @@ ORCH_SUP4_CLEAR_BASKET = (os.getenv("ORCH_SUP4_CLEAR_BASKET") or "1").strip()
 ORCH_SUP4_ATTACH_DIR = (os.getenv("ORCH_SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 ORCH_SUP4_PAUSE_SEC = (os.getenv("ORCH_SUP4_PAUSE_SEC") or "0").strip()
 ORCH_SUP5_SUPPLIERLIST = int(os.getenv("ORCH_SUP5_SUPPLIERLIST", "47"))
+ORCH_EXPORT_DOBAVKI_ENABLED = (os.getenv("ORCH_EXPORT_DOBAVKI_ENABLED") or "1").strip()
+ORCH_EXPORT_DOBAVKI_EVERY_MIN = int((os.getenv("ORCH_EXPORT_DOBAVKI_EVERY_MIN") or "720").strip())
+ORCH_EXPORT_DOBAVKI_AFTER_RUN = (os.getenv("ORCH_EXPORT_DOBAVKI_AFTER_RUN") or "1").strip()
+ORCH_EXPORT_DOBAVKI_TIMEOUT_SEC = int((os.getenv("ORCH_EXPORT_DOBAVKI_TIMEOUT_SEC") or "240").strip())
 ORCH_LOCK_FILE = Path(os.getenv("ORCH_LOCK_FILE", str(ROOT / ".orchestrator.lock")))
 RUN_INSTANCE_ID = uuid.uuid4().hex[:12]
 HOSTNAME = socket.gethostname()
@@ -588,11 +593,23 @@ def parse_supplier_result_json_from_stdout(stdout: str, *, prefix: str = SUPPLIE
 
 def load_state() -> Dict[str, Any]:
     if not STATE_FILE.exists():
-        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}, "zoohub_sent": {}}
+        return {
+            "processed_ids": [],
+            "failed": {},
+            "in_progress_orders": {},
+            "zoohub_sent": {},
+            "last_dobavki_export_ts": 0,
+        }
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return {"processed_ids": [], "failed": {}, "in_progress_orders": {}, "zoohub_sent": {}}
+            return {
+                "processed_ids": [],
+                "failed": {},
+                "in_progress_orders": {},
+                "zoohub_sent": {},
+                "last_dobavki_export_ts": 0,
+            }
         ids = data.get("processed_ids")
         if not isinstance(ids, list):
             ids = []
@@ -616,9 +633,19 @@ def load_state() -> Dict[str, Any]:
         if not isinstance(zoohub_sent, dict):
             zoohub_sent = {}
         data["zoohub_sent"] = zoohub_sent
+        try:
+            data["last_dobavki_export_ts"] = int(data.get("last_dobavki_export_ts") or 0)
+        except Exception:
+            data["last_dobavki_export_ts"] = 0
         return data
     except Exception:
-        return {"processed_ids": [], "failed": {}, "in_progress_orders": {}, "zoohub_sent": {}}
+        return {
+            "processed_ids": [],
+            "failed": {},
+            "in_progress_orders": {},
+            "zoohub_sent": {},
+            "last_dobavki_export_ts": 0,
+        }
 def _now_ts() -> int:
     return int(time.time())
 
@@ -1604,6 +1631,66 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
     return False
 
 
+def maybe_run_dobavki_export(state: Dict[str, Any]) -> None:
+    if ORCH_EXPORT_DOBAVKI_ENABLED != "1":
+        return
+    if ORCH_EXPORT_DOBAVKI_AFTER_RUN != "1":
+        return
+    if not SUP2_EXPORT_PRODUCTS_SCRIPT.exists():
+        print(f"[ORCH] Dobavki export script not found: {SUP2_EXPORT_PRODUCTS_SCRIPT}")
+        return
+
+    now_ts = _now_ts()
+    last_ts = 0
+    try:
+        last_ts = int(state.get("last_dobavki_export_ts") or 0)
+    except Exception:
+        last_ts = 0
+
+    every_sec = max(1, ORCH_EXPORT_DOBAVKI_EVERY_MIN) * 60
+    elapsed = now_ts - last_ts
+    if last_ts > 0 and elapsed < every_sec:
+        print(f"[ORCH] Dobavki export skip: next in {every_sec - elapsed}s")
+        return
+
+    print("[ORCH] Dobavki export start")
+    try:
+        rc, out, err = run_python(
+            SUP2_EXPORT_PRODUCTS_SCRIPT,
+            env=os.environ.copy(),
+            timeout_sec=max(10, ORCH_EXPORT_DOBAVKI_TIMEOUT_SEC),
+        )
+    except subprocess.TimeoutExpired as te:
+        notify_stub(f"[ORCH] Dobavki export timeout after {ORCH_EXPORT_DOBAVKI_TIMEOUT_SEC}s")
+        print(f"[ORCH] Dobavki export timeout: {te}", file=sys.stderr)
+        return
+
+    if out.strip():
+        print(out, end="" if out.endswith("\n") else "\n")
+    if err.strip():
+        print(err, file=sys.stderr, end="" if err.endswith("\n") else "\n")
+
+    if rc != 0:
+        reason = short_reason("supplier2_export_products", rc, out, err, None)
+        notify_stub(f"[ORCH] Dobavki export failed: {reason}")
+        return
+
+    summary_ok = False
+    try:
+        payload = parse_json_from_stdout(out)
+        summary_ok = isinstance(payload, dict) and bool(payload.get("ok"))
+    except Exception:
+        summary_ok = False
+
+    if not summary_ok:
+        notify_stub("[ORCH] Dobavki export failed: invalid summary payload")
+        return
+
+    state["last_dobavki_export_ts"] = now_ts
+    save_state(state)
+    print("[ORCH] Dobavki export done")
+
+
 def main() -> int:
     try:
         acquire_single_instance_lock()
@@ -1667,6 +1754,7 @@ def main() -> int:
     state.setdefault("failed", {})
     state.setdefault("in_progress_orders", {})
     state.setdefault("zoohub_sent", {})
+    state.setdefault("last_dobavki_export_ts", 0)
     processed_ids: List[int] = state.get("processed_ids", [])
 
     while True:
@@ -1886,6 +1974,11 @@ def main() -> int:
             notify_stub("[ORCH] Timeout while running a step.")
         except Exception as e:
             notify_stub(f"[ORCH] Orchestrator error: {type(e).__name__}: {e}")
+
+        try:
+            maybe_run_dobavki_export(state)
+        except Exception as e:
+            notify_stub(f"[ORCH] Dobavki export wrapper error: {type(e).__name__}: {e}")
 
         if args.once:
             break

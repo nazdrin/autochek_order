@@ -50,8 +50,18 @@ node_modules/
 # local state / outputs
 .orch_state.json
 .biotus_state.json
+credentials.json
+
+# generated labels / exports
+supplier2_labels/
+supplier3_labels/
+supplier4_labels/
+zoohub_labels/
+маркировки/
+exports/
 
 # IDE
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
