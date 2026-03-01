@@ -527,7 +527,7 @@ async def _wait_search_dropdown(page) -> tuple[Any, str]:
         (".search-results", page.locator(".search-results").first),
         (".search-results__items", page.locator(".search-results__items").first),
     ]
-    deadline = asyncio.get_running_loop().time() + min(10.0, SUP3_TIMEOUT_MS / 1000.0)
+    deadline = asyncio.get_running_loop().time() + min(16.0, SUP3_TIMEOUT_MS / 1000.0)
     while asyncio.get_running_loop().time() < deadline:
         for label, loc in candidates:
             try:
@@ -567,8 +567,10 @@ async def _search_open_product_card(page, sku: str) -> None:
         await page.keyboard.press("Backspace")
     except Exception:
         pass
-    await search_input.fill(sku, timeout=min(4000, SUP3_TIMEOUT_MS))
+    # Important for Windows: DSN autocomplete reacts better to real key typing than to fill().
+    await search_input.type(sku, delay=45, timeout=min(6000, SUP3_TIMEOUT_MS))
     try:
+        await page.wait_for_timeout(180)
         await search_input.dispatch_event("input")
         await search_input.dispatch_event("change")
     except Exception:

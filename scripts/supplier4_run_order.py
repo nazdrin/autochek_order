@@ -578,7 +578,8 @@ async def _open_search_and_fill(page, sku: str) -> None:
         await target.click(timeout=min(2500, SUP4_TIMEOUT_MS), force=True)
         await page.keyboard.press(_select_all_shortcut())
         await page.keyboard.press("Backspace")
-        await target.fill(sku, timeout=min(3000, SUP4_TIMEOUT_MS))
+        # Important for Windows: Monsterlab autocomplete listens to key events.
+        await target.type(sku, delay=45, timeout=min(6000, SUP4_TIMEOUT_MS))
     except Exception as e:
         raise StageError(stage, f"Search fill failed for sku={sku}: {e}") from e
 
@@ -587,7 +588,7 @@ async def _open_product_from_dropdown(page, sku: str) -> None:
     stage = "add_items"
     results = page.locator(".multi-results .multi-item a[href], .multi-results .multi-item, .multi-grid .multi-item a[href]")
     try:
-        await results.first.wait_for(state="visible", timeout=min(6000, SUP4_TIMEOUT_MS))
+        await results.first.wait_for(state="visible", timeout=min(12000, SUP4_TIMEOUT_MS))
     except Exception as e:
         raise StageError(stage, f"Search dropdown did not appear for sku={sku}: {e}") from e
 
