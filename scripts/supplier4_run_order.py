@@ -588,7 +588,7 @@ async def _open_product_from_dropdown(page, sku: str) -> None:
     stage = "add_items"
     results = page.locator(".multi-results .multi-item a[href], .multi-results .multi-item, .multi-grid .multi-item a[href]")
     try:
-        await results.first.wait_for(state="visible", timeout=min(12000, SUP4_TIMEOUT_MS))
+        await results.first.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
     except Exception as e:
         raise StageError(stage, f"Search dropdown did not appear for sku={sku}: {e}") from e
 
