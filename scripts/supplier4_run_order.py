@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -52,6 +53,8 @@ SUP4_NP_API_KEY = (
     or os.getenv("BIOTUS_NP_API_KEY")
     or ""
 ).strip()
+SUP4_LABELS_MAX_FILES = _to_int(os.getenv("SUP4_LABELS_MAX_FILES", "50"), 50)
+SUP4_LABELS_MAX_AGE_DAYS = _to_int(os.getenv("SUP4_LABELS_MAX_AGE_DAYS", "7"), 7)
 
 
 class StageError(RuntimeError):
@@ -1000,7 +1003,49 @@ def _download_np_label_sup4(folder: Path, ttn: str, api_key: str) -> Path:
         raise RuntimeError("Downloaded PDF file does not exist")
     if out_path.stat().st_size <= 0:
         raise RuntimeError("Downloaded PDF file size is zero")
+    _cleanup_labels_dir_sup4(folder, keep_names={out_path.name})
     return out_path
+
+
+def _cleanup_labels_dir_sup4(folder: Path, keep_names: set[str] | None = None) -> None:
+    keep_names = keep_names or set()
+    if not folder.exists():
+        return
+
+    files: list[Path] = []
+    for p in folder.glob("label-*.pdf"):
+        if p.is_file():
+            files.append(p)
+    if not files:
+        return
+
+    now = time.time()
+    deleted = 0
+
+    if SUP4_LABELS_MAX_AGE_DAYS > 0:
+        max_age_sec = SUP4_LABELS_MAX_AGE_DAYS * 24 * 60 * 60
+        for p in files:
+            if p.name in keep_names:
+                continue
+            try:
+                if now - p.stat().st_mtime > max_age_sec:
+                    p.unlink(missing_ok=True)
+                    deleted += 1
+            except Exception:
+                continue
+
+    if SUP4_LABELS_MAX_FILES > 0:
+        remaining = [p for p in files if p.exists() and p.name not in keep_names]
+        remaining.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        for p in remaining[SUP4_LABELS_MAX_FILES:]:
+            try:
+                p.unlink(missing_ok=True)
+                deleted += 1
+            except Exception:
+                continue
+
+    if deleted:
+        print(f"[SUP4] cleaned old labels: {deleted}")
 
 
 def _resolve_label_file(ttn: str) -> Path:

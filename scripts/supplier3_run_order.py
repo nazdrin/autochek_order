@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.error
 import urllib.request
@@ -57,6 +58,8 @@ SUP3_NP_API_KEY = (
     or ""
 ).strip()
 SUP3_LABELS_DIR = ROOT / "supplier3_labels"
+SUP3_LABELS_MAX_FILES = _to_int(os.getenv("SUP3_LABELS_MAX_FILES", "50"), 50)
+SUP3_LABELS_MAX_AGE_DAYS = _to_int(os.getenv("SUP3_LABELS_MAX_AGE_DAYS", "7"), 7)
 
 
 class StageError(RuntimeError):
@@ -190,7 +193,49 @@ def _download_np_label_sup3(folder: Path, ttn: str, api_key: str) -> Path:
         raise RuntimeError("Downloaded PDF file size is zero")
     if ttn not in out_path.name:
         raise RuntimeError("Downloaded file name does not contain TTN")
+    _cleanup_labels_dir_sup3(folder, keep_names={out_path.name})
     return out_path
+
+
+def _cleanup_labels_dir_sup3(folder: Path, keep_names: set[str] | None = None) -> None:
+    keep_names = keep_names or set()
+    if not folder.exists():
+        return
+
+    files: list[Path] = []
+    for p in folder.glob("label-*.pdf"):
+        if p.is_file():
+            files.append(p)
+    if not files:
+        return
+
+    now = time.time()
+    deleted = 0
+
+    if SUP3_LABELS_MAX_AGE_DAYS > 0:
+        max_age_sec = SUP3_LABELS_MAX_AGE_DAYS * 24 * 60 * 60
+        for p in files:
+            if p.name in keep_names:
+                continue
+            try:
+                if now - p.stat().st_mtime > max_age_sec:
+                    p.unlink(missing_ok=True)
+                    deleted += 1
+            except Exception:
+                continue
+
+    if SUP3_LABELS_MAX_FILES > 0:
+        remaining = [p for p in files if p.exists() and p.name not in keep_names]
+        remaining.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        for p in remaining[SUP3_LABELS_MAX_FILES:]:
+            try:
+                p.unlink(missing_ok=True)
+                deleted += 1
+            except Exception:
+                continue
+
+    if deleted:
+        print(f"[SUP3] cleaned old labels: {deleted}")
 
 
 async def _pick_checkout_file_input(page):
