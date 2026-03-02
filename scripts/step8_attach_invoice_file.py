@@ -14,7 +14,23 @@ load_dotenv(ROOT / ".env")
 USE_CDP = os.getenv("BIOTUS_USE_CDP", "0") == "1"
 CDP_ENDPOINT = os.getenv("BIOTUS_CDP_ENDPOINT", "http://127.0.0.1:9222")
 
-ATTACH_DIR = Path(os.getenv("BIOTUS_ATTACH_DIR", "/Users/dmitrijnazdrin/rpa_biotus/маркировки"))
+
+def resolve_attach_dir() -> Path:
+    """Resolve a cross-platform attachment folder with sane defaults."""
+    raw = (os.getenv("BIOTUS_ATTACH_DIR") or "").strip()
+    if raw:
+        return Path(raw).expanduser()
+
+    preferred = ROOT / "markers"
+    legacy = ROOT / "маркировки"
+    if preferred.exists():
+        return preferred
+    if legacy.exists():
+        return legacy
+    return preferred
+
+
+ATTACH_DIR = resolve_attach_dir()
 
 TIMEOUT_MS = int(os.getenv("BIOTUS_TIMEOUT_MS", "15000"))
 TTN = os.getenv("BIOTUS_TTN", "").strip()
@@ -63,9 +79,7 @@ def validate_invoice_filename_or_raise(
 
 def download_np_label(folder: Path) -> Path:
     """Download Nova Poshta 100x100 marking label (pdf) for TTN into folder and return path."""
-    if not folder.exists():
-        # keep behavior consistent: folder must exist
-        raise RuntimeError(f"Папка не найдена: {folder}")
+    folder.mkdir(parents=True, exist_ok=True)
 
     if not TTN:
         raise RuntimeError(
@@ -261,6 +275,7 @@ async def attach_file_once(page, btn, file_path: Path) -> bool:
 
 
 async def main():
+    print(f"[INFO] Attach directory: {ATTACH_DIR}")
     file_path = download_np_label(ATTACH_DIR)
     print(f"[INFO] Downloaded and will attach: {file_path}")
     validate_invoice_filename_or_raise(file_path, TTN, ORDER_ID or None)
