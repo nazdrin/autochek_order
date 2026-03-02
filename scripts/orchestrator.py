@@ -59,6 +59,12 @@ SUP2_EXPORT_PRODUCTS_SCRIPT = ROOT / "scripts" / "supplier2_export_products.py"
 
 POLL_SECONDS = int(os.getenv("ORCH_POLL_SECONDS", "60"))
 TIMEOUT_SEC = int(os.getenv("ORCH_STEP_TIMEOUT_SEC", "600"))  # общий fallback таймаут
+ORCH_ENABLE_STEP5_DROP_TAB = (os.getenv("ORCH_ENABLE_STEP5_DROP_TAB") or "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 BIOTUS_TZ = (os.getenv("BIOTUS_TZ") or "Europe/Kyiv").strip() or "Europe/Kyiv"
 BIOTUS_PAUSE_DAY = (os.getenv("BIOTUS_PAUSE_DAY") or "").strip()
 BIOTUS_PAUSE_NIGHT = (os.getenv("BIOTUS_PAUSE_NIGHT") or "").strip()
@@ -1174,7 +1180,6 @@ def process_one_biotus_order(order: Dict[str, Any]) -> None:
     steps: List[Tuple[str, str, Path]] = [
         ("STEP2_3", "step2_3_add_items_to_cart", STEP2_3_SCRIPT),
         ("STEP4", "step4_checkout", STEP4_SCRIPT),
-        ("STEP5_DROP_TAB", "step5_select_drop_tab", STEP5_DROP_TAB_SCRIPT),
         ("STEP5_CITY", "step5_select_city", STEP5_CITY_SCRIPT),
         ("STEP5_FILL_NAME_PHONE", "step5_fill_name_phone", STEP5_FILL_NAME_PHONE_SCRIPT),
         ("STEP6_TERMINAL" if step6_name == "step6_1_select_np_terminal" else "STEP6_BRANCH", step6_name, step6_script),
@@ -1182,6 +1187,10 @@ def process_one_biotus_order(order: Dict[str, Any]) -> None:
         ("STEP8_ATTACH", "step8_attach_invoice_file", STEP8_ATTACH_SCRIPT),
         ("STEP9_CONFIRM", "step9_confirm_order", STEP9_CONFIRM_SCRIPT),
     ]
+    if ORCH_ENABLE_STEP5_DROP_TAB:
+        steps.insert(2, ("STEP5_DROP_TAB", "step5_select_drop_tab", STEP5_DROP_TAB_SCRIPT))
+    else:
+        print("[ORCH] STEP5_DROP_TAB skipped (ORCH_ENABLE_STEP5_DROP_TAB=0)")
 
     current_step = None
     current_key = None
