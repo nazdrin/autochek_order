@@ -2193,34 +2193,74 @@ async def _ensure_own_ttn_selected(page) -> bool:
         "dt.form-head:has-text('Вказати номер накладної') >> xpath=following-sibling::dd[1]//input"
     ).first
 
-    async def _ttn_input_enabled() -> bool:
+    own_radio_candidates = [
+        page.locator("input[type='radio'][value='own_ttn']").first,
+        page.locator("input[type='radio'][value='own_ttn' i]").first,
+        page.locator("input[type='radio'][name*='recipient_person' i][value*='own' i]").first,
+        page.locator("input[type='radio'][name*='recipient' i][value*='ttn' i]").first,
+    ]
+    own_radio = None
+    for cand in own_radio_candidates:
         try:
-            await ttn_input_probe.wait_for(state="visible", timeout=min(1200, SUP3_TIMEOUT_MS))
-            return bool(await ttn_input_probe.is_enabled())
+            if await cand.count() > 0:
+                own_radio = cand
+                break
+        except Exception:
+            continue
+
+    async def _ttn_input_enabled() -> bool:
+        probe = ttn_input_probe
+        try:
+            if await probe.count() == 0:
+                probe = await _get_checkout_ttn_input(page)
+        except Exception:
+            probe = ttn_input_probe
+        try:
+            await probe.wait_for(state="visible", timeout=min(2200, SUP3_TIMEOUT_MS))
+            return bool(await probe.is_enabled())
         except Exception:
             return False
 
     if await _ttn_input_enabled():
         return True
 
-    label_candidates = [
+    click_candidates = [
+        own_radio,
+        page.locator("label.recipient-person__item", has_text=re.compile(r"своя\s+наклад", re.I)).first,
         page.get_by_text(re.compile(r"своя\s+накладн", re.I)).first,
         page.locator("label:has-text('своя накладна'), label:has-text('Своя накладна')").first,
         page.locator("[for]:has-text('своя накладна'), [for]:has-text('Своя накладная')").first,
     ]
 
-    for loc in label_candidates:
+    for loc in click_candidates:
+        if loc is None:
+            continue
         try:
-            if await loc.count() > 0 and await loc.is_visible():
+            if await loc.count() > 0:
+                try:
+                    await loc.scroll_into_view_if_needed(timeout=1000)
+                except Exception:
+                    pass
                 print("[SUP3] checkout_ttn: select own TTN option")
                 await loc.click(timeout=min(3000, SUP3_TIMEOUT_MS), force=True)
-                await page.wait_for_timeout(150)
-                break
+                await page.wait_for_timeout(250)
+                if own_radio is not None:
+                    try:
+                        if await own_radio.is_checked():
+                            if await _ttn_input_enabled():
+                                return True
+                    except Exception:
+                        pass
+                if await _ttn_input_enabled():
+                    return True
         except Exception:
             continue
 
-    if await _ttn_input_enabled():
-        return True
+    deadline = asyncio.get_running_loop().time() + min(5.0, SUP3_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        if await _ttn_input_enabled():
+            return True
+        await page.wait_for_timeout(180)
     raise StageError(stage, "Own TTN option not selectable")
 
 
