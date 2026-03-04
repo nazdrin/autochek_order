@@ -3,6 +3,8 @@ import argparse
 import json
 import os
 import re
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -38,9 +40,17 @@ SUP6_STAGE = (os.getenv("SUP6_STAGE") or "login").strip().lower() or "login"
 SUP6_FORCE_LOGIN = _to_bool(os.getenv("SUP6_FORCE_LOGIN", "0"), False)
 SUP6_KEEP_OPEN_SECONDS = _to_int(os.getenv("SUP6_KEEP_OPEN_SECONDS", "0"), 0)
 SUP6_CLEAR_CART_PAUSE_SECONDS = _to_int(os.getenv("SUP6_CLEAR_CART_PAUSE_SECONDS", "20"), 20)
+SUP6_ITEMS = (os.getenv("SUP6_ITEMS") or "").strip()
+SUP6_ITEMS_JSON = (os.getenv("SUP6_ITEMS_JSON") or "").strip()
 SUPPLIER_RESULT_JSON_PREFIX = "SUPPLIER_RESULT_JSON="
 SUP6_MAKE_ORDER_URL = f"{SUP6_BASE_URL.rstrip('/')}/make-order.html"
 SUP6_CART_URL = f"{SUP6_BASE_URL.rstrip('/')}/cart.html"
+
+
+@dataclass(frozen=True)
+class Sup6Item:
+    sku: str
+    qty: int
 
 
 def _state_path() -> Path:
@@ -70,6 +80,68 @@ async def _safe_is_visible(locator) -> bool:
         return await locator.first.is_visible()
     except Exception:
         return False
+
+
+def _select_all_shortcut() -> str:
+    return "Meta+A" if sys.platform == "darwin" else "Control+A"
+
+
+def _norm_sku(v: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(v or "").strip().casefold())
+
+
+def _parse_qty(value: object) -> int:
+    try:
+        qty = int(str(value).strip())
+    except Exception as e:
+        raise RuntimeError(f"Invalid qty value: {value!r}") from e
+    if qty < 1:
+        raise RuntimeError(f"Qty must be >= 1, got {qty}")
+    return qty
+
+
+def _parse_sup6_items(cli_items_raw: str = "") -> list[Sup6Item]:
+    if SUP6_ITEMS_JSON:
+        try:
+            payload = json.loads(SUP6_ITEMS_JSON)
+        except Exception as e:
+            raise RuntimeError(f"SUP6_ITEMS_JSON is not valid JSON: {e}") from e
+        if not isinstance(payload, list) or not payload:
+            raise RuntimeError("SUP6_ITEMS_JSON must be a non-empty JSON list.")
+        out: list[Sup6Item] = []
+        for idx, row in enumerate(payload, start=1):
+            if not isinstance(row, dict):
+                raise RuntimeError(f"SUP6_ITEMS_JSON[{idx}] must be an object.")
+            sku = str(
+                row.get("sku")
+                or row.get("articul")
+                or row.get("article")
+                or row.get("code")
+                or ""
+            ).strip()
+            if not sku:
+                raise RuntimeError(f"SUP6_ITEMS_JSON[{idx}] must contain sku/articul.")
+            qty = _parse_qty(row.get("qty") or row.get("quantity") or row.get("count") or 1)
+            out.append(Sup6Item(sku=sku, qty=qty))
+        return out
+
+    raw = (cli_items_raw or SUP6_ITEMS or "").strip()
+    if not raw:
+        raise RuntimeError("SUP6_ITEMS or SUP6_ITEMS_JSON is required for add_items stage.")
+    parts = [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
+    out2: list[Sup6Item] = []
+    for idx, part in enumerate(parts, start=1):
+        if ":" in part:
+            sku_raw, qty_raw = part.split(":", 1)
+            sku = sku_raw.strip()
+            qty = _parse_qty(qty_raw)
+        else:
+            sku = part.strip()
+            qty = 1
+        if not sku:
+            raise RuntimeError(f"SUP6_ITEMS part #{idx} has empty sku")
+        out2.append(Sup6Item(sku=sku, qty=qty))
+    return out2
 
 
 async def _auth_header_state(page) -> dict:
@@ -491,17 +563,302 @@ async def _run_clear_cart_stage(*, pause_seconds: int = 0) -> dict:
                 await browser.close()
 
 
+def _step3_fail(reason: str, *, details: dict | None = None) -> dict:
+    return {
+        "ok": False,
+        "step": "step3_add_items_to_cart",
+        "reason": reason,
+        "details": details or {},
+    }
+
+
+async def _step3_wait_search_input(page) -> None:
+    search_input = page.locator("input.input-filter.SumoActive, input.input-filter").first
+    await search_input.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+
+
+async def _step3_find_row_for_sku(page, sku: str):
+    sku_norm = _norm_sku(sku)
+    row_candidates = page.locator("tr:has(.addtocart-button), .product_item:has(.addtocart-button), li:has(.addtocart-button)")
+    count = await row_candidates.count()
+    first_btn = page.locator(".addtocart-button:visible").first
+
+    matched_row = None
+    for i in range(min(count, 25)):
+        row = row_candidates.nth(i)
+        try:
+            txt = re.sub(r"\s+", " ", (await row.inner_text(timeout=900)) or "").strip()
+            if sku_norm and sku_norm in _norm_sku(txt):
+                matched_row = row
+                break
+        except Exception:
+            continue
+
+    if matched_row is not None:
+        return matched_row, None
+
+    if await first_btn.count() <= 0:
+        return None, _step3_fail(f"SKU_NOT_FOUND:{sku}", details={"sku": sku, "stage": "results_wait"})
+    return None, _step3_fail(f"SKU_NOT_FOUND:{sku}", details={"sku": sku, "stage": "results_match"})
+
+
+async def _step3_detect_qty_limit(page) -> bool:
+    selectors = [
+        ".fancybox-inner",
+        ".fancybox-wrap",
+        ".fancybox-overlay",
+        ".fancybox-skin",
+        "body",
+    ]
+    needle = ("достигнута максимальна кількість", "досягнута максимальна кількість", "максимальна кількість")
+    for sel in selectors:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count() <= 0:
+                continue
+            txt = ((await loc.inner_text(timeout=min(1200, SUP6_TIMEOUT_MS))) or "").casefold()
+            if any(n in txt for n in needle):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _step3_close_fancybox(page) -> None:
+    close_btns = [
+        ".fancybox-close",
+        "a.fancybox-close",
+        "button.fancybox-button--close",
+        "button[title='Close']",
+        "button[aria-label='Close']",
+    ]
+    for sel in close_btns:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count() > 0 and await loc.is_visible():
+                await loc.click(timeout=min(3000, SUP6_TIMEOUT_MS), force=True)
+                return
+        except Exception:
+            continue
+    try:
+        await page.keyboard.press("Escape")
+    except Exception:
+        pass
+
+
+async def _step3_set_qty_in_modal(page, qty: int) -> None:
+    qty_input = page.locator("input.quantity-input.js-recalculate, input.quantity-input").first
+    await qty_input.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+    await qty_input.click(timeout=min(3000, SUP6_TIMEOUT_MS))
+    await page.keyboard.press(_select_all_shortcut())
+    await page.keyboard.press("Backspace")
+    await qty_input.fill(str(qty), timeout=min(3000, SUP6_TIMEOUT_MS))
+
+
+async def _step3_click_add_in_modal(page, sku: str) -> dict | None:
+    confirm_btn = page.locator(".fancybox-wrap button.addtocart-button:visible, .fancybox-inner button.addtocart-button:visible, button.addtocart-button:visible").first
+    await confirm_btn.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+    await confirm_btn.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+
+    showcart = page.locator("a.showcart:visible, a.showcart:has-text('Показати кошик')").first
+    limit_deadline = asyncio.get_running_loop().time() + min(6.0, SUP6_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < limit_deadline:
+        if await _safe_is_visible(showcart):
+            return None
+        if await _step3_detect_qty_limit(page):
+            return _step3_fail(f"QTY_LIMIT:{sku}", details={"sku": sku, "qty_limit": True})
+        await page.wait_for_timeout(120)
+    return _step3_fail(f"ADD_CONFIRM_TIMEOUT:{sku}", details={"sku": sku, "stage": "showcart_wait"})
+
+
+async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool) -> dict | None:
+    sku = item.sku
+    qty = item.qty
+    max_attempts = 2
+
+    for attempt in range(1, max_attempts + 1):
+        print(f"[SUP6] step3_add_items: sku={sku} qty={qty} attempt={attempt}/{max_attempts}")
+        try:
+            await page.goto(SUP6_MAKE_ORDER_URL, wait_until="domcontentloaded", timeout=SUP6_TIMEOUT_MS)
+            await _step3_wait_search_input(page)
+
+            search_input = page.locator("input.input-filter.SumoActive, input.input-filter").first
+            await search_input.click(timeout=min(3000, SUP6_TIMEOUT_MS))
+            await page.keyboard.press(_select_all_shortcut())
+            await page.keyboard.press("Backspace")
+            await search_input.fill(sku, timeout=min(5000, SUP6_TIMEOUT_MS))
+
+            results_ready = page.locator(".addtocart-button:visible").first
+            await results_ready.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+            row, fail_payload = await _step3_find_row_for_sku(page, sku)
+            if fail_payload is not None:
+                return fail_payload
+
+            add_btn = row.locator(".addtocart-button:visible").first if row is not None else results_ready
+            await add_btn.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+
+            modal = page.locator(".fancybox-wrap:visible, .fancybox-inner:visible, .fancybox-opened:visible").first
+            await modal.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+
+            await _step3_set_qty_in_modal(page, qty)
+            fail_after_click = await _step3_click_add_in_modal(page, sku)
+            if fail_after_click is not None:
+                return fail_after_click
+
+            showcart = page.locator("a.showcart:visible, a.showcart:has-text('Показати кошик')").first
+            if is_last:
+                await showcart.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+                try:
+                    await page.wait_for_url(re.compile(r"/cart\.html|make-order"), timeout=SUP6_TIMEOUT_MS)
+                except Exception:
+                    pass
+                cart_rows = page.locator("button.vm2-remove_from_cart:visible, .cart-summary tr:has(button.vm2-remove_from_cart), .cart-view tr")
+                if await cart_rows.count() <= 0:
+                    return _step3_fail(f"CART_VERIFY_FAILED:{sku}", details={"sku": sku})
+            else:
+                await _step3_close_fancybox(page)
+
+            return None
+        except Exception as e:
+            print(f"[SUP6] step3_add_items: attempt failed sku={sku} attempt={attempt}: {e}")
+            if attempt >= max_attempts:
+                return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": str(e)})
+            await page.wait_for_timeout(220)
+
+    return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": "unknown"})
+
+
+async def step3_add_items_to_cart(page, items: list[Sup6Item]) -> dict:
+    if not items:
+        return _step3_fail("NO_ITEMS", details={"items": 0})
+
+    added = 0
+    processed: list[dict] = []
+    for idx, item in enumerate(items):
+        is_last = idx == len(items) - 1
+        fail = await _step3_add_single_item(page, item, is_last=is_last)
+        if fail is not None:
+            fail_details = dict(fail.get("details") or {})
+            fail_details["items_added"] = added
+            fail_details["processed"] = processed
+            fail["details"] = fail_details
+            return fail
+        added += 1
+        processed.append({"sku": item.sku, "qty": item.qty})
+        print(f"[SUP6] step3_add_items: added sku={item.sku} qty={item.qty}")
+
+    return {
+        "ok": True,
+        "step": "step3_add_items_to_cart",
+        "details": {"items_added": added, "items": processed},
+    }
+
+
+async def _run_add_items_stage(*, items_override: str = "") -> dict:
+    items = _parse_sup6_items(items_override)
+    state_path = _state_path()
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=SUP6_HEADLESS)
+        context = None
+        try:
+            if _is_state_file_valid(state_path) and not SUP6_FORCE_LOGIN:
+                context = await browser.new_context(storage_state=str(state_path))
+            else:
+                context = await browser.new_context()
+            page = await context.new_page()
+            login_info = await ensure_logged_in(page, context, state_path, force_login=SUP6_FORCE_LOGIN)
+            result = await step3_add_items_to_cart(page, items)
+            return {
+                "stage": "add_items",
+                "url": page.url or SUP6_MAKE_ORDER_URL,
+                "storage_state": str(state_path),
+                "details": {"login": login_info, "add_items": result},
+                **result,
+            }
+        finally:
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                await browser.close()
+
+
+async def _run_full_stage(*, items_override: str = "") -> dict:
+    items = _parse_sup6_items(items_override)
+    state_path = _state_path()
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=SUP6_HEADLESS)
+        context = None
+        try:
+            if _is_state_file_valid(state_path) and not SUP6_FORCE_LOGIN:
+                context = await browser.new_context(storage_state=str(state_path))
+            else:
+                context = await browser.new_context()
+            page = await context.new_page()
+            login_info = await ensure_logged_in(page, context, state_path, force_login=SUP6_FORCE_LOGIN)
+            clear_result = await clear_cart(page)
+            if not clear_result.get("ok"):
+                return {
+                    "ok": False,
+                    "stage": "clear_cart",
+                    "url": page.url or SUP6_MAKE_ORDER_URL,
+                    "storage_state": str(state_path),
+                    "details": {"login": login_info, "clear_cart": clear_result},
+                    "error": str(clear_result.get("error") or "clear_cart failed"),
+                }
+            add_result = await step3_add_items_to_cart(page, items)
+            if not add_result.get("ok"):
+                return {
+                    "ok": False,
+                    "stage": "add_items",
+                    "url": page.url or SUP6_MAKE_ORDER_URL,
+                    "storage_state": str(state_path),
+                    "details": {"login": login_info, "clear_cart": clear_result, "add_items": add_result},
+                    "reason": add_result.get("reason"),
+                    "error": str(add_result.get("reason") or "step3_add_items_to_cart failed"),
+                }
+            return {
+                "ok": True,
+                "stage": "run",
+                "url": page.url or SUP6_MAKE_ORDER_URL,
+                "storage_state": str(state_path),
+                "details": {"login": login_info, "clear_cart": clear_result, "add_items": add_result},
+            }
+        finally:
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                await browser.close()
+
+
 async def _run() -> dict:
     if SUP6_STAGE == "login":
         return await _run_login_stage()
     if SUP6_STAGE == "clear_cart":
         return await _run_clear_cart_stage()
-    raise RuntimeError(f"Unsupported SUP6_STAGE={SUP6_STAGE!r}. Expected 'login' or 'clear_cart'.")
+    if SUP6_STAGE == "add_items":
+        return await _run_add_items_stage()
+    if SUP6_STAGE == "run":
+        return await _run_full_stage()
+    raise RuntimeError(f"Unsupported SUP6_STAGE={SUP6_STAGE!r}. Expected 'login', 'clear_cart', 'add_items' or 'run'.")
 
 
-async def _amain(clear_cart_only: bool = False) -> int:
+async def _amain(clear_cart_only: bool = False, *, stage_override: str = "", items_override: str = "") -> int:
     try:
-        if clear_cart_only:
+        if stage_override:
+            stage = stage_override.strip().lower()
+            if stage in {"1", "login"}:
+                result = await _run_login_stage()
+            elif stage in {"2", "clear_cart", "clear-cart"}:
+                result = await _run_clear_cart_stage(pause_seconds=SUP6_CLEAR_CART_PAUSE_SECONDS if clear_cart_only else 0)
+            elif stage in {"3", "add_items", "add-items"}:
+                result = await _run_add_items_stage(items_override=items_override)
+            elif stage in {"run"}:
+                result = await _run_full_stage(items_override=items_override)
+            else:
+                raise RuntimeError(f"Unsupported --step value: {stage_override!r}")
+        elif clear_cart_only:
             result = await _run_clear_cart_stage(pause_seconds=SUP6_CLEAR_CART_PAUSE_SECONDS)
         else:
             result = await _run()
@@ -524,8 +881,10 @@ async def _amain(clear_cart_only: bool = False) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Supplier6 (proteinplus.pro) runner")
     parser.add_argument("--clear-cart", action="store_true", help="Run clear cart stage and keep browser open for SUP6_CLEAR_CART_PAUSE_SECONDS")
+    parser.add_argument("--step", default="", help="Stage shortcut: 1|2|3|login|clear_cart|add_items|run")
+    parser.add_argument("--items", default="", help="Items for add_items stage, format: SKU1:2,SKU2:1")
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(_amain(clear_cart_only=args.clear_cart)))
+    raise SystemExit(asyncio.run(_amain(clear_cart_only=args.clear_cart, stage_override=args.step, items_override=args.items)))
 
 
 if __name__ == "__main__":

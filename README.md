@@ -37,6 +37,7 @@ ENV:
 - `SUP6_HEADLESS=0`
 - `SUP6_TIMEOUT_MS=20000`
 - `SUP6_STORAGE_STATE_FILE=.state_supplier6.json`
+- `SUP6_ITEMS=SKU1:2,SKU2:1` (для шага наполнения)
 - `SUP6_CLEAR_CART_PAUSE_SECONDS=20` (пауза после `--clear-cart`)
 
 Запуск только шага очистки корзины:
@@ -45,3 +46,14 @@ ENV:
 python -u scripts/supplier6_run_order.py --clear-cart
 ```
 
+Запуск только шага 3 (наполнение корзины):
+
+```bash
+SUP6_ITEMS="ART1:2,ART2:1" python -u scripts/supplier6_run_order.py --step=3
+```
+
+Полный flow supplier6 (login -> clear_cart -> step3 add_items):
+
+```bash
+SUP6_ITEMS="ART1:2,ART2:1" SUP6_STAGE=run python -u scripts/supplier6_run_order.py
+```
