@@ -30,4 +30,18 @@ python -m playwright install chromium
 
 ⸻
 
+Supplier6 (proteinplus.pro): очистка корзины
+
+ENV:
+- `SUP6_BASE_URL=https://proteinplus.pro`
+- `SUP6_HEADLESS=0`
+- `SUP6_TIMEOUT_MS=20000`
+- `SUP6_STORAGE_STATE_FILE=.state_supplier6.json`
+- `SUP6_CLEAR_CART_PAUSE_SECONDS=20` (пауза после `--clear-cart`)
+
+Запуск только шага очистки корзины:
+
+```bash
+python -u scripts/supplier6_run_order.py --clear-cart
+```
 
