@@ -53,6 +53,7 @@ STEP9_CONFIRM_SCRIPT = ROOT / "scripts" / "step9_confirm_order.py"
 SUP2_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier2_run_order.py"
 SUP3_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier3_run_order.py"
 SUP4_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier4_run_order.py"
+SUP6_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier6_run_order.py"
 SUP5_ZOOHUB_SCRIPT = ROOT / "scripts" / "supplier5_zoohub.py"
 SUP2_EXPORT_PRODUCTS_SCRIPT = ROOT / "scripts" / "supplier2_export_products.py"
 
@@ -86,6 +87,7 @@ STEP_TIMEOUT_DEFAULTS: Dict[str, int] = {
     "SUP2_RUN_ORDER": int(os.getenv("ORCH_TIMEOUT_SUP2_RUN_ORDER", "180")),
     "SUP3_RUN_ORDER": int(os.getenv("ORCH_TIMEOUT_SUP3_RUN_ORDER", "240")),
     "SUP4_RUN_ORDER": int(os.getenv("ORCH_TIMEOUT_SUP4_RUN_ORDER", "240")),
+    "SUP6_RUN_ORDER": int(os.getenv("ORCH_TIMEOUT_SUP6_RUN_ORDER", "300")),
     "SALESDRIVE_UPDATE": int(os.getenv("ORCH_TIMEOUT_SALESDRIVE_UPDATE", "30")),
 }
 
@@ -199,6 +201,9 @@ ORCH_SUP4_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP4_STORAGE_STATE_FILE") or ".s
 ORCH_SUP4_CLEAR_BASKET = (os.getenv("ORCH_SUP4_CLEAR_BASKET") or "1").strip()
 ORCH_SUP4_ATTACH_DIR = (os.getenv("ORCH_SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 ORCH_SUP4_PAUSE_SEC = (os.getenv("ORCH_SUP4_PAUSE_SEC") or "0").strip()
+ORCH_SUP6_SUPPLIERLIST = int(os.getenv("ORCH_SUP6_SUPPLIERLIST", "40"))
+ORCH_SUP6_HEADLESS = (os.getenv("ORCH_SUP6_HEADLESS") or ORCH_HEADLESS or "1").strip()
+ORCH_SUP6_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP6_STORAGE_STATE_FILE") or ".state_supplier6.json").strip()
 ORCH_SUP5_SUPPLIERLIST = int(os.getenv("ORCH_SUP5_SUPPLIERLIST", "47"))
 ORCH_EXPORT_DOBAVKI_ENABLED = (os.getenv("ORCH_EXPORT_DOBAVKI_ENABLED") or "1").strip()
 ORCH_EXPORT_DOBAVKI_EVERY_MIN = int((os.getenv("ORCH_EXPORT_DOBAVKI_EVERY_MIN") or "720").strip())
@@ -712,6 +717,11 @@ def is_supplier5_order(order: Dict[str, Any]) -> bool:
     return supplierlist == ORCH_SUP5_SUPPLIERLIST
 
 
+def is_supplier6_order(order: Dict[str, Any]) -> bool:
+    supplierlist, _ = parse_order_supplierlist(order)
+    return supplierlist == ORCH_SUP6_SUPPLIERLIST
+
+
 # Helpers for terminal/attempts
 def is_terminal_failed(state: Dict[str, Any], order_id: int) -> bool:
     failed = state.get("failed")
@@ -858,6 +868,11 @@ def build_sup3_items(order: Dict[str, Any]) -> str:
 
 def build_sup4_items(order: Dict[str, Any]) -> str:
     # Monsterlab supplier4 uses the same SKU:QTY format as supplier2/supplier3.
+    return build_sup2_items(order)
+
+
+def build_sup6_items(order: Dict[str, Any]) -> str:
+    # ProteinPlus supplier6 uses the same SKU:QTY format as supplier2/supplier3/supplier4.
     return build_sup2_items(order)
 
 
@@ -1505,6 +1520,93 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
     )
 
 
+def process_one_supplier6_order(order: Dict[str, Any]) -> None:
+    order_id = order.get("id")
+    try:
+        order_id_int = int(order_id)
+    except Exception:
+        raise RuntimeError(f"Invalid order id: {order_id}")
+
+    sup6_items = build_sup6_items(order)
+    if not sup6_items:
+        raise RuntimeError("Не смог сформировать SUP6_ITEMS из order['products'].")
+
+    if not ORCH_SUP6_STORAGE_STATE_FILE:
+        raise RuntimeError("ORCH_SUP6_STORAGE_STATE_FILE is empty.")
+
+    try:
+        order_json = json.dumps(order, ensure_ascii=False)
+    except Exception as e:
+        raise RuntimeError(f"Не смог сериализовать order в JSON для supplier6: {e}") from e
+
+    env = os.environ.copy()
+    env.setdefault("SUP6_HEADLESS", ORCH_SUP6_HEADLESS)
+    env["SUP6_STAGE"] = "run"
+    env["SUP6_STORAGE_STATE_FILE"] = ORCH_SUP6_STORAGE_STATE_FILE
+
+    args = [
+        "--step",
+        "run",
+        "--items",
+        sup6_items,
+        "--order-json",
+        order_json,
+    ]
+
+    print(f"[ORCH] ProteinPlus SUP6_ITEMS => {sup6_items}")
+    print(f"[ORCH] start supplier6 order_id={order_id_int} run={RUN_INSTANCE_ID}", flush=True)
+
+    step_name = "supplier6_run_order"
+    step_timeout = _timeout_for_step("SUP6_RUN_ORDER")
+    try:
+        rc, out, err = run_python(SUP6_RUN_ORDER_SCRIPT, env=env, timeout_sec=step_timeout, args=args)
+    except subprocess.TimeoutExpired as te:
+        raise StepError(step_name, f"timeout after {step_timeout}s") from te
+
+    if out.strip():
+        print(out, end="" if out.endswith("\n") else "\n")
+    if err.strip():
+        print(err, file=sys.stderr, end="" if err.endswith("\n") else "\n")
+
+    payload: Dict[str, Any] | None = None
+    try:
+        parsed = parse_supplier_result_json_from_stdout(out)
+        if isinstance(parsed, dict):
+            payload = parsed
+    except Exception:
+        payload = None
+
+    if rc != 0:
+        if payload:
+            stage = str(payload.get("stage") or step_name)
+            msg = str(payload.get("error") or payload.get("reason") or f"rc={rc}")
+            raise StepError(stage, msg)
+        reason = short_reason(step_name, rc, out, err, None)
+        raise StepError(step_name, reason)
+
+    if not payload:
+        raise StepError(step_name, "No SUPPLIER_RESULT_JSON marker in supplier6_run_order stdout.")
+    if not bool(payload.get("ok")):
+        stage = str(payload.get("stage") or step_name)
+        msg = str(payload.get("error") or payload.get("reason") or "supplier6_run_order returned ok=false")
+        raise StepError(stage, msg)
+
+    supplier_order_number = str(payload.get("numberSup") or payload.get("supplier_order_number") or "").strip()
+    details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+    submit_details = details.get("submit_order") if isinstance(details.get("submit_order"), dict) else {}
+    if not supplier_order_number and isinstance(submit_details.get("details"), dict):
+        supplier_order_number = str((submit_details.get("details") or {}).get("supplier_order_number") or "").strip()
+
+    if supplier_order_number:
+        salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
+        print(
+            f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number}"
+        )
+    else:
+        salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID)
+        print(f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}")
+
+
 def process_one_zoohub_order(order: Dict[str, Any], state: Dict[str, Any]) -> None:
     step_name = "zoohub_pipeline"
     order_id = order.get("id")
@@ -1630,6 +1732,10 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
         process_one_zoohub_order(order, state)
         return True
 
+    if supplierlist == ORCH_SUP6_SUPPLIERLIST:
+        process_one_supplier6_order(order)
+        return True
+
     if supplierlist == 38:
         process_one_biotus_order(order)
         return True
@@ -1733,6 +1839,7 @@ def main() -> int:
         ("Supplier2 run order script", SUP2_RUN_ORDER_SCRIPT),
         ("Supplier3 run order script", SUP3_RUN_ORDER_SCRIPT),
         ("Supplier4 run order script", SUP4_RUN_ORDER_SCRIPT),
+        ("Supplier6 run order script", SUP6_RUN_ORDER_SCRIPT),
         ("Supplier5 Zoohub script", SUP5_ZOOHUB_SCRIPT),
         ("Step2_3 script", STEP2_3_SCRIPT),
         ("Step4 script", STEP4_SCRIPT),
@@ -1894,6 +2001,10 @@ def main() -> int:
                             print(f"[ORCH] SUP4_ITEMS => {sup4_items}")
                         elif supplierlist == ORCH_SUP5_SUPPLIERLIST:
                             print(f"[ORCH] Routing => Zoohub (supplierlist={ORCH_SUP5_SUPPLIERLIST}, supplier={supplier!r})")
+                        elif supplierlist == ORCH_SUP6_SUPPLIERLIST:
+                            sup6_items = build_sup6_items(order)
+                            print(f"[ORCH] Routing => ProteinPlus (supplierlist={ORCH_SUP6_SUPPLIERLIST}, supplier={supplier!r})")
+                            print(f"[ORCH] SUP6_ITEMS => {sup6_items}")
                         elif supplierlist == 41:
                             sup2_items = build_sup2_items(order)
                             print(f"[ORCH] Routing => Dobavki (supplierlist=41, supplier={supplier!r})")
@@ -1931,6 +2042,8 @@ def main() -> int:
                             if is_supplier4_order(order) and step in {"submit_checkout_order"}:
                                 force_terminal = True
                             if is_supplier5_order(order) and step in {"zoohub_email_send"}:
+                                force_terminal = True
+                            if is_supplier6_order(order) and step in {"submit_order", "step7_submit_order"}:
                                 force_terminal = True
                             mark_failed(state, int(order_id), step, reason, force_terminal=force_terminal)
                             clear_in_progress(state, int(order_id))

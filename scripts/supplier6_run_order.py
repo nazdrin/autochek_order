@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -63,6 +64,49 @@ SUP6_CHECKOUT_URL = f"{SUP6_BASE_URL.rstrip('/')}/shipping-and-payment.html"
 class Sup6Item:
     sku: str
     qty: int
+
+
+def _to_decimal_number(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    raw = raw.replace("\u00a0", " ").replace(" ", "")
+    raw = raw.replace("грн", "").replace("₴", "")
+    raw = raw.replace(",", ".")
+    raw = re.sub(r"[^0-9.\-]", "", raw)
+    if raw in {"", ".", "-", "-."}:
+        return None
+    try:
+        return Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _money_to_stripped_intish(value: Decimal | None) -> str:
+    if value is None:
+        return ""
+    q = value.quantize(Decimal("1")) if value == value.to_integral_value() else value.normalize()
+    return str(q)
+
+
+def _extract_money_candidates(text: str) -> list[Decimal]:
+    raw = (text or "").replace("\u00a0", " ").replace(",", ".")
+    parts = re.findall(r"\d+(?:[ .]\d{3})*(?:\.\d+)?", raw)
+    out: list[Decimal] = []
+    seen: set[str] = set()
+    for p in parts:
+        clean = p.replace(" ", "")
+        d = _to_decimal_number(clean)
+        if d is None:
+            continue
+        key = str(d.normalize())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(d)
+    return out
 
 
 def _state_path() -> Path:
@@ -485,6 +529,122 @@ def _extract_recipient_values(order_payload: dict | None = None) -> dict:
         "phone": phone.strip(),
         "full_name": _build_full_name(payload) if payload else SUP6_BIOTUS_FULL_NAME,
     }
+
+
+def _extract_order_product_rows(order_payload: dict | None = None) -> list[dict]:
+    payload = order_payload if isinstance(order_payload, dict) else {}
+    products = payload.get("products") or []
+    if not isinstance(products, list):
+        return []
+
+    out: list[dict] = []
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        desc = str(p.get("description") or "").strip()
+        sku_from_desc = desc.split(",", 1)[0].strip() if desc else ""
+        sku = str(
+            sku_from_desc
+            or p.get("parameter")
+            or p.get("sku")
+            or p.get("articul")
+            or p.get("code")
+            or ""
+        ).strip()
+        if not sku:
+            continue
+        try:
+            qty = int(str(p.get("amount") or "1").strip())
+        except Exception:
+            qty = 1
+        if qty < 1:
+            qty = 1
+        price_dec = _to_decimal_number(p.get("price"))
+        name = str(p.get("name") or p.get("text") or "").strip()
+        out.append(
+            {
+                "sku": sku,
+                "sku_norm": _norm_sku(sku),
+                "qty": qty,
+                "price": p.get("price"),
+                "price_dec": price_dec,
+                "description": desc,
+                "name": name,
+            }
+        )
+    return out
+
+
+def _build_step3_item_price_plan(items: list[Sup6Item], order_payload: dict | None = None) -> list[dict]:
+    order_rows = _extract_order_product_rows(order_payload)
+    buckets: dict[str, list[dict]] = {}
+    for row in order_rows:
+        buckets.setdefault(row["sku_norm"], []).append(row)
+
+    plan: list[dict] = []
+    for item in items:
+        sku_norm = _norm_sku(item.sku)
+        row = None
+        bucket = buckets.get(sku_norm) or []
+        if bucket:
+            row = bucket.pop(0)
+        plan.append(
+            {
+                "sku": item.sku,
+                "qty": item.qty,
+                "client_price": row.get("price") if row else None,
+                "client_price_dec": row.get("price_dec") if row else None,
+                "order_name": row.get("name") if row else "",
+                "order_description": row.get("description") if row else "",
+            }
+        )
+    return plan
+
+
+def _strip_added_message_to_site_name(raw_text: str) -> str:
+    text = _normalize_spaces(raw_text or "")
+    if not text:
+        return ""
+    text = re.sub(r"\s+додано\s+до\s+кошика\.?$", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"^\s*\d+\s*[xх×]\s*", "", text, flags=re.IGNORECASE).strip()
+    return text
+
+
+def _norm_product_title(text: str) -> str:
+    t = _norm_text(text or "")
+    t = re.sub(r"\s+додано\s+до\s+кошика\.?$", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"^\s*\d+\s*[xх×]\s*", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _title_tokens(text: str) -> set[str]:
+    t = _norm_product_title(text)
+    t = t.replace("/", " ").replace("|", " ").replace("(", " ").replace(")", " ")
+    t = re.sub(r"[^0-9a-zа-яіїєґ+\- ]+", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
+    raw = [x for x in t.split(" ") if x]
+    out: set[str] = set()
+    for tok in raw:
+        if tok in {"грн", "uah", "usd", "$", "шт", "x"}:
+            continue
+        if tok.isdigit() and len(tok) == 1:
+            continue
+        if len(tok) >= 3 or tok.isdigit():
+            out.add(tok)
+    return out
+
+
+def _extract_qty_prefix(text: str) -> int | None:
+    t = _norm_text(text or "")
+    m = re.match(r"^\s*(\d+)\s*[xх×]\s+", t)
+    if not m:
+        return None
+    try:
+        q = int(m.group(1))
+        return q if q > 0 else None
+    except Exception:
+        return None
 
 
 async def _auth_header_state(page) -> dict:
@@ -978,12 +1138,38 @@ async def _step3_find_row_for_sku(page, sku: str):
     count = await row_candidates.count()
     first_btn = page.locator(".addtocart-button:visible").first
 
+    # First, try strict "Артикул <sku>" match to disambiguate similar codes
+    # like 23667-01 vs 23667-01_U002120.
+    sku_re = re.escape(str(sku or "").strip())
+    strict_patterns = [
+        rf"(^|\s)артикул\s*[:\-]?\s*{sku_re}(?![_a-zA-Z0-9])",
+        rf"(^|\s){sku_re}(?![_a-zA-Z0-9])",
+    ]
+    for pat in strict_patterns:
+        try:
+            marker = page.get_by_text(re.compile(pat, re.IGNORECASE)).first
+            if await marker.count() <= 0:
+                continue
+            # Find nearest row-like ancestor that has add button.
+            row = marker.locator(
+                "xpath=ancestor::*[self::tr or contains(@class,'product_item') or self::li][.//*[contains(@class,'addtocart-button')]][1]"
+            ).first
+            if await row.count() > 0 and await row.is_visible():
+                return row, None
+        except Exception:
+            continue
+
     matched_row = None
     for i in range(min(count, 25)):
         row = row_candidates.nth(i)
         try:
             txt = re.sub(r"\s+", " ", (await row.inner_text(timeout=900)) or "").strip()
-            if sku_norm and sku_norm in _norm_sku(txt):
+            txt_norm = _norm_sku(txt)
+            if sku_norm and sku_norm in txt_norm:
+                # Avoid prefix collision for codes like XXX-01 vs XXX-01_U...
+                txt_raw = (txt or "").casefold()
+                if (str(sku).casefold() in txt_raw) and (f"{str(sku).casefold()}_" in txt_raw):
+                    continue
                 matched_row = row
                 break
         except Exception:
@@ -1088,7 +1274,47 @@ async def _step3_click_add_in_modal(page, sku: str) -> dict | None:
     return _step3_fail(f"ADD_CONFIRM_TIMEOUT:{sku}", details={"sku": sku, "stage": "showcart_wait"})
 
 
-async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool) -> dict | None:
+async def _step3_extract_added_site_name(page, fallback_name: str = "") -> str:
+    try:
+        wrap = page.locator(".fancybox-inner, .fancybox-wrap").first
+        if await wrap.count() > 0:
+            all_text = _normalize_spaces((await wrap.inner_text(timeout=min(1600, SUP6_TIMEOUT_MS))) or "")
+            if all_text:
+                m = re.search(r"(\d+\s*[xх×]\s+.+?)\s+додано\s+до\s+кошика\.?", all_text, flags=re.IGNORECASE)
+                if m:
+                    cleaned = _strip_added_message_to_site_name(m.group(1))
+                    if cleaned:
+                        return cleaned
+    except Exception:
+        pass
+
+    candidates = [
+        page.locator(".fancybox-inner h4").first,
+        page.locator(".fancybox-inner .title").first,
+        page.locator(".fancybox-inner .product-name").first,
+        page.locator(".fancybox-inner").first,
+    ]
+    for cand in candidates:
+        try:
+            if await cand.count() <= 0:
+                continue
+            txt = _normalize_spaces((await cand.inner_text(timeout=min(1800, SUP6_TIMEOUT_MS))) or "")
+            if not txt:
+                continue
+            for line in [x.strip() for x in txt.splitlines() if x.strip()]:
+                if "додано до кошика" in line.casefold():
+                    cleaned = _strip_added_message_to_site_name(line)
+                    if cleaned:
+                        return cleaned
+            cleaned_full = _strip_added_message_to_site_name(txt)
+            if cleaned_full and cleaned_full.casefold() != txt.casefold():
+                return cleaned_full
+        except Exception:
+            continue
+    return _strip_added_message_to_site_name(fallback_name or "")
+
+
+async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned_client_price: object = None) -> tuple[dict | None, dict | None]:
     sku = item.sku
     qty = item.qty
     max_attempts = 2
@@ -1112,7 +1338,24 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool) -> dict
             await results_ready.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
             row, fail_payload = await _step3_find_row_for_sku(page, sku)
             if fail_payload is not None:
-                return fail_payload
+                return fail_payload, None
+
+            fallback_site_name = ""
+            if row is not None:
+                row_name_candidates = [
+                    row.locator("a.product_name, .product-name, .product_name a").first,
+                    row.locator("td:has(a), h3, h4").first,
+                    row,
+                ]
+                for name_loc in row_name_candidates:
+                    try:
+                        if await name_loc.count() <= 0:
+                            continue
+                        fallback_site_name = _normalize_spaces((await name_loc.inner_text(timeout=min(1200, SUP6_TIMEOUT_MS))) or "")
+                        if fallback_site_name:
+                            break
+                    except Exception:
+                        continue
 
             add_btn = row.locator(".addtocart-button:visible").first if row is not None else results_ready
             await add_btn.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
@@ -1135,11 +1378,12 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool) -> dict
                 await _step3_set_qty_in_modal(page, qty)
                 fail_after_click = await _step3_click_add_in_modal(page, sku)
                 if fail_after_click is not None:
-                    return fail_after_click
+                    return fail_after_click, None
                 await _step3_debug_pause(page, f"after_modal_confirm_sku={sku}")
 
             showcart = page.locator("a.showcart:visible, a.showcart:has-text('Показати кошик')").first
             await showcart.wait_for(state="visible", timeout=min(8000, SUP6_TIMEOUT_MS))
+            site_name = await _step3_extract_added_site_name(page, fallback_name=fallback_site_name)
             if is_last:
                 await showcart.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
                 try:
@@ -1148,19 +1392,27 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool) -> dict
                     pass
                 cart_rows = page.locator("button.vm2-remove_from_cart:visible, .cart-summary tr:has(button.vm2-remove_from_cart), .cart-view tr")
                 if await cart_rows.count() <= 0:
-                    return _step3_fail(f"CART_VERIFY_FAILED:{sku}", details={"sku": sku})
+                    return _step3_fail(f"CART_VERIFY_FAILED:{sku}", details={"sku": sku}), None
             else:
                 await _step3_close_fancybox(page)
                 await _step3_debug_pause(page, f"after_close_fancybox_sku={sku}")
 
-            return None
+            return (
+                None,
+                {
+                    "sku": sku,
+                    "qty": qty,
+                    "site_name": site_name,
+                    "client_price": planned_client_price,
+                },
+            )
         except Exception as e:
             print(f"[SUP6] step3_add_items: attempt failed sku={sku} attempt={attempt}: {e}")
             if attempt >= max_attempts:
-                return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": str(e)})
+                return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": str(e)}), None
             await page.wait_for_timeout(220)
 
-    return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": "unknown"})
+    return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": "unknown"}), None
 
 
 async def _step3_cart_is_empty(page) -> bool:
@@ -1432,34 +1684,82 @@ async def proceed_from_cart_to_checkout(page) -> dict:
     )
 
 
-async def step3_add_items_to_cart(page, items: list[Sup6Item]) -> dict:
+async def step3_add_items_to_cart(page, items: list[Sup6Item], order_payload: dict | None = None) -> dict:
     if not items:
         return _step3_fail("NO_ITEMS", details={"items": 0})
 
     added = 0
     processed: list[dict] = []
+    mapped_items: list[dict] = []
+    price_plan = _build_step3_item_price_plan(items, order_payload)
     for idx, item in enumerate(items):
         is_last = idx == len(items) - 1
-        fail = await _step3_add_single_item(page, item, is_last=is_last)
+        planned = price_plan[idx] if idx < len(price_plan) else {}
+        fail, map_row = await _step3_add_single_item(
+            page,
+            item,
+            is_last=is_last,
+            planned_client_price=planned.get("client_price"),
+        )
         if fail is not None:
             fail_details = dict(fail.get("details") or {})
             fail_details["items_added"] = added
             fail_details["processed"] = processed
+            fail_details["supplier6_item_map"] = mapped_items
             fail["details"] = fail_details
             return fail
         added += 1
         processed.append({"sku": item.sku, "qty": item.qty})
+        if map_row is None:
+            map_row = {"sku": item.sku, "qty": item.qty, "site_name": "", "client_price": planned.get("client_price")}
+        if not map_row.get("site_name"):
+            map_row["site_name"] = planned.get("order_name") or ""
+        mapped_items.append(map_row)
         print(f"[SUP6] step3_add_items: added sku={item.sku} qty={item.qty}")
 
-    # Final verification: ensure each requested SKU is present in cart page text.
+    # Final verification: cart can hide SKU and show only product titles, so verify by rows/name, not SKU text.
     try:
         if "cart" not in (page.url or ""):
             await page.goto(SUP6_CART_URL, wait_until="domcontentloaded", timeout=SUP6_TIMEOUT_MS)
-        body_text = re.sub(r"\s+", " ", (await page.inner_text("body")) or "")
-        body_norm = _norm_sku(body_text)
-        missing = [i.sku for i in items if _norm_sku(i.sku) and _norm_sku(i.sku) not in body_norm]
-        if missing:
-            return _step3_fail("CART_MISSING_SKU", details={"missing_skus": missing, "items_added": added, "items": processed})
+        row_selectors = [
+            ".cart-view tr:has(input[name^='quantity'])",
+            ".cart-view tr:has(button.vm2-remove_from_cart)",
+            ".cart-summary tr:has(button.vm2-remove_from_cart)",
+            "button.vm2-remove_from_cart",
+        ]
+        cart_count = 0
+        for sel in row_selectors:
+            loc = page.locator(sel)
+            try:
+                c = await loc.count()
+            except Exception:
+                c = 0
+            if c > cart_count:
+                cart_count = c
+        if cart_count < len(items):
+            return _step3_fail(
+                "CART_ITEMS_COUNT_MISMATCH",
+                details={"expected_items": len(items), "cart_count": cart_count, "items_added": added, "items": processed},
+            )
+
+        # Additional soft check by site names captured from add-to-cart modal (if available).
+        try:
+            cart_text_norm = _norm_product_title((await page.inner_text("body")) or "")
+        except Exception:
+            cart_text_norm = ""
+        missing_names: list[str] = []
+        for m in mapped_items:
+            site_name = str(m.get("site_name") or "").strip()
+            if not site_name:
+                continue
+            n = _norm_product_title(site_name)
+            if n and n not in cart_text_norm:
+                missing_names.append(site_name)
+        if missing_names and cart_count == 0:
+            return _step3_fail(
+                "CART_VERIFY_NAME_MISMATCH",
+                details={"missing_site_names": missing_names, "items_added": added, "items": processed, "cart_count": cart_count},
+            )
     except Exception as e:
         return _step3_fail("CART_VERIFY_ERROR", details={"error": str(e), "items_added": added, "items": processed})
 
@@ -1468,6 +1768,7 @@ async def step3_add_items_to_cart(page, items: list[Sup6Item]) -> dict:
         finish_details = dict(finish_result.get("details") or {})
         finish_details["items_added"] = added
         finish_details["items"] = processed
+        finish_details["supplier6_item_map"] = mapped_items
         finish_result["details"] = finish_details
         return finish_result
 
@@ -1477,6 +1778,7 @@ async def step3_add_items_to_cart(page, items: list[Sup6Item]) -> dict:
         "details": {
             "items_added": added,
             "items": processed,
+            "supplier6_item_map": mapped_items,
             "finish_cart": finish_result,
         },
     }
@@ -1936,6 +2238,34 @@ async def _sumo_wait_enabled(page, select_id: str, timeout_ms: int) -> bool:
     return False
 
 
+async def _sumo_options_snapshot(page, select_id: str, limit: int = 40) -> list[str]:
+    select = page.locator(f"select#{select_id}").first
+    out: list[str] = []
+    try:
+        if await select.count() <= 0:
+            return out
+        options = select.locator("option")
+        count = await options.count()
+        for i in range(min(count, max(1, limit))):
+            txt = ((await options.nth(i).inner_text()) or "").strip()
+            if txt:
+                out.append(_norm_text(txt))
+    except Exception:
+        return []
+    return out
+
+
+async def _sumo_wait_options_reload(page, select_id: str, prev_snapshot: list[str], timeout_ms: int) -> bool:
+    deadline = asyncio.get_running_loop().time() + (timeout_ms / 1000.0)
+    prev = prev_snapshot or []
+    while asyncio.get_running_loop().time() < deadline:
+        curr = await _sumo_options_snapshot(page, select_id)
+        if curr and curr != prev:
+            return True
+        await page.wait_for_timeout(220)
+    return False
+
+
 def _is_default_placeholder_text(text: str) -> bool:
     t = _norm_text(text)
     return ("виберіть" in t) or ("спочатку виберіть" in t)
@@ -2035,8 +2365,10 @@ async def _sumo_choose_option(
     matcher,
     reason_not_found: str,
     max_attempts: int = 3,
+    require_query_typed: bool = False,
 ) -> tuple[bool, str, dict]:
     last_options: list[str] = []
+    typed_debug = {"attempts": 0, "typed_ok": False, "last_typed_value": "", "input_found": False}
     for _attempt in range(1, max_attempts + 1):
         opened = await _sumo_open(page, select_id)
         if not opened:
@@ -2045,25 +2377,98 @@ async def _sumo_choose_option(
         container = await _sumo_container(page, select_id)
         if container is None:
             continue
-        search_inputs = container.locator(".optWrapper input, .search-txt input, .search-txt")
-        try:
-            if await search_inputs.count() > 0:
-                search_input = search_inputs.first
-                if await search_input.is_visible():
-                    await search_input.click(timeout=min(3000, SUP6_TIMEOUT_MS), force=True)
-                    await search_input.fill("", timeout=min(3000, SUP6_TIMEOUT_MS))
-                    await search_input.type(query, delay=12, timeout=min(5000, SUP6_TIMEOUT_MS))
-        except Exception:
-            pass
-
-        await page.wait_for_timeout(260)
         options = container.locator(".optWrapper li.opt:not(.disabled):not(.hidden):visible")
+        baseline_count = 0
+        baseline_texts: list[str] = []
+        try:
+            baseline_count = await options.count()
+            for bi in range(min(baseline_count, 50)):
+                btxt = ((await options.nth(bi).inner_text()) or "").strip()
+                if btxt:
+                    baseline_texts.append(_norm_text(btxt))
+        except Exception:
+            baseline_count = 0
+            baseline_texts = []
+
+        search_inputs = container.locator(".optWrapper input, .search-txt input")
+        query_typed_ok = not require_query_typed
+        try:
+            search_input = None
+            if await search_inputs.count() > 0 and await search_inputs.first.is_visible():
+                search_input = search_inputs.first
+            if search_input is None:
+                global_search = page.locator(
+                    ".SumoSelect.open .optWrapper input:visible, .SumoSelect.open .search-txt input:visible, input[placeholder*='ошук']:visible"
+                ).first
+                if await global_search.count() > 0 and await global_search.is_visible():
+                    search_input = global_search
+            if search_input is not None:
+                typed_debug["input_found"] = True
+                await search_input.click(timeout=min(3000, SUP6_TIMEOUT_MS), force=True)
+                await search_input.fill("", timeout=min(3000, SUP6_TIMEOUT_MS))
+                await search_input.type(query, delay=12, timeout=min(5000, SUP6_TIMEOUT_MS))
+                typed_debug["attempts"] = int(typed_debug["attempts"]) + 1
+                typed_now = (await search_input.input_value()) or ""
+                typed_debug["last_typed_value"] = typed_now
+                if _norm_text(query) in _norm_text(typed_now):
+                    query_typed_ok = True
+            elif require_query_typed:
+                # Some SumoSelect builds keep focus on hidden text field; type via keyboard as fallback.
+                await container.click(timeout=min(3000, SUP6_TIMEOUT_MS), force=True)
+                await page.keyboard.press(_select_all_shortcut())
+                await page.keyboard.press("Backspace")
+                await page.keyboard.type(query, delay=12)
+                typed_debug["attempts"] = int(typed_debug["attempts"]) + 1
+                active_val = await page.evaluate(
+                    """() => {
+                        const ae = document.activeElement;
+                        if (!ae) return '';
+                        return (ae.value || ae.textContent || '').toString();
+                    }"""
+                )
+                typed_debug["last_typed_value"] = str(active_val or "")
+                if _norm_text(query) in _norm_text(str(active_val or "")):
+                    query_typed_ok = True
+        except Exception:
+            query_typed_ok = not require_query_typed
+
+        if require_query_typed and not query_typed_ok:
+            await page.wait_for_timeout(220)
+            continue
+        if query_typed_ok:
+            typed_debug["typed_ok"] = True
+
+        # Wait for dropdown filtering to actually apply (debounce/ajax).
+        query_norm = _norm_text(query or "")
+        filter_deadline = asyncio.get_running_loop().time() + min(3.5, SUP6_TIMEOUT_MS / 1000.0)
+        while asyncio.get_running_loop().time() < filter_deadline:
+            try:
+                curr_count = await options.count()
+            except Exception:
+                curr_count = 0
+            curr_texts_norm: list[str] = []
+            try:
+                for ci in range(min(curr_count, 50)):
+                    ctxt = ((await options.nth(ci).inner_text()) or "").strip()
+                    if ctxt:
+                        curr_texts_norm.append(_norm_text(ctxt))
+            except Exception:
+                curr_texts_norm = []
+
+            has_query_match = bool(query_norm) and any((query_norm in t) for t in curr_texts_norm)
+            list_changed = (curr_count != baseline_count) or (curr_texts_norm != baseline_texts)
+            if has_query_match or list_changed:
+                break
+            await page.wait_for_timeout(220)
+
+        await page.wait_for_timeout(180)
         try:
             count = await options.count()
         except Exception:
             count = 0
         candidates: list[tuple[int, str]] = []
-        for i in range(min(count, 200)):
+        scan_limit = min(count, 1200)
+        for i in range(scan_limit):
             opt = options.nth(i)
             try:
                 txt = ((await opt.inner_text()) or "").strip()
@@ -2073,6 +2478,7 @@ async def _sumo_choose_option(
                 last_options.append(txt)
             if txt and matcher(txt):
                 candidates.append((i, txt))
+
         if candidates:
             pick_i, picked_text = candidates[0]
             pick = options.nth(pick_i)
@@ -2102,7 +2508,15 @@ async def _sumo_choose_option(
             continue
         seen.add(n)
         uniq_opts.append(o)
-    return False, "", {"reason": reason_not_found, "query": query, "seen_options": uniq_opts[:25]}
+    if require_query_typed and not bool(typed_debug.get("typed_ok")):
+        return False, "", {
+            "reason": "QUERY_NOT_TYPED",
+            "query": query,
+            "select_id": select_id,
+            "typed_debug": typed_debug,
+            "seen_options": uniq_opts[:25],
+        }
+    return False, "", {"reason": reason_not_found, "query": query, "seen_options": uniq_opts[:25], "typed_debug": typed_debug}
 
 
 async def _step5_select_delivery_np_pickup(page) -> bool:
@@ -2210,6 +2624,8 @@ async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None)
     if not delivery["warehouse_query"]:
         return _step5_fail("NP_WAREHOUSE_QUERY_MISSING", details={"delivery": delivery})
 
+    city_snapshot_before = await _sumo_options_snapshot(page, "selectCity")
+
     region_query = delivery["region"]
     region_matcher = lambda txt: region_query in _norm_area_region(txt)  # noqa: E731
     ok_region, selected_region, region_meta = await _sumo_choose_option(
@@ -2225,6 +2641,7 @@ async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None)
 
     if not await _sumo_wait_enabled(page, "selectCity", SUP6_TIMEOUT_MS):
         return _step5_fail("NP_CITY_FIELD_DISABLED", details={"after_region": selected_region})
+    await _sumo_wait_options_reload(page, "selectCity", city_snapshot_before, min(SUP6_TIMEOUT_MS, 6000))
     city_norm = _norm_city_name_only(delivery["city"])
     area_norm = _norm_area_region(delivery["region"])
 
@@ -2249,8 +2666,11 @@ async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None)
         query=delivery["city"],
         matcher=_city_matcher,
         reason_not_found="NP_CITY_NOT_FOUND",
+        require_query_typed=True,
     )
     if not ok_city:
+        if str(city_meta.get("reason") or "") == "QUERY_NOT_TYPED":
+            return _step5_fail("NP_CITY_QUERY_NOT_TYPED", details=city_meta)
         return _step5_fail("NP_CITY_NOT_FOUND", details=city_meta)
     print(f"[SUP6] selected city: {selected_city}")
 
@@ -2306,6 +2726,843 @@ async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None)
     }
 
 
+def _step6_fail(reason: str, details: dict | None = None) -> dict:
+    payload = {"ok": False, "step": "step6_fill_payment_and_client_prices", "reason": reason}
+    if details:
+        payload["details"] = details
+    return payload
+
+
+def _extract_payment_amount(order_payload: dict | None = None) -> Decimal | None:
+    payload = order_payload if isinstance(order_payload, dict) else {}
+    candidates = [
+        payload.get("paymentAmount"),
+        payload.get("postpaySum"),
+    ]
+    d0 = _get_first_delivery_block(payload)
+    if isinstance(d0, dict):
+        candidates.append(d0.get("postpaySum"))
+    for c in candidates:
+        val = _to_decimal_number(c)
+        if val is not None:
+            return val
+    return None
+
+
+async def _step6_select_payment_cod(page) -> bool:
+    async def _is_selected() -> bool:
+        for label_sel in ("label[for='typeOfPayment1']", "label:has-text('Післяплата')"):
+            label = page.locator(label_sel).first
+            try:
+                if await label.count() > 0:
+                    cls = ((await label.get_attribute("class")) or "").casefold()
+                    if "selected" in cls:
+                        return True
+            except Exception:
+                pass
+        for radio_sel in ("#typeOfPayment1", "input[type='radio'][name='form[typeOfPayment]'][value='1']"):
+            radio = page.locator(radio_sel).first
+            try:
+                if await radio.count() > 0 and await radio.is_checked():
+                    return True
+            except Exception:
+                pass
+        return False
+
+    if await _is_selected():
+        print("[SUP6] selected payment type: Післяплата")
+        return True
+
+    for cand in [
+        page.locator("label[for='typeOfPayment1']").first,
+        page.get_by_text("Післяплата", exact=False).first,
+        page.locator("#typeOfPayment1").first,
+    ]:
+        try:
+            if await cand.count() <= 0:
+                continue
+            if await cand.first.is_visible():
+                await cand.first.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+                await cand.first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+                await page.wait_for_timeout(240)
+                if await _is_selected():
+                    print("[SUP6] selected payment type: Післяплата")
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+async def _step6_fill_cod_amount(page, amount: Decimal) -> tuple[bool, str]:
+    field = await _step4_pick_field(page, ["#cashRedelivery", "input[name='form[cashRedelivery]']"])
+    if field is None:
+        return False, ""
+    expected = _money_to_stripped_intish(amount)
+    if not expected:
+        expected = str(amount)
+    try:
+        await field.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+        await field.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+        await field.click(timeout=min(3000, SUP6_TIMEOUT_MS))
+        await page.keyboard.press(_select_all_shortcut())
+        await page.keyboard.press("Backspace")
+        await field.fill(expected, timeout=min(5000, SUP6_TIMEOUT_MS))
+        try:
+            await field.press("Tab", timeout=min(1500, SUP6_TIMEOUT_MS))
+        except Exception:
+            pass
+        await page.wait_for_timeout(240)
+        val = (await field.input_value() or "").strip()
+        if _to_decimal_number(val) is None:
+            return False, val
+        print(f"[SUP6] filled paymentAmount: {expected}")
+        return True, val
+    except Exception:
+        try:
+            val = (await field.input_value() or "").strip()
+        except Exception:
+            val = ""
+        return False, val
+
+
+async def _step6_collect_checkout_rows(page) -> list[dict]:
+    rows = page.locator("div.clientPriceRow")
+    out: list[dict] = []
+    try:
+        count = await rows.count()
+    except Exception:
+        count = 0
+    for i in range(count):
+        row = rows.nth(i)
+        try:
+            if not await row.is_visible():
+                continue
+        except Exception:
+            continue
+        name_loc = row.locator(".productName").first
+        input_loc = row.locator("input[name^='form[clientPrice]']").first
+        try:
+            if await input_loc.count() <= 0:
+                continue
+            raw_name = _normalize_spaces((await name_loc.inner_text(timeout=min(1200, SUP6_TIMEOUT_MS))) or "")
+            row_qty_attr = await name_loc.get_attribute("data-quantity") if await name_loc.count() > 0 else None
+            row_qty = None
+            if row_qty_attr:
+                try:
+                    q = int(str(row_qty_attr).strip())
+                    row_qty = q if q > 0 else None
+                except Exception:
+                    row_qty = None
+            if row_qty is None:
+                row_qty = _extract_qty_prefix(raw_name)
+            out.append(
+                {
+                    "row": row,
+                    "name_raw": raw_name,
+                    "name_norm": _norm_product_title(raw_name),
+                    "qty": row_qty,
+                    "input": input_loc,
+                }
+            )
+        except Exception:
+            continue
+    return out
+
+
+async def _step6_read_final_check_sum(page) -> tuple[Decimal | None, str]:
+    # UI variants: span text, input value, data attrs.
+    js = """() => {
+        const candidates = [
+          document.querySelector('#finalCheckSum'),
+          document.querySelector('.checkSum #finalCheckSum'),
+          document.querySelector('span#finalCheckSum'),
+          document.querySelector('input#finalCheckSum'),
+        ].filter(Boolean);
+        for (const el of candidates) {
+          const parts = [];
+          if (typeof el.value === 'string') parts.push(el.value);
+          if (typeof el.textContent === 'string') parts.push(el.textContent);
+          if (typeof el.innerText === 'string') parts.push(el.innerText);
+          if (typeof el.getAttribute === 'function') {
+            parts.push(el.getAttribute('value') || '');
+            parts.push(el.getAttribute('data-value') || '');
+          }
+          const joined = parts.join(' ').replace(/\\s+/g, ' ').trim();
+          if (joined) return joined;
+        }
+        const block = document.querySelector('.checkSum');
+        if (block) return (block.textContent || '').replace(/\\s+/g, ' ').trim();
+        return '';
+    }"""
+    raw = ""
+    try:
+        raw = _normalize_spaces((await page.evaluate(js)) or "")
+    except Exception:
+        raw = ""
+    return _to_decimal_number(raw), raw
+
+
+async def _step6_trigger_recalc(page) -> None:
+    try:
+        await page.evaluate(
+            """() => {
+                const inputs = document.querySelectorAll("input[name^='form[clientPrice]'], #cashRedelivery, input[name='form[cashRedelivery]']");
+                inputs.forEach((el) => {
+                    try {
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        el.dispatchEvent(new Event('blur', { bubbles: true }));
+                    } catch (_) {}
+                });
+            }"""
+        )
+    except Exception:
+        pass
+
+
+def _step6_build_fallback_map_from_order(order_payload: dict | None = None) -> list[dict]:
+    rows = _extract_order_product_rows(order_payload)
+    out: list[dict] = []
+    for r in rows:
+        out.append(
+            {
+                "sku": r.get("sku") or "",
+                "qty": r.get("qty") or 1,
+                "site_name": (r.get("name") or r.get("description") or ""),
+                "client_price": r.get("price"),
+            }
+        )
+    return out
+
+
+def _step6_match_rows_with_map(checkout_rows: list[dict], item_map: list[dict]) -> tuple[bool, list[tuple[dict, dict]], dict]:
+    prepared: list[dict] = []
+    for idx, m in enumerate(item_map):
+        if not isinstance(m, dict):
+            continue
+        site_name = str(m.get("site_name") or "").strip()
+        qty_raw = m.get("qty")
+        try:
+            qty_val = int(str(qty_raw).strip())
+            if qty_val < 1:
+                qty_val = 1
+        except Exception:
+            qty_val = 1
+        prepared.append(
+            {
+                "idx": idx,
+                "sku": str(m.get("sku") or "").strip(),
+                "qty": qty_val,
+                "site_name": site_name,
+                "site_name_norm": _norm_product_title(site_name),
+                "client_price": m.get("client_price"),
+                "used": False,
+            }
+        )
+
+    matches: list[tuple[dict, dict]] = []
+    if len(checkout_rows) == 1 and len(prepared) == 1:
+        # Safe fallback for single-item checkout: still validate qty when available.
+        only_row = checkout_rows[0]
+        only_map = prepared[0]
+        row_qty = only_row.get("qty")
+        if (row_qty is None) or (int(row_qty) == int(only_map["qty"])):
+            return True, [(only_row, only_map)], {}
+    for row in checkout_rows:
+        best = None
+        best_score = -1
+        rn = row["name_norm"]
+        rq = row.get("qty")
+        row_tokens = _title_tokens(row.get("name_raw") or rn)
+        for m in prepared:
+            if m["used"]:
+                continue
+            mn = m["site_name_norm"]
+            score = -1
+            if mn and rn == mn:
+                score = 100
+            elif mn and rn and (mn in rn or rn in mn):
+                score = 80
+            else:
+                map_tokens = _title_tokens(m.get("site_name") or mn)
+                if row_tokens and map_tokens:
+                    overlap = row_tokens & map_tokens
+                    union = row_tokens | map_tokens
+                    ratio = (len(overlap) / len(union)) if union else 0.0
+                    if len(overlap) >= 2 and ratio >= 0.25:
+                        score = 60 + len(overlap)
+            if score < 0:
+                continue
+            if rq and m["qty"] == rq:
+                score += 15
+            if rq and m["qty"] != rq:
+                score -= 5
+            if score > best_score:
+                best_score = score
+                best = m
+        if best is None:
+            return False, [], {"row_name": row.get("name_raw"), "row_qty": rq, "map_size": len(prepared)}
+        best["used"] = True
+        matches.append((row, best))
+    return True, matches, {}
+
+
+def _round_half_up_int(value: Decimal) -> int:
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _step6_calculate_integer_unit_prices(price_rows: list[dict], target_total_int: int) -> tuple[bool, list[int], dict]:
+    if not price_rows:
+        return False, [], {"reason": "NO_PRICE_ROWS"}
+    unit_ints: list[int] = []
+    qtys: list[int] = []
+    for row in price_rows:
+        raw_dec = _to_decimal_number(row.get("raw_price"))
+        if raw_dec is None:
+            return False, [], {"reason": "RAW_PRICE_MISSING", "row": row}
+        qty = int(row.get("qty") or 1)
+        if qty < 1:
+            qty = 1
+        qtys.append(qty)
+        unit_ints.append(_round_half_up_int(raw_dec))
+
+    subtotal = sum(u * q for u, q in zip(unit_ints, qtys))
+    delta = int(target_total_int - subtotal)
+    if delta == 0:
+        return True, unit_ints, {"delta": 0}
+
+    # Prefer qty=1 rows (exact +1/-1 control on total).
+    idx_qty1 = [i for i, q in enumerate(qtys) if q == 1]
+    if idx_qty1:
+        pick = idx_qty1[0]
+        candidate = unit_ints[pick] + delta
+        if candidate < 0:
+            return False, [], {"reason": "ROUNDING_NEGATIVE_PRICE", "idx": pick, "candidate": candidate}
+        unit_ints[pick] = candidate
+        subtotal2 = sum(u * q for u, q in zip(unit_ints, qtys))
+        if subtotal2 == target_total_int:
+            return True, unit_ints, {"delta": delta, "adjusted_idx": pick}
+
+    # Greedy adjustments by qty chunks.
+    sign = 1 if delta > 0 else -1
+    remaining = abs(delta)
+    order = sorted(range(len(qtys)), key=lambda i: qtys[i])
+    for i in order:
+        q = qtys[i]
+        if q <= 0:
+            continue
+        steps = remaining // q
+        if steps <= 0:
+            continue
+        if sign < 0:
+            steps = min(steps, unit_ints[i])  # avoid negative unit price
+        if steps <= 0:
+            continue
+        unit_ints[i] += sign * steps
+        remaining -= steps * q
+        if remaining == 0:
+            break
+
+    subtotal3 = sum(u * q for u, q in zip(unit_ints, qtys))
+    if subtotal3 == target_total_int:
+        return True, unit_ints, {"delta": delta}
+
+    return False, [], {
+        "reason": "ROUNDING_SUM_MISMATCH",
+        "target_total_int": target_total_int,
+        "subtotal": subtotal3,
+        "delta": int(target_total_int - subtotal3),
+        "qtys": qtys,
+        "rounded_units": unit_ints,
+    }
+
+
+async def _step6_select_order_format_shipping(page) -> bool:
+    async def _is_selected() -> bool:
+        for label_sel in ("label[for='orderType1']", "label:has-text('Відправка')"):
+            label = page.locator(label_sel).first
+            try:
+                if await label.count() > 0:
+                    cls = ((await label.get_attribute("class")) or "").casefold()
+                    if "selected" in cls:
+                        return True
+            except Exception:
+                pass
+        try:
+            candidate = page.locator("input[type='radio']:checked").first
+            if await candidate.count() > 0:
+                parent_text = _norm_text((await candidate.locator("xpath=ancestor::*[self::label or self::div][1]").inner_text()) or "")
+                if "відправка" in parent_text:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    if await _is_selected():
+        print("[SUP6] selected order format: Відправка")
+        return True
+
+    candidates = [
+        page.locator("label[for='orderType1']").first,
+        page.get_by_text("Відправка", exact=False).first,
+        page.locator("label:has-text('Відправка')").first,
+    ]
+    for cand in candidates:
+        try:
+            if await cand.count() <= 0:
+                continue
+            if await cand.first.is_visible():
+                await cand.first.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+                await cand.first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+                await page.wait_for_timeout(220)
+                if await _is_selected():
+                    print("[SUP6] selected order format: Відправка")
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+async def _step6_check_ack(page) -> bool:
+    checkbox = page.locator(
+        "#importAntmsgConfirm, input[name='form[importAntmsgConfirm]'][type='checkbox'], "
+        "input[id*='importAntmsgConfirm'][type='checkbox'], input[name*='importAntmsgConfirm'][type='checkbox'], "
+        "input[id*='msgConfirm'][type='checkbox'], #agreeBan, input[name='agreeBan'][type='checkbox'], "
+        "input[type='checkbox'][name*='agree']"
+    ).first
+
+    async def _checked() -> bool:
+        try:
+            if await checkbox.count() > 0 and await checkbox.is_checked():
+                return True
+        except Exception:
+            pass
+        for sel in ("label[for='importAntmsgConfirm']", "label[for='agreeBan']"):
+            label = page.locator(sel).first
+            try:
+                if await label.count() > 0:
+                    cls = ((await label.get_attribute("class")) or "").casefold()
+                    if "selected" in cls:
+                        return True
+            except Exception:
+                pass
+        try:
+            lbl_inline = page.locator(".rsform-block-importantmsgconfirm label.checkbox-inline.selected").first
+            if await lbl_inline.count() > 0 and await lbl_inline.is_visible():
+                return True
+        except Exception:
+            pass
+        try:
+            lbl_yes = page.locator("label.checkbox-inline:has-text('Так').selected").first
+            if await lbl_yes.count() > 0 and await lbl_yes.is_visible():
+                return True
+        except Exception:
+            pass
+        return False
+
+    if await _checked():
+        print("[SUP6] acknowledgment checked")
+        return True
+
+    for cand in [
+        page.locator("label[for='importAntmsgConfirm']").first,
+        page.locator("label[for='agreeBan']").first,
+        page.locator(".rsform-block-importantmsgconfirm label.checkbox-inline").first,
+        page.locator("label.checkbox-inline:has-text('Так')").first,
+        page.get_by_text("Я ознайомлений", exact=False).first,
+        page.get_by_text("Так", exact=True).first,
+        checkbox,
+    ]:
+        try:
+            if await cand.count() > 0 and await cand.first.is_visible():
+                await cand.first.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+                await cand.first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+                await page.wait_for_timeout(220)
+                if await _checked():
+                    print("[SUP6] acknowledgment checked")
+                    return True
+        except Exception:
+            continue
+
+    try:
+        js = await page.evaluate(
+            """() => {
+                const block = document.querySelector('.rsform-block-importantmsgconfirm');
+                const el = (block && block.querySelector('input[type="checkbox"]'))
+                    || document.querySelector('#importAntmsgConfirm')
+                    || document.querySelector('input[name="form[importAntmsgConfirm]"][type="checkbox"]')
+                    || document.querySelector('input[id*="importAntmsgConfirm"][type="checkbox"]')
+                    || document.querySelector('input[name*="importAntmsgConfirm"][type="checkbox"]')
+                    || document.querySelector('#agreeBan')
+                    || document.querySelector('input[name="agreeBan"][type="checkbox"]');
+                if (el) {
+                    el.checked = true;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    const lbl = el.closest('label.checkbox-inline') || (el.id ? document.querySelector(`label[for="${el.id}"]`) : null);
+                    if (lbl) lbl.classList.add('selected');
+                    return !!el.checked;
+                }
+                const lbl2 = (block && block.querySelector('label.checkbox-inline')) || document.querySelector('label.checkbox-inline[for="importAntmsgConfirm"]');
+                if (lbl2) {
+                    lbl2.classList.add('selected');
+                    try { lbl2.click(); } catch (_) {}
+                    return true;
+                }
+                return false;
+            }"""
+        )
+        if js:
+            await page.wait_for_timeout(220)
+            if await _checked():
+                print("[SUP6] acknowledgment checked")
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+async def step6_fill_payment_and_client_prices(page, order_payload: dict | None = None, supplier6_item_map: list[dict] | None = None) -> dict:
+    try:
+        await _step4_ensure_checkout_open(page)
+    except Exception as e:
+        return _step6_fail("CHECKOUT_OPEN_FAILED", details={"error": str(e), "url": page.url or ""})
+
+    if not await _step6_select_payment_cod(page):
+        return _step6_fail("PAYMENT_TYPE_NOT_SELECTED", details={"expected": "Післяплата"})
+
+    payment_amount_raw = _extract_payment_amount(order_payload)
+    if payment_amount_raw is None:
+        return _step6_fail("PAYMENT_AMOUNT_MISSING")
+    target_total_int = _round_half_up_int(payment_amount_raw)
+    print(f"[SUP6] rounded paymentAmount => {target_total_int}")
+    cod_ok, cod_value = await _step6_fill_cod_amount(page, Decimal(target_total_int))
+    if not cod_ok:
+        return _step6_fail("PAYMENT_AMOUNT_FILL_FAILED", details={"expected": str(target_total_int), "value": cod_value})
+
+    checkout_rows = await _step6_collect_checkout_rows(page)
+    if not checkout_rows:
+        return _step6_fail("CLIENT_PRICE_ROWS_NOT_FOUND")
+
+    mapping = supplier6_item_map or []
+    if not mapping:
+        mapping = _step6_build_fallback_map_from_order(order_payload)
+    if not mapping:
+        return _step6_fail("ITEM_MAP_EMPTY")
+
+    matched_ok, matches, match_meta = _step6_match_rows_with_map(checkout_rows, mapping)
+    if not matched_ok:
+        return _step6_fail("PRICE_ROW_MATCH_FAILED", details=match_meta)
+
+    calc_rows: list[dict] = []
+    for row_info, map_info in matches:
+        qty = int(row_info.get("qty") or map_info.get("qty") or 1)
+        if qty < 1:
+            qty = 1
+        calc_rows.append(
+            {
+                "sku": map_info.get("sku"),
+                "site_name": map_info.get("site_name"),
+                "qty": qty,
+                "raw_price": map_info.get("client_price"),
+            }
+        )
+    calc_ok, unit_ints, calc_meta = _step6_calculate_integer_unit_prices(calc_rows, target_total_int)
+    if not calc_ok:
+        if str(calc_meta.get("reason") or "") == "ROUNDING_SUM_MISMATCH":
+            fallback_units = calc_meta.get("rounded_units")
+            fallback_subtotal = calc_meta.get("subtotal")
+            if isinstance(fallback_units, list) and fallback_units and isinstance(fallback_subtotal, int):
+                unit_ints = [int(x) for x in fallback_units]
+                target_total_int = int(fallback_subtotal)
+                print(f"[SUP6] rounded paymentAmount => adjusted to reachable total {target_total_int}")
+                cod_ok2, cod_value2 = await _step6_fill_cod_amount(page, Decimal(target_total_int))
+                if not cod_ok2:
+                    return _step6_fail(
+                        "PAYMENT_AMOUNT_FILL_FAILED",
+                        details={"expected": str(target_total_int), "value": cod_value2, "rounding_meta": calc_meta},
+                    )
+                cod_value = cod_value2
+            else:
+                return _step6_fail("ROUNDING_SUM_MISMATCH", details=calc_meta)
+        else:
+            return _step6_fail("ROUNDING_SUM_MISMATCH", details=calc_meta)
+    prices_log = [{"sku": calc_rows[i]["sku"], "qty": calc_rows[i]["qty"], "unit_price_int": unit_ints[i]} for i in range(len(unit_ints))]
+    print(f"[SUP6] calculated integer client prices => {json.dumps(prices_log, ensure_ascii=False)}")
+
+    filled_count = 0
+    for idx, (row_info, map_info) in enumerate(matches):
+        target_str = str(unit_ints[idx])
+        field = row_info["input"]
+        try:
+            await field.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+            await field.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+            await field.click(timeout=min(3000, SUP6_TIMEOUT_MS))
+            await page.keyboard.press(_select_all_shortcut())
+            await page.keyboard.press("Backspace")
+            await field.fill(target_str, timeout=min(4500, SUP6_TIMEOUT_MS))
+            try:
+                await field.press("Tab", timeout=min(1500, SUP6_TIMEOUT_MS))
+            except Exception:
+                pass
+            await page.wait_for_timeout(220)
+            after = (await field.input_value() or "").strip()
+            after_dec = _to_decimal_number(after)
+            if after_dec is None or int(after_dec) != int(unit_ints[idx]):
+                return _step6_fail("CLIENT_PRICE_FILL_FAILED", details={"sku": map_info.get("sku"), "value": after})
+            print(f"[SUP6] matched checkout row -> sku={map_info.get('sku')} site_name={map_info.get('site_name')}")
+            print(f"[SUP6] filled client price for item: {target_str}")
+            filled_count += 1
+        except Exception as e:
+            return _step6_fail("CLIENT_PRICE_FILL_FAILED", details={"sku": map_info.get("sku"), "error": str(e)})
+
+    await _step6_trigger_recalc(page)
+    await page.wait_for_timeout(280)
+    cod_sum = _to_decimal_number(cod_value)
+    final_sum = None
+    final_sum_text = ""
+    final_sum_candidates: list[Decimal] = []
+    deadline = asyncio.get_running_loop().time() + (SUP6_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        current_sum, current_raw = await _step6_read_final_check_sum(page)
+        if current_raw:
+            final_sum_text = current_raw
+            final_sum_candidates = _extract_money_candidates(current_raw)
+            if cod_sum is not None and final_sum_candidates:
+                for cand in final_sum_candidates:
+                    if cand == cod_sum:
+                        final_sum = cand
+                        break
+                if final_sum is not None:
+                    break
+        if current_sum is not None:
+            final_sum = current_sum
+            if (cod_sum is None) or (final_sum == cod_sum):
+                break
+        await _step6_trigger_recalc(page)
+        await page.wait_for_timeout(220)
+
+    cod_sum = _to_decimal_number(cod_value)
+    if final_sum is None and final_sum_candidates:
+        if len(final_sum_candidates) == 1:
+            final_sum = final_sum_candidates[0]
+        elif cod_sum is not None:
+            for cand in final_sum_candidates:
+                if cand == cod_sum:
+                    final_sum = cand
+                    break
+            if final_sum is None:
+                final_sum = final_sum_candidates[-1]
+        else:
+            final_sum = final_sum_candidates[-1]
+
+    if final_sum is None or cod_sum is None:
+        return _step6_fail(
+            "CHECK_SUM_READ_FAILED",
+            details={
+                "final_sum_text": final_sum_text,
+                "final_sum_candidates": [str(x) for x in final_sum_candidates],
+                "cod_value": cod_value,
+            },
+        )
+    if int(final_sum) != int(cod_sum) or int(final_sum) != int(target_total_int):
+        return _step6_fail(
+            "CHECK_SUM_MISMATCH",
+            details={
+                "final_sum": str(final_sum),
+                "cod_sum": str(cod_sum),
+                "target_total_int": target_total_int,
+                "final_sum_text": final_sum_text,
+                "final_sum_candidates": [str(x) for x in final_sum_candidates],
+            },
+        )
+    print(f"[SUP6] final check sum verified => {int(final_sum)}")
+
+    if not await _step6_select_order_format_shipping(page):
+        return _step6_fail("ORDER_FORMAT_NOT_SELECTED", details={"expected": "Відправка"})
+    if not await _step6_check_ack(page):
+        return _step6_fail("ACK_CHECK_FAILED")
+
+    return {
+        "ok": True,
+        "step": "step6_fill_payment_and_client_prices",
+        "details": {
+            "payment_type": "Післяплата",
+            "payment_amount": str(int(target_total_int)),
+            "client_prices_filled": filled_count,
+            "final_check_sum": str(int(final_sum)),
+            "format": "Відправка",
+            "ack_checked": True,
+            "client_prices": prices_log,
+            "target_total_int": target_total_int,
+        },
+    }
+
+
+def _step7_fail(reason: str, details: dict | None = None) -> dict:
+    payload = {"ok": False, "step": "step7_submit_order", "reason": reason}
+    if details:
+        payload["details"] = details
+    return payload
+
+
+async def _step7_get_submit_button(page):
+    for cand in [
+        page.locator("#SendDoppler").first,
+        page.locator("button[name='SendDoppler']").first,
+        page.locator("button#SendDoppler[type='button']").first,
+        page.get_by_role("button", name=re.compile(r"Підтвердити", re.IGNORECASE)).first,
+        page.get_by_text("Підтвердити", exact=False).first,
+    ]:
+        try:
+            if await cand.count() > 0:
+                return cand
+        except Exception:
+            continue
+    return None
+
+
+async def _step7_wait_submit_outcome(page, start_url: str) -> tuple[str, dict]:
+    success_markers = [
+        "Дякуємо за замовлення",
+        "замовлення оформлено",
+        "Ваше замовлення прийнято",
+    ]
+    validation_markers = [
+        ".formError:visible",
+        ".rsform-error:visible",
+        ".alert-danger:visible",
+        ".error:visible",
+    ]
+    deadline = asyncio.get_running_loop().time() + (SUP6_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        url = page.url or ""
+        if url and url != start_url and ("shipping-and-payment" not in url):
+            return "success", {"url": url, "mode": "url_change"}
+        for marker in success_markers:
+            try:
+                if await page.get_by_text(marker, exact=False).first.is_visible():
+                    return "success", {"url": url, "mode": f"text:{marker}"}
+            except Exception:
+                continue
+        for sel in validation_markers:
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0 and await loc.is_visible():
+                    txt = _normalize_spaces((await loc.inner_text()) or "")
+                    return "validation", {"url": url, "error_text": txt, "selector": sel}
+            except Exception:
+                continue
+        await page.wait_for_timeout(220)
+    return "timeout", {"url": page.url or start_url}
+
+
+async def step7_submit_order(page, order_payload: dict | None = None, pricing_details: dict | None = None) -> dict:
+    try:
+        await _step4_ensure_checkout_open(page)
+    except Exception as e:
+        return _step7_fail("CHECKOUT_OPEN_FAILED", {"error": str(e)})
+
+    if not await _step6_select_payment_cod(page):
+        return _step7_fail("PRECHECK_PAYMENT_NOT_SELECTED")
+    if not await _step6_select_order_format_shipping(page):
+        return _step7_fail("PRECHECK_FORMAT_NOT_SELECTED")
+    if not await _step6_check_ack(page):
+        return _step7_fail("PRECHECK_ACK_NOT_CHECKED")
+
+    target_total_int = None
+    if isinstance(pricing_details, dict):
+        try:
+            target_total_int = int(str(pricing_details.get("target_total_int") or pricing_details.get("payment_amount") or "").strip())
+        except Exception:
+            target_total_int = None
+    if target_total_int is None:
+        amount_raw = _extract_payment_amount(order_payload)
+        if amount_raw is None:
+            return _step7_fail("PRECHECK_PAYMENT_AMOUNT_MISSING")
+        target_total_int = _round_half_up_int(amount_raw)
+
+    check_sum_val, check_sum_text = await _step6_read_final_check_sum(page)
+    candidates = _extract_money_candidates(check_sum_text)
+    final_int = None
+    if candidates:
+        for c in candidates:
+            if int(c) == int(target_total_int):
+                final_int = int(c)
+                break
+        if final_int is None:
+            final_int = int(candidates[-1])
+    elif check_sum_val is not None:
+        final_int = int(check_sum_val)
+    if final_int is None or int(final_int) != int(target_total_int):
+        return _step7_fail(
+            "PRECHECK_SUM_MISMATCH",
+            {"target_total_int": target_total_int, "final_sum": final_int, "check_sum_text": check_sum_text},
+        )
+
+    client_inputs = page.locator("input[name^='form[clientPrice]']")
+    try:
+        cnt = await client_inputs.count()
+    except Exception:
+        cnt = 0
+    client_prices: list[int] = []
+    for i in range(cnt):
+        inp = client_inputs.nth(i)
+        try:
+            if not await inp.is_visible():
+                continue
+            val = (await inp.input_value() or "").strip()
+            dec = _to_decimal_number(val)
+            if dec is None:
+                return _step7_fail("PRECHECK_CLIENT_PRICE_EMPTY", {"index": i, "value": val})
+            iv = int(dec)
+            if Decimal(iv) != dec:
+                return _step7_fail("PRECHECK_CLIENT_PRICE_NOT_INTEGER", {"index": i, "value": val})
+            client_prices.append(iv)
+        except Exception as e:
+            return _step7_fail("PRECHECK_CLIENT_PRICE_READ_FAILED", {"index": i, "error": str(e)})
+
+    submit_btn = await _step7_get_submit_button(page)
+    if submit_btn is None:
+        return _step7_fail("SUBMIT_BUTTON_NOT_FOUND")
+
+    start_url = page.url or ""
+    clicked = False
+    for attempt in (1, 2):
+        try:
+            await submit_btn.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+            print("[SUP6] clicking submit => Підтвердити")
+            await submit_btn.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=(attempt == 2))
+            clicked = True
+            break
+        except Exception:
+            await page.wait_for_timeout(220)
+    if not clicked:
+        return _step7_fail("SUBMIT_CLICK_FAILED")
+
+    outcome, meta = await _step7_wait_submit_outcome(page, start_url)
+    if outcome == "success":
+        print("[SUP6] submit success")
+        return {
+            "ok": True,
+            "step": "step7_submit_order",
+            "details": {
+                "payment_amount": target_total_int,
+                "final_check_sum": final_int,
+                "client_prices": client_prices,
+                "submitted": True,
+                "url": page.url or "",
+                "outcome": meta,
+            },
+        }
+    if outcome == "validation":
+        print("[SUP6] submit failed => validation")
+        return _step7_fail("SUBMIT_FAILED_VALIDATION", details=meta)
+    print("[SUP6] submit failed => timeout")
+    return _step7_fail("SUBMIT_TIMEOUT", details=meta)
+
+
 async def _run_add_items_stage(*, items_override: str = "", order_json_override: str = "") -> dict:
     items = _parse_sup6_items(items_override)
     order_payload = _parse_order_payload(order_json_override)
@@ -2320,9 +3577,11 @@ async def _run_add_items_stage(*, items_override: str = "", order_json_override:
                 context = await browser.new_context()
             page = await context.new_page()
             login_info = await ensure_logged_in(page, context, state_path, force_login=SUP6_FORCE_LOGIN)
-            result = await step3_add_items_to_cart(page, items)
+            result = await step3_add_items_to_cart(page, items, order_payload)
             fill_result = None
             delivery_result = None
+            payment_result = None
+            submit_result = None
             if result.get("ok"):
                 fill_result = await step4_fill_recipient_info(page, order_payload)
                 if not fill_result.get("ok"):
@@ -2351,6 +3610,42 @@ async def _run_add_items_stage(*, items_override: str = "", order_json_override:
                         "reason": delivery_result.get("reason"),
                         "error": str(delivery_result.get("reason") or "step5_fill_delivery_np_pickup failed"),
                     }
+                item_map = ((result.get("details") or {}).get("supplier6_item_map") or [])
+                payment_result = await step6_fill_payment_and_client_prices(page, order_payload, item_map)
+                if not payment_result.get("ok"):
+                    return {
+                        "ok": False,
+                        "stage": "fill_payment",
+                        "url": page.url or SUP6_CHECKOUT_URL,
+                        "storage_state": str(state_path),
+                        "details": {
+                            "login": login_info,
+                            "add_items": result,
+                            "fill_recipient": fill_result,
+                            "fill_delivery": delivery_result,
+                            "fill_payment": payment_result,
+                        },
+                        "reason": payment_result.get("reason"),
+                        "error": str(payment_result.get("reason") or "step6_fill_payment_and_client_prices failed"),
+                    }
+                submit_result = await step7_submit_order(page, order_payload, payment_result.get("details") or {})
+                if not submit_result.get("ok"):
+                    return {
+                        "ok": False,
+                        "stage": "submit_order",
+                        "url": page.url or SUP6_CHECKOUT_URL,
+                        "storage_state": str(state_path),
+                        "details": {
+                            "login": login_info,
+                            "add_items": result,
+                            "fill_recipient": fill_result,
+                            "fill_delivery": delivery_result,
+                            "fill_payment": payment_result,
+                            "submit_order": submit_result,
+                        },
+                        "reason": submit_result.get("reason"),
+                        "error": str(submit_result.get("reason") or "step7_submit_order failed"),
+                    }
             return {
                 "stage": "add_items",
                 "url": page.url or SUP6_MAKE_ORDER_URL,
@@ -2360,6 +3655,8 @@ async def _run_add_items_stage(*, items_override: str = "", order_json_override:
                     "add_items": result,
                     "fill_recipient": fill_result,
                     "fill_delivery": delivery_result,
+                    "fill_payment": payment_result,
+                    "submit_order": submit_result,
                 },
                 **result,
             }
@@ -2481,6 +3778,121 @@ async def _run_fill_delivery_stage(*, pause_seconds: int = 18, order_json_overri
                 await browser.close()
 
 
+async def _run_fill_payment_stage(
+    *,
+    pause_seconds: int = 18,
+    order_json_override: str = "",
+    supplier6_item_map_override: str = "",
+) -> dict:
+    state_path = _state_path()
+    if not _is_state_file_valid(state_path):
+        return {
+            "ok": False,
+            "stage": "fill_payment",
+            "storage_state": str(state_path),
+            "error": f"storage_state is missing or invalid: {state_path}",
+        }
+
+    order_payload = _parse_order_payload(order_json_override)
+    item_map: list[dict] = []
+    raw_map = (supplier6_item_map_override or "").strip()
+    if raw_map:
+        try:
+            parsed_map = json.loads(raw_map)
+            if isinstance(parsed_map, list):
+                item_map = [x for x in parsed_map if isinstance(x, dict)]
+        except Exception:
+            item_map = []
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=SUP6_HEADLESS)
+        context = None
+        try:
+            context = await browser.new_context(storage_state=str(state_path))
+            page = await context.new_page()
+            await page.goto(SUP6_CHECKOUT_URL, wait_until="domcontentloaded", timeout=SUP6_TIMEOUT_MS)
+            result = await step6_fill_payment_and_client_prices(page, order_payload, item_map)
+            if pause_seconds > 0:
+                print(f"[SUP6] fill_payment: keep browser open for {pause_seconds}s")
+                await page.wait_for_timeout(pause_seconds * 1000)
+            return {
+                "stage": "fill_payment",
+                "url": page.url or SUP6_CHECKOUT_URL,
+                "storage_state": str(state_path),
+                "details": {"fill_payment": result},
+                **result,
+            }
+        finally:
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                await browser.close()
+
+
+async def _run_submit_stage(
+    *,
+    pause_seconds: int = 18,
+    order_json_override: str = "",
+    supplier6_item_map_override: str = "",
+) -> dict:
+    state_path = _state_path()
+    if not _is_state_file_valid(state_path):
+        return {
+            "ok": False,
+            "stage": "submit_order",
+            "storage_state": str(state_path),
+            "error": f"storage_state is missing or invalid: {state_path}",
+        }
+
+    order_payload = _parse_order_payload(order_json_override)
+    item_map: list[dict] = []
+    raw_map = (supplier6_item_map_override or "").strip()
+    if raw_map:
+        try:
+            parsed_map = json.loads(raw_map)
+            if isinstance(parsed_map, list):
+                item_map = [x for x in parsed_map if isinstance(x, dict)]
+        except Exception:
+            item_map = []
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=SUP6_HEADLESS)
+        context = None
+        try:
+            context = await browser.new_context(storage_state=str(state_path))
+            page = await context.new_page()
+            await page.goto(SUP6_CHECKOUT_URL, wait_until="domcontentloaded", timeout=SUP6_TIMEOUT_MS)
+            payment_result = await step6_fill_payment_and_client_prices(page, order_payload, item_map)
+            if not payment_result.get("ok"):
+                return {
+                    "ok": False,
+                    "stage": "fill_payment",
+                    "url": page.url or SUP6_CHECKOUT_URL,
+                    "storage_state": str(state_path),
+                    "details": {"fill_payment": payment_result},
+                    "reason": payment_result.get("reason"),
+                    "error": str(payment_result.get("reason") or "step6_fill_payment_and_client_prices failed"),
+                }
+            submit_result = await step7_submit_order(page, order_payload, payment_result.get("details") or {})
+            if pause_seconds > 0:
+                print(f"[SUP6] submit_order: keep browser open for {pause_seconds}s")
+                await page.wait_for_timeout(pause_seconds * 1000)
+            return {
+                "stage": "submit_order",
+                "url": page.url or SUP6_CHECKOUT_URL,
+                "storage_state": str(state_path),
+                "details": {"fill_payment": payment_result, "submit_order": submit_result},
+                **submit_result,
+            }
+        finally:
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                await browser.close()
+
+
 async def _run_full_stage(*, items_override: str = "", order_json_override: str = "") -> dict:
     items = _parse_sup6_items(items_override)
     order_payload = _parse_order_payload(order_json_override)
@@ -2505,7 +3917,7 @@ async def _run_full_stage(*, items_override: str = "", order_json_override: str 
                     "details": {"login": login_info, "clear_cart": clear_result},
                     "error": str(clear_result.get("error") or "clear_cart failed"),
                 }
-            add_result = await step3_add_items_to_cart(page, items)
+            add_result = await step3_add_items_to_cart(page, items, order_payload)
             if not add_result.get("ok"):
                 return {
                     "ok": False,
@@ -2549,6 +3961,44 @@ async def _run_full_stage(*, items_override: str = "", order_json_override: str 
                     "reason": delivery_result.get("reason"),
                     "error": str(delivery_result.get("reason") or "step5_fill_delivery_np_pickup failed"),
                 }
+            item_map = ((add_result.get("details") or {}).get("supplier6_item_map") or [])
+            payment_result = await step6_fill_payment_and_client_prices(page, order_payload, item_map)
+            if not payment_result.get("ok"):
+                return {
+                    "ok": False,
+                    "stage": "fill_payment",
+                    "url": page.url or SUP6_CHECKOUT_URL,
+                    "storage_state": str(state_path),
+                    "details": {
+                        "login": login_info,
+                        "clear_cart": clear_result,
+                        "add_items": add_result,
+                        "fill_recipient": fill_result,
+                        "fill_delivery": delivery_result,
+                        "fill_payment": payment_result,
+                    },
+                    "reason": payment_result.get("reason"),
+                    "error": str(payment_result.get("reason") or "step6_fill_payment_and_client_prices failed"),
+                }
+            submit_result = await step7_submit_order(page, order_payload, payment_result.get("details") or {})
+            if not submit_result.get("ok"):
+                return {
+                    "ok": False,
+                    "stage": "submit_order",
+                    "url": page.url or SUP6_CHECKOUT_URL,
+                    "storage_state": str(state_path),
+                    "details": {
+                        "login": login_info,
+                        "clear_cart": clear_result,
+                        "add_items": add_result,
+                        "fill_recipient": fill_result,
+                        "fill_delivery": delivery_result,
+                        "fill_payment": payment_result,
+                        "submit_order": submit_result,
+                    },
+                    "reason": submit_result.get("reason"),
+                    "error": str(submit_result.get("reason") or "step7_submit_order failed"),
+                }
             return {
                 "ok": True,
                 "stage": "run",
@@ -2560,6 +4010,8 @@ async def _run_full_stage(*, items_override: str = "", order_json_override: str 
                     "add_items": add_result,
                     "fill_recipient": fill_result,
                     "fill_delivery": delivery_result,
+                    "fill_payment": payment_result,
+                    "submit_order": submit_result,
                 },
             }
         finally:
@@ -2583,11 +4035,15 @@ async def _run() -> dict:
         return await _run_fill_recipient_stage()
     if SUP6_STAGE in {"fill_delivery", "fill-delivery"}:
         return await _run_fill_delivery_stage()
+    if SUP6_STAGE in {"fill_payment", "fill-payment"}:
+        return await _run_fill_payment_stage()
+    if SUP6_STAGE in {"submit_order", "submit-order", "submit"}:
+        return await _run_submit_stage()
     if SUP6_STAGE == "run":
         return await _run_full_stage()
     raise RuntimeError(
         f"Unsupported SUP6_STAGE={SUP6_STAGE!r}. Expected 'login', 'clear_cart', 'add_items', "
-        "'finish_cart', 'fill_recipient', 'fill_delivery' or 'run'."
+        "'finish_cart', 'fill_recipient', 'fill_delivery', 'fill_payment', 'submit_order' or 'run'."
     )
 
 
@@ -2596,10 +4052,13 @@ async def _amain(
     finish_cart_only: bool = False,
     fill_recipient_only: bool = False,
     fill_delivery_only: bool = False,
+    fill_payment_only: bool = False,
+    submit_only: bool = False,
     *,
     stage_override: str = "",
     items_override: str = "",
     order_json_override: str = "",
+    supplier6_item_map_override: str = "",
 ) -> int:
     try:
         if stage_override:
@@ -2616,10 +4075,30 @@ async def _amain(
                 result = await _run_fill_recipient_stage(order_json_override=order_json_override)
             elif stage in {"5", "fill_delivery", "fill-delivery", "step5_fill_delivery_np_pickup"}:
                 result = await _run_fill_delivery_stage(order_json_override=order_json_override)
+            elif stage in {"6", "fill_payment", "fill-payment", "step6_fill_payment_and_client_prices"}:
+                result = await _run_fill_payment_stage(
+                    order_json_override=order_json_override,
+                    supplier6_item_map_override=supplier6_item_map_override,
+                )
+            elif stage in {"7", "submit_order", "submit-order", "submit", "step7_submit_order"}:
+                result = await _run_submit_stage(
+                    order_json_override=order_json_override,
+                    supplier6_item_map_override=supplier6_item_map_override,
+                )
             elif stage in {"run"}:
                 result = await _run_full_stage(items_override=items_override, order_json_override=order_json_override)
             else:
                 raise RuntimeError(f"Unsupported --step value: {stage_override!r}")
+        elif submit_only:
+            result = await _run_submit_stage(
+                order_json_override=order_json_override,
+                supplier6_item_map_override=supplier6_item_map_override,
+            )
+        elif fill_payment_only:
+            result = await _run_fill_payment_stage(
+                order_json_override=order_json_override,
+                supplier6_item_map_override=supplier6_item_map_override,
+            )
         elif fill_delivery_only:
             result = await _run_fill_delivery_stage(order_json_override=order_json_override)
         elif fill_recipient_only:
@@ -2635,7 +4114,11 @@ async def _amain(
         print(SUPPLIER_RESULT_JSON_PREFIX + json.dumps(result, ensure_ascii=False))
         return 0 if bool(result.get("ok")) else 1
     except PWTimeoutError as e:
-        if fill_delivery_only:
+        if submit_only:
+            stage = "submit_order"
+        elif fill_payment_only:
+            stage = "fill_payment"
+        elif fill_delivery_only:
             stage = "fill_delivery"
         elif fill_recipient_only:
             stage = "fill_recipient"
@@ -2649,7 +4132,11 @@ async def _amain(
         print(SUPPLIER_RESULT_JSON_PREFIX + json.dumps({"ok": False, "stage": stage, "error": f"timeout: {e}"}))
         return 1
     except Exception as e:
-        if fill_delivery_only:
+        if submit_only:
+            stage = "submit_order"
+        elif fill_payment_only:
+            stage = "fill_payment"
+        elif fill_delivery_only:
             stage = "fill_delivery"
         elif fill_recipient_only:
             stage = "fill_recipient"
@@ -2670,9 +4157,12 @@ def main() -> None:
     parser.add_argument("--finish-cart-only", action="store_true", help="Open cart.html from storage_state and finish step 3 (checkout + agreement)")
     parser.add_argument("--fill-recipient-only", action="store_true", help="Open checkout and fill recipient fields for dropshipping from order payload")
     parser.add_argument("--fill-delivery-only", action="store_true", help="Open checkout and fill NP pickup delivery fields from order payload")
-    parser.add_argument("--step", default="", help="Stage shortcut: 1|2|3|4|5|login|clear_cart|add_items|finish_cart|fill_recipient|fill_delivery|run")
+    parser.add_argument("--fill-payment-only", action="store_true", help="Open checkout and fill payment type/amount/client prices/order format")
+    parser.add_argument("--submit-only", action="store_true", help="Open checkout, run payment rounding/verification and click final Підтвердити")
+    parser.add_argument("--step", default="", help="Stage shortcut: 1|2|3|4|5|6|7|login|clear_cart|add_items|finish_cart|fill_recipient|fill_delivery|fill_payment|submit_order|run")
     parser.add_argument("--items", default="", help="Items for add_items stage, format: SKU1:2,SKU2:1")
     parser.add_argument("--order-json", default="", help="Order payload JSON (expects primaryContact with lName/fName/phone)")
+    parser.add_argument("--supplier6-item-map-json", default="", help="Optional JSON list with supplier6 item map for step6 standalone test")
     args = parser.parse_args()
     raise SystemExit(
         asyncio.run(
@@ -2681,9 +4171,12 @@ def main() -> None:
                 finish_cart_only=args.finish_cart_only,
                 fill_recipient_only=args.fill_recipient_only,
                 fill_delivery_only=args.fill_delivery_only,
+                fill_payment_only=args.fill_payment_only,
+                submit_only=args.submit_only,
                 stage_override=args.step,
                 items_override=args.items,
                 order_json_override=args.order_json,
+                supplier6_item_map_override=args.supplier6_item_map_json,
             )
         )
     )

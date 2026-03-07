@@ -4,7 +4,7 @@
     "name": "DHEA (дегідроепіандростерон) -, 21st Century, 25 мг, 90 капсул",
     "brand": "21st Century",
     "barcode": "740985211779",
-    "qty": 1,
+    "qty": 2,
     "price": 320.0,
     "termin": "2027-03-30 00:00:00"
   },
@@ -22,7 +22,7 @@
     "name": "Для волосся, шкіри та нігтів, покращений склад, 21st Century, 50 капсул",
     "brand": "21st Century",
     "barcode": "740985214343",
-    "qty": 2,
+    "qty": 1,
     "price": 290.0,
     "termin": "2028-05-30 00:00:00"
   },
@@ -40,18 +40,9 @@
     "name": "Кальцій Магній Цинк та Вітамін Д3 21st Century (Calcium Magnesium Zinc + D3) 90 таблеток",
     "brand": "21st Century",
     "barcode": "740985222638",
-    "qty": 40,
+    "qty": 50,
     "price": 236.0,
     "termin": "2028-04-30 00:00:00"
-  },
-  {
-    "articul": "CEN-22309",
-    "name": "Вітамін B12 21st Century (Vitamin B12) 500 мкг 110 таблеток",
-    "brand": "21st Century",
-    "barcode": "740985223093",
-    "qty": 1,
-    "price": 208.0,
-    "termin": "2028-07-31 00:00:00"
   },
   {
     "articul": "CEN-22400",
@@ -76,18 +67,9 @@
     "name": "Амінокислоти для щоденного прийому максимальна сила 21st Century (Daily Amino Acid) 120 таблеток",
     "brand": "21st Century",
     "barcode": "740985225578",
-    "qty": 2,
+    "qty": 1,
     "price": 555.0,
     "termin": "2027-11-30 00:00:00"
-  },
-  {
-    "articul": "CEN-22713",
-    "name": "Магній 21st Century (Magnesium) 250 мг 110 таблеток",
-    "brand": "21st Century",
-    "barcode": "740985227138",
-    "qty": 1,
-    "price": 147.0,
-    "termin": ""
   },
   {
     "articul": "CEN-22846",
@@ -121,7 +103,7 @@
     "name": "MgO, Оксид магнію, 21st Century, 400 мг, 90 таблеток",
     "brand": "21st Century",
     "barcode": "740985270721",
-    "qty": 1,
+    "qty": 2,
     "price": 340.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -135,13 +117,13 @@
     "termin": "2028-03-30 00:00:00"
   },
   {
-    "articul": "CEN-27308",
-    "name": "Вітаміни для жінок 21st Century (Multivitamin Multimineral) 100 таблеток",
+    "articul": "CEN-27529",
+    "name": "Кальцій та вітамін Д3 21st Century (600+D3 Calcium &amp; Vitamin D3 Supplement) 75 таблеток",
     "brand": "21st Century",
-    "barcode": "740985273081",
-    "qty": 2,
-    "price": 282.0,
-    "termin": "2026-08-30 00:00:00"
+    "barcode": "740985275290",
+    "qty": 1,
+    "price": 142.0,
+    "termin": "2027-11-30 00:00:00"
   },
   {
     "articul": "AMP-00031",
@@ -225,15 +207,6 @@
     "termin": "2028-10-30 00:00:00"
   },
   {
-    "articul": "AUU-73143",
-    "name": "Anua, Heartleaf 77 %, заспокійливий тонік, 250 мл (8,45 рідк. унції)",
-    "brand": "Anua",
-    "barcode": "8809640731433",
-    "qty": 1,
-    "price": 659.0,
-    "termin": "2026-08-05 00:00:00"
-  },
-  {
     "articul": "ADL-65057",
     "name": "LashGrip, для полоскових вій, темний клей, Ardell, 0,25 унції (7 г)",
     "brand": "Ardell",
@@ -257,8 +230,8 @@
     "brand": "Arm & Hammer",
     "barcode": "033200191230",
     "qty": 30,
-    "price": 93.0,
-    "termin": "2027-05-31 00:00:00"
+    "price": 94.0,
+    "termin": "2027-09-30 00:00:00"
   },
   {
     "articul": "ARH-19460",
@@ -285,7 +258,7 @@
     "barcode": "033200197140",
     "qty": 30,
     "price": 174.0,
-    "termin": "2027-08-30 00:00:00"
+    "termin": "2027-10-30 00:00:00"
   },
   {
     "articul": "ARH-19724",
@@ -310,7 +283,7 @@
     "name": "Натуральний дезодорант для чоловіків та жінок без запаху Arm &amp; Hammer (Essentials with Natural Deodorizers Deodorant Unscented) 71 г",
     "brand": "Arm & Hammer",
     "barcode": "033200197928",
-    "qty": 30,
+    "qty": 20,
     "price": 229.0,
     "termin": "2027-12-12 00:00:00"
   },
@@ -320,7 +293,7 @@
     "brand": "Arm & Hammer",
     "barcode": "033200197935",
     "qty": 10,
-    "price": 227.0,
+    "price": 229.0,
     "termin": "2027-12-12 00:00:00"
   },
   {
@@ -373,7 +346,7 @@
     "name": "Спрей від комах Badger Company (Anti-Bug Shake &amp; Spray) 79,85 мл",
     "brand": "Badger",
     "barcode": "634084296037",
-    "qty": 2,
+    "qty": 3,
     "price": 363.0,
     "termin": "2026-10-20 00:00:00"
   },
@@ -387,15 +360,6 @@
     "termin": "2026-06-01 00:00:00"
   },
   {
-    "articul": "BGL-56167",
-    "name": "Біоглан Пробіотики для дітей 1 млрд для травлення Bioglan (Chocballs for Kids (Milk) 1 Billion) 30 шоколадних кульок",
-    "brand": "Bioglan",
-    "barcode": "5060216561677",
-    "qty": 2,
-    "price": 487.0,
-    "termin": "2026-04-30 00:00:00"
-  },
-  {
     "articul": "BTZ-75109",
     "name": "15-денний швидкодіючий засіб для виведення токсинів і очищення кишечника, посилена формула, BioSchwartz, 45 рослинних капсул",
     "brand": "BioSchwartz",
@@ -405,13 +369,13 @@
     "termin": ""
   },
   {
-    "articul": "BTH-00092-5",
-    "name": "Протеїн 100% Pure Whey BioTech 454 г Полуниця",
-    "brand": "BioTech",
-    "barcode": "5999076238330",
+    "articul": "PPLS-25105",
+    "name": "Clear Collagen Professional BioTech 350 g peach ice tea",
+    "brand": "Biotech USA",
+    "barcode": "5999076254613",
     "qty": 1,
-    "price": 766.0,
-    "termin": ""
+    "price": 1253.0,
+    "termin": "2029-01-30 00:00:00"
   },
   {
     "articul": "BLB-00135",
@@ -439,6 +403,15 @@
     "qty": 1,
     "price": 885.0,
     "termin": ""
+  },
+  {
+    "articul": "BLB-00748",
+    "name": "Магній гліцинат Bluebonnet Nutrition (Magnesium Glycinate) 400 мг 60 вегетаріанських капсул",
+    "brand": "Bluebonnet Nutrition",
+    "barcode": "743715007482",
+    "qty": 2,
+    "price": 581.0,
+    "termin": "2026-03-06 00:00:00"
   },
   {
     "articul": "BLB-00878",
@@ -477,13 +450,13 @@
     "termin": "2026-07-30 00:00:00"
   },
   {
-    "articul": "BLN-01709",
-    "name": "Brothers-All-Natural, Фруктові чіпси, полуниця, 1 унція (28 г)",
-    "brand": "Brothers-All-Natural",
-    "barcode": "811387017099",
-    "qty": 2,
-    "price": 293.0,
-    "termin": "2026-04-12 00:00:00"
+    "articul": "BUP-95046",
+    "name": "Bucked Up, Heat Hardcore, Miami, полуниця, манго й ананас, 228 г (8 унцій)",
+    "brand": "Bucked Up",
+    "barcode": "810131950460",
+    "qty": 1,
+    "price": 2019.0,
+    "termin": ""
   },
   {
     "articul": "BRT-01794",
@@ -493,15 +466,6 @@
     "qty": 1,
     "price": 376.0,
     "termin": "2027-12-12 00:00:00"
-  },
-  {
-    "articul": "CGN-01115",
-    "name": "Пасифлора екстракт Каліфорнія Gold Nutrition (Passion Flower EuroHerbs) 250 мг 60 вегетаріанських капсул",
-    "brand": "California Gold",
-    "barcode": "898220011155",
-    "qty": 1,
-    "price": 344.0,
-    "termin": ""
   },
   {
     "articul": "CGN-01126",
@@ -517,7 +481,7 @@
     "name": "Гідролізовані колагенові пептиди + вітамін С тип 1 і 3 California Gold Nutrition (Hydrolyzed Collagen Peptides + Vitamin C Type I &amp; III) 6000 мг 250 таблеток",
     "brand": "California Gold",
     "barcode": "898220011780",
-    "qty": 4,
+    "qty": 1,
     "price": 935.0,
     "termin": "2027-08-03 00:00:00"
   },
@@ -535,16 +499,16 @@
     "name": "Вітамін C California Gold Nutrition (Gold C Vitamin C) 1000 мг 60 вегетаріанських капсул",
     "brand": "California Gold Nutrition",
     "barcode": "898220009312",
-    "qty": 10,
+    "qty": 5,
     "price": 237.0,
-    "termin": "2028-09-30 00:00:00"
+    "termin": "2028-11-30 00:00:00"
   },
   {
     "articul": "CGN-00956",
     "name": "Комплекс для здоров'я печінки силімарин California Gold Nutrition (Silymarin Complex Liver Health) 300 мг 120 вегакапсул",
     "brand": "California Gold Nutrition",
     "barcode": "898220009565",
-    "qty": 3,
+    "qty": 2,
     "price": 616.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -562,8 +526,8 @@
     "name": "Пробіотики California Gold Nutrition (LactoBif Probiotics) 30 млрд КОЕ 60 овочевих капсул",
     "brand": "California Gold Nutrition",
     "barcode": "898220009657",
-    "qty": 50,
-    "price": 944.0,
+    "qty": 20,
+    "price": 950.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
@@ -571,9 +535,9 @@
     "name": "Колаген UP без ароматизаторів California Gold Nutrition (CollagenUP Unflavored) 464 г",
     "brand": "California Gold Nutrition",
     "barcode": "898220010325",
-    "qty": 40,
-    "price": 1656.0,
-    "termin": "2028-05-03 00:00:00"
+    "qty": 30,
+    "price": 1661.0,
+    "termin": "2028-05-30 00:00:00"
   },
   {
     "articul": "CGN-01033",
@@ -581,26 +545,26 @@
     "brand": "California Gold Nutrition",
     "barcode": "898220010332",
     "qty": 50,
-    "price": 719.0,
+    "price": 717.0,
     "termin": "2028-05-30 00:00:00"
+  },
+  {
+    "articul": "CGN-01034",
+    "name": "Вітамін Д3 дитячі краплі California Gold Nutrition (Baby Vitamin D3 Liquid) 10 мкг 400 МО 10 мл",
+    "brand": "California Gold Nutrition",
+    "barcode": "898220010349",
+    "qty": 40,
+    "price": 316.0,
+    "termin": "2027-10-01 00:00:00"
   },
   {
     "articul": "CGN-01179",
     "name": "Вітамін Д3 California Gold Nutrition (Vitamin D3) 50 мкг 2000 МО 90 капсул",
     "brand": "California Gold Nutrition",
     "barcode": "898220011797",
-    "qty": 40,
+    "qty": 50,
     "price": 206.0,
     "termin": "2028-05-30 00:00:00"
-  },
-  {
-    "articul": "CGN-01236",
-    "name": "Вітамін C аскорбат натрію буферизований California Gold Nutrition (Buffered Vitamin C) 750 мг 60 рослинних капсул",
-    "brand": "California Gold Nutrition",
-    "barcode": "898220012367",
-    "qty": 2,
-    "price": 248.0,
-    "termin": "2028-07-30 00:00:00"
   },
   {
     "articul": "CGN-01330",
@@ -612,15 +576,6 @@
     "termin": "2028-07-30 00:00:00"
   },
   {
-    "articul": "CGN-01722",
-    "name": "Органічна мелена паприка California Gold Nutrition (Organic Ground Paprika) 63 г",
-    "brand": "California Gold Nutrition",
-    "barcode": "898220017225",
-    "qty": 2,
-    "price": 255.0,
-    "termin": "2026-08-08 00:00:00"
-  },
-  {
     "articul": "CGN-01846",
     "name": "California Gold Nutrition, кверцетин, 500 мг, 180 вегетаріанських капсул",
     "brand": "California Gold Nutrition",
@@ -628,6 +583,15 @@
     "qty": 1,
     "price": 1838.0,
     "termin": "2027-07-30 00:00:00"
+  },
+  {
+    "articul": "CAE-72665",
+    "name": "Care:Nel, сироватка-пілінг з АГК-БГК, 30 мл (1 рідк. унція)",
+    "brand": "Care:Nel",
+    "barcode": "8809472726652",
+    "qty": 1,
+    "price": 705.0,
+    "termin": ""
   },
   {
     "articul": "CAR-01302",
@@ -644,8 +608,17 @@
     "brand": "Carlson",
     "barcode": "088395017148",
     "qty": 30,
-    "price": 1536.0,
+    "price": 1532.0,
     "termin": "2027-11-30 00:00:00"
+  },
+  {
+    "articul": "CAR-05222",
+    "name": "Магній оксид Carlson Labs (Magnesium) 350 мг 180 капсул",
+    "brand": "Carlson",
+    "barcode": "088395052224",
+    "qty": 1,
+    "price": 704.0,
+    "termin": ""
   },
   {
     "articul": "CAR-10830",
@@ -679,7 +652,7 @@
     "name": "Дитяче жувальний залізо, 15 мг, натуральна полуниця, Kid's Chewable Iron, Natural Strawberry, Carlson Labs, 60 таблеток",
     "brand": "Carlson",
     "barcode": "088395559402",
-    "qty": 9,
+    "qty": 10,
     "price": 326.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -688,8 +661,17 @@
     "name": "Cetaphil, прозорий мінеральний сонцезахисний крем-стік, SPF 50, 14 г (0,5 унції)",
     "brand": "Cetaphil",
     "barcode": "302994108008",
-    "qty": 7,
+    "qty": 8,
     "price": 392.0,
+    "termin": "2026-06-30 00:00:00"
+  },
+  {
+    "articul": "CET-11000",
+    "name": "Cetaphil, Рідкий сонцезахисний засіб для обличчя з мінералами, SPF 50, 50 мл (1,7 рідк. унції)",
+    "brand": "Cetaphil",
+    "barcode": "302994110001",
+    "qty": 1,
+    "price": 633.0,
     "termin": "2026-06-30 00:00:00"
   },
   {
@@ -796,18 +778,18 @@
     "name": "Покращена зубна паста з фтором, захист ясен, Pro Health, Advanced Fluoride Toothpaste, Gum Protection, Crest, 144 г",
     "brand": "Crest",
     "barcode": "037000976592",
-    "qty": 2,
+    "qty": 1,
     "price": 373.0,
     "termin": "2027-03-30 00:00:00"
   },
   {
-    "articul": "CBD-00225",
-    "name": "Дезодорант-стик Crystal (Body Deodorant) 40 г",
-    "brand": "CRYSTAL",
-    "barcode": "086449002256",
-    "qty": 2,
-    "price": 149.0,
-    "termin": "2028-01-31 00:00:00"
+    "articul": "DSH-42095",
+    "name": "Dashu, білковий пуховий крем для чоловіків, 100 мл (3,38 рідк. унції)",
+    "brand": "Dashu",
+    "barcode": "8809897420951",
+    "qty": 1,
+    "price": 808.0,
+    "termin": ""
   },
   {
     "articul": "DLC-15042",
@@ -841,7 +823,7 @@
     "name": "Подарунковий сертифікат DOBAVKI.UA (2000 грн)",
     "brand": "Dobavki",
     "barcode": "",
-    "qty": 7,
+    "qty": 8,
     "price": 2.0,
     "termin": ""
   },
@@ -850,9 +832,27 @@
     "name": "Магній з високою засвоюваністю Doctor's Best (High Absorption Magnesium) 120 таблеток",
     "brand": "Doctor's Best",
     "barcode": "753950000254",
-    "qty": 10,
-    "price": 512.0,
+    "qty": 20,
+    "price": 529.0,
     "termin": "2027-10-12 00:00:00"
+  },
+  {
+    "articul": "DRB-00087",
+    "name": "100% хелатований легкозасвоюваний магній Doctor's Best (High Absorption Magnesium 100% Chelated) 200 мг, 240 таблеток",
+    "brand": "Doctor's Best",
+    "barcode": "753950000872",
+    "qty": 10,
+    "price": 900.0,
+    "termin": "2028-01-30 00:00:00"
+  },
+  {
+    "articul": "DRB-00125",
+    "name": "Наттокіназа, Nattokinase, 2000 FUs, Doctor's Best, 90 капсул",
+    "brand": "Doctor's Best",
+    "barcode": "753950001251",
+    "qty": 2,
+    "price": 758.0,
+    "termin": "2028-04-30 00:00:00"
   },
   {
     "articul": "DRB-00133",
@@ -868,7 +868,7 @@
     "name": "Цинк карнозин Doctor's Best (PepZin GI Zinc-L-Carnosine Complex) 120 вегетаріанських капсул",
     "brand": "Doctor's Best",
     "barcode": "753950001367",
-    "qty": 5,
+    "qty": 3,
     "price": 1091.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -877,36 +877,9 @@
     "name": "Гіалуронова кислота та хондроїтин сульфат Doctor's Best (Hyaluronic Acid + Chondroitin Sulfate) 50 мг / 100 мг 60 капсул",
     "brand": "Doctor's Best",
     "barcode": "753950001466",
-    "qty": 4,
+    "qty": 3,
     "price": 871.0,
     "termin": "2027-03-30 00:00:00"
-  },
-  {
-    "articul": "DRB-00203",
-    "name": "Колаген 1 і 3 типу Doctor's Best (Collagen types 1 and 3 Powder) 200 г",
-    "brand": "Doctor's Best",
-    "barcode": "753950002036",
-    "qty": 3,
-    "price": 619.0,
-    "termin": "2028-01-30 00:00:00"
-  },
-  {
-    "articul": "DRB-00218",
-    "name": "Вітамін Д3 Doctor's Best (Vitamin D3) 125 мкг 5000 МО 180 м'яких таблеток",
-    "brand": "Doctor's Best",
-    "barcode": "753950002180",
-    "qty": 1,
-    "price": 307.0,
-    "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "DRB-00220",
-    "name": "Фосфатидилсерин Doctor's Best (Phosphatidylserine) 100 мг 120 капсул",
-    "brand": "Doctor's Best",
-    "barcode": "753950002203",
-    "qty": 1,
-    "price": 1620.0,
-    "termin": ""
   },
   {
     "articul": "DRB-00454",
@@ -916,15 +889,6 @@
     "qty": 1,
     "price": 988.0,
     "termin": "2027-05-30 00:00:00"
-  },
-  {
-    "articul": "DOP-52235",
-    "name": "Доппельгерц актив, женьшень + В-вітаміни, Doppel Herz, 30 капсул",
-    "brand": "Doppelherz",
-    "barcode": "4009932522358",
-    "qty": 1,
-    "price": 272.0,
-    "termin": "2027-06-01 00:00:00"
   },
   {
     "articul": "2DLH",
@@ -940,7 +904,7 @@
     "name": "Їжовик гребінчастий Левова грива Double Wood (Lion's Mane Mushroom) 500 мг 120 капсул",
     "brand": "Double Wood",
     "barcode": "X002353QLB",
-    "qty": 9,
+    "qty": 7,
     "price": 801.0,
     "termin": "2027-05-30 00:00:00"
   },
@@ -958,7 +922,7 @@
     "name": "Теанін Double Wood (L-Theanine) 200 мг 120 капсул",
     "brand": "Double Wood",
     "barcode": "X001LWAOOT",
-    "qty": 7,
+    "qty": 1,
     "price": 819.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -967,7 +931,7 @@
     "name": "Берберин Double Wood (Berberine) 500 мг 60 капсул",
     "brand": "Double Wood",
     "barcode": "X000XOC6BZ",
-    "qty": 8,
+    "qty": 6,
     "price": 847.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -985,7 +949,7 @@
     "name": "Тонгкат Алі LJ100 Double Wood (LJ100 Tongkat) 100 мг 120 капсул",
     "brand": "Double Wood",
     "barcode": "X0036BEDA9",
-    "qty": 6,
+    "qty": 3,
     "price": 1456.0,
     "termin": "2027-07-30 00:00:00"
   },
@@ -999,20 +963,11 @@
     "termin": "2027-07-30 00:00:00"
   },
   {
-    "articul": "G021",
-    "name": "Тонгкат Алі Double Wood (Tongkat Ali) 1020 мг 120 капсул",
-    "brand": "Double Wood",
-    "barcode": "X0028HG021",
-    "qty": 2,
-    "price": 833.0,
-    "termin": "2027-05-30 00:00:00"
-  },
-  {
     "articul": "H2D5",
     "name": "Колострум Молозиво Double Wood (Colostrum) 1000 мг 120 капсул",
     "brand": "Double Wood",
     "barcode": "X003WJH2D5",
-    "qty": 7,
+    "qty": 9,
     "price": 921.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -1021,7 +976,7 @@
     "name": "Уридин монофосфат Double Wood (Uridine Monophosphate) 300 мг 60 капсул",
     "brand": "Double Wood",
     "barcode": "X002AEITPN",
-    "qty": 4,
+    "qty": 1,
     "price": 865.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -1030,7 +985,7 @@
     "name": "Магній цитрат Double Wood (Magnesium Citrate) 800 мг 180 капсул",
     "brand": "Double Wood",
     "barcode": "X003AMKUS3",
-    "qty": 4,
+    "qty": 2,
     "price": 893.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -1048,7 +1003,7 @@
     "name": "Апігенін Double Wood (Apigenin) 50 мг 120 капсул",
     "brand": "Double Wood",
     "barcode": "X002ZVTHWF",
-    "qty": 10,
+    "qty": 9,
     "price": 867.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -1057,7 +1012,7 @@
     "name": "Альфа-ГФХ Double Wood (Alpha GPC) 300 мг 60 капсул",
     "brand": "Double Wood",
     "barcode": "X000S3VNDX",
-    "qty": 10,
+    "qty": 9,
     "price": 788.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -1120,7 +1075,7 @@
     "name": "L-Треонат магнію, Dr Mercola, 90 капсул",
     "brand": "Dr. Mercola",
     "barcode": "813006017787",
-    "qty": 6,
+    "qty": 9,
     "price": 1498.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -1129,7 +1084,7 @@
     "name": "Цинк плюс селен, Zinc plus Selenium, Dr Mercola, 30 капсул",
     "brand": "Dr. Mercola",
     "barcode": "810487030656",
-    "qty": 2,
+    "qty": 1,
     "price": 419.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -1143,13 +1098,13 @@
     "termin": "2027-05-30 00:00:00"
   },
   {
-    "articul": "MCL-03358",
-    "name": "Травна підтримка Dr. Mercola 60 мл",
-    "brand": "Dr. Mercola",
-    "barcode": "810487033589",
-    "qty": 0,
-    "price": 948.0,
-    "termin": ""
+    "articul": "DNH-30466",
+    "name": "Яблучний оцет з маткою Dynamic Health Laboratories (Apple Cider Vinegar with Mother) 473 мл",
+    "brand": "Dynamic Health",
+    "barcode": "790223304664",
+    "qty": 1,
+    "price": 495.0,
+    "termin": "2028-11-30 00:00:00"
   },
   {
     "articul": "EID-00021",
@@ -1174,7 +1129,7 @@
     "name": "Формула основних ферментів Enzymedica (Digest Basic) 90 капсул",
     "brand": "Enzymedica",
     "barcode": "670480290101",
-    "qty": 7,
+    "qty": 4,
     "price": 568.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -1183,7 +1138,7 @@
     "name": "Травні ферменти Enzymedica (Essential Enzyme Formula) 180 капсул",
     "brand": "Enzymedica",
     "barcode": "670480290118",
-    "qty": 2,
+    "qty": 1,
     "price": 933.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -1192,7 +1147,7 @@
     "name": "Формула з основними ферментами, Enzymedica, 30 капсул",
     "brand": "Enzymedica",
     "barcode": "670480290507",
-    "qty": 4,
+    "qty": 2,
     "price": 272.0,
     "termin": "2026-12-30 00:00:00"
   },
@@ -1229,8 +1184,17 @@
     "brand": "Fairhaven Health",
     "barcode": "895749000752",
     "qty": 20,
-    "price": 914.0,
+    "price": 921.0,
     "termin": "2027-09-30 00:00:00"
+  },
+  {
+    "articul": "FHH-00218",
+    "name": "Чоловічі мультивітаміни - добавка для фертильності клінічного класу Fairhaven Health (FH Pro for Men - Clinical Grade Fertility Supplement) 180 капсул",
+    "brand": "Fairhaven Health",
+    "barcode": "896593002183",
+    "qty": 1,
+    "price": 4028.0,
+    "termin": ""
   },
   {
     "articul": "FHH-00227",
@@ -1258,33 +1222,6 @@
     "qty": 3,
     "price": 774.0,
     "termin": ""
-  },
-  {
-    "articul": "FR1574",
-    "name": "Органічний кисневий порошок для видалення плям Friendly Organic 500 гр",
-    "brand": "Friendly organic",
-    "barcode": "8680088181574",
-    "qty": 1,
-    "price": 242.0,
-    "termin": "2028-12-12 00:00:00"
-  },
-  {
-    "articul": "FR1604",
-    "name": "Органічний дитячий шампунь-гель Friendly Organic без запаху 400 мл",
-    "brand": "Friendly organic",
-    "barcode": "8680088181604",
-    "qty": 1,
-    "price": 343.0,
-    "termin": "2027-11-30 00:00:00"
-  },
-  {
-    "articul": "FRO-18216",
-    "name": "Органічний миючий засіб для дитячого посуду, пляшок, сосок Friendly Organic з ароматом апельсина, 500 мл",
-    "brand": "Friendly organic",
-    "barcode": "8680088182168",
-    "qty": 2,
-    "price": 302.0,
-    "termin": "2029-11-06 00:00:00"
   },
   {
     "articul": "FPI-03162",
@@ -1359,6 +1296,15 @@
     "termin": "2027-09-30 00:00:00"
   },
   {
+    "articul": "HAV-75090",
+    "name": "Havasu Nutrition, Creatine Powder For Women, Unflavored, 10.6 oz (300 g)",
+    "brand": "Havasu Nutrition",
+    "barcode": "850041750903",
+    "qty": 1,
+    "price": 1141.0,
+    "termin": ""
+  },
+  {
     "articul": "HWT-09117",
     "name": "Сонцезахисний засіб з широким спектром захисту, SPF 50, легкий тропічний аромат, Hawaiian Tropic, 236 мл",
     "brand": "Hawaiian Tropic",
@@ -1377,13 +1323,13 @@
     "termin": "2028-03-30 00:00:00"
   },
   {
-    "articul": "HEI-76054",
-    "name": "All Clean, пінка з білою глиною, Heimish, 150 г",
-    "brand": "Heimish",
-    "barcode": "8809481760548",
-    "qty": 7,
-    "price": 315.0,
-    "termin": "2026-10-19 00:00:00"
+    "articul": "HOG-15092",
+    "name": "Добавка із високим вмістом селену Healthy Origins (Seleno Excell) 200 мкг 180 капсул",
+    "brand": "Healthy Origins",
+    "barcode": "603573150921",
+    "qty": 1,
+    "price": 464.0,
+    "termin": ""
   },
   {
     "articul": "HBP-90037",
@@ -1408,7 +1354,7 @@
     "name": "Активатор росту волосся Hobe Labs (Labs) 237 мл",
     "brand": "Hobe Labs",
     "barcode": "076791002127",
-    "qty": 9,
+    "qty": 7,
     "price": 548.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -1435,7 +1381,7 @@
     "name": "Комплекс вітамінів групи В Jarrow Formulas (B-Right) 100 вегетаріанських капсул",
     "brand": "Jarrow Formulas",
     "barcode": "790011010067",
-    "qty": 7,
+    "qty": 8,
     "price": 935.0,
     "termin": "2027-05-30 00:00:00"
   },
@@ -1453,18 +1399,18 @@
     "name": "Артишок Jarrow Formulas (Artichoke) 500 мг 180 капсул",
     "brand": "Jarrow Formulas",
     "barcode": "790011140627",
-    "qty": 6,
+    "qty": 7,
     "price": 1235.0,
     "termin": "2027-03-30 00:00:00"
   },
   {
-    "articul": "JRW-14123",
-    "name": "Кверцетин, 500 мг, Quercetin, Jarrow Formulas, 30 вегетеріанських капсул",
+    "articul": "JRW-15001",
+    "name": "L-тирозин, L-Tyrosine, Jarrow Formulas, 500 мг, 100 капсул",
     "brand": "Jarrow Formulas",
-    "barcode": "790011141235",
-    "qty": 1,
-    "price": 626.0,
-    "termin": ""
+    "barcode": "790011150015",
+    "qty": 2,
+    "price": 573.0,
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "JRW-16058",
@@ -1476,11 +1422,20 @@
     "termin": "2026-10-30 00:00:00"
   },
   {
+    "articul": "JRW-18001",
+    "name": "Вітамін В12 Jarrow Formulas (Methyl B12) 1000 мкг 100 льодяників зі смаком лимона",
+    "brand": "Jarrow Formulas",
+    "barcode": "790011180012",
+    "qty": 4,
+    "price": 506.0,
+    "termin": "2027-10-30 00:00:00"
+  },
+  {
     "articul": "JRW-18010",
     "name": "Пантотенова кислота, вітамін В5 Jarrow Formulas (Pantothenic acid B5) 500 мг 100 капсул",
     "brand": "Jarrow Formulas",
     "barcode": "790011180104",
-    "qty": 2,
+    "qty": 1,
     "price": 596.0,
     "termin": "2027-04-30 00:00:00"
   },
@@ -1501,6 +1456,15 @@
     "qty": 1,
     "price": 1826.0,
     "termin": "2028-03-30 00:00:00"
+  },
+  {
+    "articul": "JRW-21011",
+    "name": "Лактоферин, Lactoferrin, Jarrow Formulas, 250 мг, 60 капсул",
+    "brand": "Jarrow Formulas",
+    "barcode": "790011210115",
+    "qty": 8,
+    "price": 2121.0,
+    "termin": "2028-06-30 00:00:00"
   },
   {
     "articul": "JRW-23007",
@@ -1530,6 +1494,15 @@
     "termin": "2027-02-28 00:00:00"
   },
   {
+    "articul": "JRW-29060",
+    "name": "Комплекс з муміє, Jarrow Formulas, 250 мг, 60 вегетаріанських капсул",
+    "brand": "Jarrow Formulas",
+    "barcode": "790011290605",
+    "qty": 1,
+    "price": 1078.0,
+    "termin": ""
+  },
+  {
     "articul": "JRW-29065",
     "name": "DIM + CDG, покращена формула детоксикації, Jarrow Formulas, 30 овочевих капсул",
     "brand": "Jarrow Formulas",
@@ -1543,8 +1516,8 @@
     "name": "Метил Фолієва Кислота Jarrow Formulas (Methyl Folate) 400 мкг 60 вегетаріанських капсул",
     "brand": "Jarrow Formulas",
     "barcode": "790011300069",
-    "qty": 30,
-    "price": 402.0,
+    "qty": 20,
+    "price": 404.0,
     "termin": "2028-04-30 00:00:00"
   },
   {
@@ -1584,48 +1557,57 @@
     "termin": "2028-10-30 00:00:00"
   },
   {
-    "articul": "CAL-30686",
-    "name": "Метил фолат, Methyl Folate, KAL, 400 мкг, 90 таблеток",
+    "articul": "CAL-36975",
+    "name": "Таурат магнію + KAL (Magnesium Taurate Plus) 400 мг 90 таблеток",
     "brand": "KAL",
-    "barcode": "021245306863",
-    "qty": 1,
-    "price": 389.0,
-    "termin": "2027-10-30 00:00:00"
+    "barcode": "021245369752",
+    "qty": 6,
+    "price": 665.0,
+    "termin": "2029-06-30 00:00:00"
   },
   {
     "articul": "CAL-38038",
     "name": "Оротат літію KAL (Lithium Orotate) 5 мг, 60 вегетаріанських капсул",
     "brand": "KAL",
     "barcode": "021245380382",
-    "qty": 4,
+    "qty": 5,
     "price": 321.0,
     "termin": "2029-04-30 00:00:00"
-  },
-  {
-    "articul": "CAL-41369",
-    "name": "Вітаміни D-3 і K-2, натуральний цитрусовий смак, D-3 and K-2, KAL, 2 р унц (59 мл)",
-    "brand": "KAL",
-    "barcode": "021245413691",
-    "qty": 2,
-    "price": 606.0,
-    "termin": "2027-10-30 00:00:00"
   },
   {
     "articul": "CAL-61832",
     "name": "Таурат магнію + KAL (Magnesium Taurate +) 400 мг 180 таблеток",
     "brand": "KAL",
     "barcode": "021245618324",
-    "qty": 4,
+    "qty": 2,
     "price": 1157.0,
     "termin": "2029-01-30 00:00:00"
+  },
+  {
+    "articul": "CAL-74810",
+    "name": "Покращення пам'яті і роботи мозку підлітків KAL 60 таблеток",
+    "brand": "KAL",
+    "barcode": "021245748106",
+    "qty": 10,
+    "price": 641.0,
+    "termin": "2029-03-30 00:00:00"
   },
   {
     "articul": "CAL-81309",
     "name": "Магній Малат KAL  (Magnesium Malate) 90 таблеток",
     "brand": "KAL",
     "barcode": "021245813095",
-    "qty": 20,
+    "qty": 10,
     "price": 559.0,
+    "termin": "2029-05-30 00:00:00"
+  },
+  {
+    "articul": "CAL-89160",
+    "name": "Магній гліцинат проти стресу, Stress B Mag Glycinate, KAL, 60 капсул",
+    "brand": "KAL",
+    "barcode": "021245891604",
+    "qty": 1,
+    "price": 359.0,
     "termin": "2029-05-30 00:00:00"
   },
   {
@@ -1633,7 +1615,7 @@
     "name": "Метілфолат KAL (Methyl Folate) 800 мкг, 90 таблеток",
     "brand": "KAL",
     "barcode": "021245955931",
-    "qty": 9,
+    "qty": 6,
     "price": 492.0,
     "termin": "2029-02-28 00:00:00"
   },
@@ -1656,12 +1638,21 @@
     "termin": "2027-05-30 00:00:00"
   },
   {
+    "articul": "LEX-14591",
+    "name": "Магній Life Extension (Magnesium Caps) 500 мг 100 вегетаріанських капсул",
+    "brand": "Life Extension",
+    "barcode": "737870145912",
+    "qty": 4,
+    "price": 358.0,
+    "termin": "2027-05-30 00:00:00"
+  },
+  {
     "articul": "LEX-16039",
     "name": "Магній L-треонат Life Extension (Neuro-Mag) 90 капсул",
     "brand": "Life Extension",
     "barcode": "737870160397",
     "qty": 20,
-    "price": 1413.0,
+    "price": 1414.0,
     "termin": "2027-05-30 00:00:00"
   },
   {
@@ -1669,16 +1660,25 @@
     "name": "Аргінін Life Extension (L-Arginine) 700 мг 200 капсул.",
     "brand": "Life Extension",
     "barcode": "737870162421",
-    "qty": 10,
+    "qty": 9,
     "price": 848.0,
     "termin": "2027-05-30 00:00:00"
+  },
+  {
+    "articul": "LEX-16516",
+    "name": "Кальцій Д-глюкарат, Calcium D-Glucarate, Life Extension, 200 мг, 60 рослинних капсул",
+    "brand": "Life Extension",
+    "barcode": "737870165163",
+    "qty": 5,
+    "price": 618.0,
+    "termin": "2027-10-30 00:00:00"
   },
   {
     "articul": "LEX-16583",
     "name": "Гінкго Білоба дволопатеве, сертифікований екстракт, Ginkgo Biloba, Life Extension, 120 мг, 365 капсул",
     "brand": "Life Extension",
     "barcode": "737870165835",
-    "qty": 2,
+    "qty": 1,
     "price": 1480.0,
     "termin": "2026-10-30 00:00:00"
   },
@@ -1687,9 +1687,18 @@
     "name": "Магній цитрат Life Extension (Magnesium citrate) 160 мг, 100 вегетаріанських капсул",
     "brand": "Life Extension",
     "barcode": "737870168218",
-    "qty": 3,
+    "qty": 2,
     "price": 369.0,
     "termin": "2027-06-30 00:00:00"
+  },
+  {
+    "articul": "LEX-16836",
+    "name": "L-теанін Life Extension (L-Theanine) 100 мг 60 капсул",
+    "brand": "Life Extension",
+    "barcode": "737870168362",
+    "qty": 8,
+    "price": 776.0,
+    "termin": "2027-07-30 00:00:00"
   },
   {
     "articul": "LEX-16896",
@@ -1705,7 +1714,7 @@
     "name": "Олія насіння чорного кмину Life Extension (Black Cumin Seed Oil) 60 жувальних капсул",
     "brand": "Life Extension",
     "barcode": "737870170969",
-    "qty": 2,
+    "qty": 1,
     "price": 476.0,
     "termin": "2027-07-30 00:00:00"
   },
@@ -1741,7 +1750,7 @@
     "name": "Cелен суперкомплекс Life Extension (Super Selenium Complex) 100 вегетаріанських капсул",
     "brand": "Life Extension",
     "barcode": "737870177814",
-    "qty": 2,
+    "qty": 3,
     "price": 423.0,
     "termin": "2027-07-30 00:00:00"
   },
@@ -1750,7 +1759,7 @@
     "name": "Добавка для енергії, азіатський енергетичний імпульс, Asian Energy Boost, Life Extension, 30 рослинних капсул",
     "brand": "Life Extension",
     "barcode": "737870180593",
-    "qty": 1,
+    "qty": 2,
     "price": 719.0,
     "termin": "2026-08-30 00:00:00"
   },
@@ -1762,15 +1771,6 @@
     "qty": 5,
     "price": 299.0,
     "termin": "2027-08-30 00:00:00"
-  },
-  {
-    "articul": "LEX-18429",
-    "name": "Фолієва кислота і вітамін B12 Life Extension (Folate and Vitamin B12) 400 мкг / 300 мкг 90 капсул",
-    "brand": "Life Extension",
-    "barcode": "737870184294",
-    "qty": 2,
-    "price": 361.0,
-    "termin": "2027-04-30 00:00:00"
   },
   {
     "articul": "LEX-18596",
@@ -1795,8 +1795,8 @@
     "name": "В-комплекс вітамінів Life Extension (BioActive B-Complex) 60 капсул",
     "brand": "Life Extension",
     "barcode": "737870194569",
-    "qty": 40,
-    "price": 410.0,
+    "qty": 10,
+    "price": 406.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
@@ -1813,7 +1813,7 @@
     "name": "Магній для пам'яті і когнітивної функції, L-Треонат магнію, смак тропічного пуншу, Neuro-Mag, Magnesium L-Threonate, Tropical Punch Flavor, Life Extension, 93,35 г",
     "brand": "Life Extension",
     "barcode": "737870203292",
-    "qty": 9,
+    "qty": 8,
     "price": 1421.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -1824,15 +1824,6 @@
     "barcode": "737870209638",
     "qty": 1,
     "price": 740.0,
-    "termin": "2027-06-30 00:00:00"
-  },
-  {
-    "articul": "LEX-21216",
-    "name": "Підтримка рівня гомоцистеїну Life Extension (Homocysteine Resist)  60 рослинних капсул",
-    "brand": "Life Extension",
-    "barcode": "737870212164",
-    "qty": 2,
-    "price": 789.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
@@ -1867,8 +1858,8 @@
     "name": "Мультивітаміни Life Extension (Two-Per-Day Capsules) 120 капсул",
     "brand": "Life Extension",
     "barcode": "737870231417",
-    "qty": 10,
-    "price": 949.0,
+    "qty": 20,
+    "price": 972.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
@@ -1876,7 +1867,7 @@
     "name": "Мультивітаміни Life Extension (Two-Per-Day) 120 таблеток",
     "brand": "Life Extension",
     "barcode": "737870231516",
-    "qty": 3,
+    "qty": 4,
     "price": 896.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -1885,8 +1876,8 @@
     "name": "Мультивітаміни Life Extension (Two-Per-Day Tablets) 60 таблеток",
     "brand": "Life Extension",
     "barcode": "737870231660",
-    "qty": 10,
-    "price": 502.0,
+    "qty": 4,
+    "price": 497.0,
     "termin": "2027-08-30 00:00:00"
   },
   {
@@ -1921,7 +1912,7 @@
     "name": "Літій, Lithium, Life Extension 1000 мкг, 100 вегетаріанських капсул",
     "brand": "Life Extension",
     "barcode": "737870240310",
-    "qty": 2,
+    "qty": 10,
     "price": 502.0,
     "termin": "2027-02-20 00:00:00"
   },
@@ -1939,25 +1930,34 @@
     "name": "ДГЕА (дегідроепіандростерон), DHEA, Life Extension, 50 мг, 60 капсул",
     "brand": "Life Extension",
     "barcode": "737870882060",
-    "qty": 9,
+    "qty": 8,
     "price": 571.0,
     "termin": "2027-08-30 00:00:00"
+  },
+  {
+    "articul": "LEX-88806",
+    "name": "Оптимізований екстракт ашвагандха Life Extension (Optimized Ashwagandha Extract) 60 капсул",
+    "brand": "Life Extension",
+    "barcode": "737870888062",
+    "qty": 1,
+    "price": 356.0,
+    "termin": "2027-03-30 00:00:00"
   },
   {
     "articul": "LEX-92512",
     "name": "Бенфотиамин, Mega Benfotiamine, Life Extension, 250 мг, 120 капсул на рослинній основі",
     "brand": "Life Extension",
     "barcode": "737870925125",
-    "qty": 6,
-    "price": 912.0,
-    "termin": "2027-06-30 00:00:00"
+    "qty": 7,
+    "price": 915.0,
+    "termin": "2027-11-30 00:00:00"
   },
   {
     "articul": "LFH-28221",
     "name": "Рідкий йод плюс натуральний смак апельсина, Life-flo, 2 рідк унціі (59 мл)",
     "brand": "Life-flo",
     "barcode": "645951282213",
-    "qty": 4,
+    "qty": 2,
     "price": 310.0,
     "termin": "2027-07-30 00:00:00"
   },
@@ -1966,7 +1966,7 @@
     "name": "Магнієва олія Life-flo (Pure Magnesium Oil Spray) 237 мл",
     "brand": "Life-flo",
     "barcode": "645951405308",
-    "qty": 6,
+    "qty": 7,
     "price": 445.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -1976,143 +1976,8 @@
     "brand": "Life-flo",
     "barcode": "645951915470",
     "qty": 10,
-    "price": 308.0,
+    "price": 309.0,
     "termin": "2027-07-30 00:00:00"
-  },
-  {
-    "articul": "LPBB-48007",
-    "name": "Батончик LipoBar Exclusive Вишня 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480076",
-    "qty": 10,
-    "price": 41.0,
-    "termin": "2026-09-26 00:00:00"
-  },
-  {
-    "articul": "LPBB-48008",
-    "name": "Батончик LipoBar Exclusive Малина 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480083",
-    "qty": 7,
-    "price": 41.0,
-    "termin": "2026-10-02 00:00:00"
-  },
-  {
-    "articul": "LPBB-48009",
-    "name": "Батончик LipoBar Exclusive Фундук 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480090",
-    "qty": 2,
-    "price": 41.0,
-    "termin": "2026-09-30 00:00:00"
-  },
-  {
-    "articul": "LPBB-48010",
-    "name": "Батончик LipoBar Exclusive Фісташка 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480106",
-    "qty": 7,
-    "price": 41.0,
-    "termin": "2026-10-30 00:00:00"
-  },
-  {
-    "articul": "LPBB-48011",
-    "name": "Батончик LipoBar Exclusive Карамель 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480113",
-    "qty": 6,
-    "price": 41.0,
-    "termin": "2026-10-06 00:00:00"
-  },
-  {
-    "articul": "LPBB-48012",
-    "name": "Батончик LipoBar Exclusive Шоколад 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480120",
-    "qty": 8,
-    "price": 41.0,
-    "termin": "2026-09-29 00:00:00"
-  },
-  {
-    "articul": "LPBB-48013",
-    "name": "Батончик LipoBar Exclusive Кокос 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480137",
-    "qty": 10,
-    "price": 41.0,
-    "termin": "2026-10-08 00:00:00"
-  },
-  {
-    "articul": "LPBB-48014",
-    "name": "Батончик LipoBar Exclusive Гранат 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480144",
-    "qty": 10,
-    "price": 41.0,
-    "termin": "2026-10-01 00:00:00"
-  },
-  {
-    "articul": "LPBB-48015",
-    "name": "Батончик LipoBar Exclusive Абрикос 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480151",
-    "qty": 20,
-    "price": 41.0,
-    "termin": "2026-10-14 00:00:00"
-  },
-  {
-    "articul": "LPBB-48016",
-    "name": "Батончик LipoBar Exclusive Манго 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480168",
-    "qty": 10,
-    "price": 41.0,
-    "termin": "2026-10-13 00:00:00"
-  },
-  {
-    "articul": "LPBB-48017",
-    "name": "Батончик LipoBar Exclusive Полуниця 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480175",
-    "qty": 7,
-    "price": 41.0,
-    "termin": "2026-10-23 00:00:00"
-  },
-  {
-    "articul": "LPBB-48018",
-    "name": "Батончик LipoBar Exclusive Бісквіт 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480182",
-    "qty": 20,
-    "price": 41.0,
-    "termin": "2026-10-07 00:00:00"
-  },
-  {
-    "articul": "LPBB-48019",
-    "name": "Батончик LipoBar Exclusive Марципан 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480199",
-    "qty": 10,
-    "price": 41.0,
-    "termin": "2026-10-17 00:00:00"
-  },
-  {
-    "articul": "LPBB-48020",
-    "name": "Батончик LipoBar Exclusive Капучино 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480205",
-    "qty": 6,
-    "price": 41.0,
-    "termin": "2026-10-16 00:00:00"
-  },
-  {
-    "articul": "LPBB-48021",
-    "name": "Батончик LipoBar Exclusive Апельсин 50 г",
-    "brand": "Lipobar",
-    "barcode": "4820270480212",
-    "qty": 10,
-    "price": 41.0,
-    "termin": "2026-10-09 00:00:00"
   },
   {
     "articul": "MAJ-00806",
@@ -2128,9 +1993,18 @@
     "name": "Mariani Dried Fruit, Organic, сушена журавлина, 4 унції (113 г)",
     "brand": "Mariani Dried Fruit",
     "barcode": "071022315922",
-    "qty": 2,
+    "qty": 1,
     "price": 206.0,
     "termin": ""
+  },
+  {
+    "articul": "MAV-11699",
+    "name": "Фолієва кислота В-6 і В-12 Mason Natural (Folic Acid B6 and B12) 90 таблеток",
+    "brand": "Mason Natural",
+    "barcode": "311845116994",
+    "qty": 2,
+    "price": 272.0,
+    "termin": "2028-06-30 00:00:00"
   },
   {
     "articul": "MAV-14539",
@@ -2178,15 +2052,6 @@
     "termin": "2027-02-20 00:00:00"
   },
   {
-    "articul": "MIE-00673",
-    "name": "Олія для зміцнення шкіри голови та волосся розмарин та м'ята Mielle 2 рідких унції (59 мл)",
-    "brand": "Mielle",
-    "barcode": "854102006732",
-    "qty": 3,
-    "price": 456.0,
-    "termin": "2027-12-12 00:00:00"
-  },
-  {
     "articul": "MIE-73006",
     "name": "Mielle, очищувальний цукровий скраб для шкіри голови, розмарин і м’ята, 170 г (6 унцій)",
     "brand": "Mielle",
@@ -2194,15 +2059,6 @@
     "qty": 1,
     "price": 533.0,
     "termin": "2027-12-12 00:00:00"
-  },
-  {
-    "articul": "MBN-01640",
-    "name": "Очищуючий засіб для рук без спирту лемонграсс Mild By Nature (Hand Cleanser) 60 мл",
-    "brand": "Mild By Nature",
-    "barcode": "898220016402",
-    "qty": 2,
-    "price": 75.0,
-    "termin": "2025-12-12 00:00:00"
   },
   {
     "articul": "BAB-07183",
@@ -2340,15 +2196,6 @@
     "termin": "2027-06-30 00:00:00"
   },
   {
-    "articul": "MNW-532665",
-    "name": "Міо-інозитол, Myo-Inositol, My Nutri Week, 120 капсул",
-    "brand": "My Nutri Week",
-    "barcode": "4820236532665",
-    "qty": 1,
-    "price": 479.0,
-    "termin": "2027-11-30 00:00:00"
-  },
-  {
     "articul": "MNW-532795",
     "name": "Індол-3-карбінол, Indole-3-Carbinol, My Nutri Week, 60 капсул",
     "brand": "My Nutri Week",
@@ -2371,7 +2218,7 @@
     "name": "Вітамін D3+K2, Vitamin D3+K2, My Nutri Week, 5000 МО/50 мкг, 60 капсул",
     "brand": "My Nutri Week",
     "barcode": "4820236532825",
-    "qty": 7,
+    "qty": 6,
     "price": 443.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -2403,15 +2250,6 @@
     "termin": "2027-10-30 00:00:00"
   },
   {
-    "articul": "MYPN-30201",
-    "name": "Креатин моногідрат Myprotein (Creatine Monohydrate) 500 г",
-    "brand": "My Protein",
-    "barcode": "5055534302019",
-    "qty": 1,
-    "price": 643.0,
-    "termin": ""
-  },
-  {
     "articul": "NPC-46195",
     "name": "Nacific, Newpair, крем із вітаміном C, 15 мл (0,5 рідк. унції)",
     "brand": "Nacific",
@@ -2428,6 +2266,15 @@
     "qty": 1,
     "price": 577.0,
     "termin": "2027-11-28 00:00:00"
+  },
+  {
+    "articul": "JRW-07979",
+    "name": "Natrol, Melatonin Max, добавка для сну, лохина, 10 мг, 80 жувальних таблеток",
+    "brand": "Natrol",
+    "barcode": "047469079796",
+    "qty": 1,
+    "price": 1186.0,
+    "termin": ""
   },
   {
     "articul": "NTL-05228",
@@ -2466,40 +2313,13 @@
     "termin": "2028-08-30 00:00:00"
   },
   {
-    "articul": "NFS-01648",
-    "name": "Цитрат магнію, зі смаком жувальної гумки, Big Friends, Magnesium Citrate, Bubble Gum Flavor, Natural Factors, 50 мг, 60 жувальних таблеток",
+    "articul": "NFS-01637",
+    "name": "Natural Factors, Піколінат хрому, 500 мкг, 90 таблеток",
     "brand": "Natural Factors",
-    "barcode": "627765016482",
-    "qty": 2,
-    "price": 249.0,
-    "termin": "2030-07-30 00:00:00"
-  },
-  {
-    "articul": "NFS-01653",
-    "name": "Магнію цитрат, Natural Factors, 150 мг, 180 капсул",
-    "brand": "Natural Factors",
-    "barcode": "627765016536",
-    "qty": 2,
-    "price": 587.0,
-    "termin": "2030-03-31 00:00:00"
-  },
-  {
-    "articul": "NFS-01683",
-    "name": "Хелатний цинк, Natural Factors, 25 мг, 90 таблеток",
-    "brand": "Natural Factors",
-    "barcode": "627765016833",
-    "qty": 1,
-    "price": 231.0,
-    "termin": "2028-02-20 00:00:00"
-  },
-  {
-    "articul": "NFS-02056",
-    "name": "Яблучний оцет, Natural Factors, 500 мг, 180 капсул",
-    "brand": "Natural Factors",
-    "barcode": "068958020563",
-    "qty": 1,
-    "price": 497.0,
-    "termin": "2028-09-30 00:00:00"
+    "barcode": "068958016375",
+    "qty": 6,
+    "price": 211.0,
+    "termin": "2030-03-30 00:00:00"
   },
   {
     "articul": "NFS-02849",
@@ -2511,6 +2331,15 @@
     "termin": "2026-11-30 00:00:00"
   },
   {
+    "articul": "NFS-03543",
+    "name": "Берберин Natural Factors (Berberine)  500 мг, 120 вегетаріанських капсул",
+    "brand": "Natural Factors",
+    "barcode": "627765035438",
+    "qty": 4,
+    "price": 991.0,
+    "termin": "2029-03-30 00:00:00"
+  },
+  {
     "articul": "NFS-04512",
     "name": "Журавлина концентрат Natural Factors (Super Strength Cranberry Concentrate) 500 мг 90 капсул",
     "brand": "Natural Factors",
@@ -2518,15 +2347,6 @@
     "qty": 7,
     "price": 416.0,
     "termin": "2028-09-30 00:00:00"
-  },
-  {
-    "articul": "NFS-04527",
-    "name": "ResveratrolRich, надсильний концентрат ресвератрола, Natural Factors, 60 капсул на рослинній основі",
-    "brand": "Natural Factors",
-    "barcode": "068958045276",
-    "qty": 1,
-    "price": 905.0,
-    "termin": "2028-02-20 00:00:00"
   },
   {
     "articul": "NFS-04940",
@@ -2569,7 +2389,7 @@
     "name": "Солодка, без спирту, Nature's Answer, 2000мг, 1 рідка унція (30 мл)",
     "brand": "Nature's Answer",
     "barcode": "083000006401",
-    "qty": 2,
+    "qty": 3,
     "price": 420.0,
     "termin": "2029-03-31 00:00:00"
   },
@@ -2578,18 +2398,9 @@
     "name": "Клевер червоний, без спирту, Nature's Answer, 2000мг, 1 рідка унція (30 мл)",
     "brand": "Nature's Answer",
     "barcode": "083000006586",
-    "qty": 9,
+    "qty": 7,
     "price": 420.0,
     "termin": "2029-01-31 00:00:00"
-  },
-  {
-    "articul": "NTA-00784",
-    "name": "Зміцнення здоров'я печінки Nature's Answer (Liver Support) 30 мл",
-    "brand": "Nature's Answer",
-    "barcode": "083000007842",
-    "qty": 2,
-    "price": 474.0,
-    "termin": "2029-07-30 00:00:00"
   },
   {
     "articul": "NTA-00801",
@@ -2608,15 +2419,6 @@
     "qty": 1,
     "price": 774.0,
     "termin": "2028-01-31 00:00:00"
-  },
-  {
-    "articul": "NTA-26107",
-    "name": "Комплекс рідких вітамінів групи В з натуральним мандариновий смаком, Nature's Answer, 16 рідких унції (480 мл)",
-    "brand": "Nature's Answer",
-    "barcode": "083000261077",
-    "qty": 1,
-    "price": 898.0,
-    "termin": "2026-11-30 00:00:00"
   },
   {
     "articul": "NTA-26110",
@@ -2646,38 +2448,20 @@
     "termin": "2028-08-30 00:00:00"
   },
   {
-    "articul": "NAP-02564",
-    "name": "Кверцетин плюс вітамін С (Quercetin Plus with Vitamin C) Nature's Plus 90 таблеток",
-    "brand": "Nature's Plus",
-    "barcode": "097467025646",
-    "qty": 0,
-    "price": 952.0,
-    "termin": ""
-  },
-  {
-    "articul": "NAP-03001",
-    "name": "Pedi-Active, добавка для активних дітей, зі смаком ягідної суміші, Nature's Plus, 120 жувальних таблеток",
-    "brand": "Nature's Plus",
-    "barcode": "097467030015",
-    "qty": 1,
-    "price": 1228.0,
-    "termin": "2027-05-30 00:00:00"
-  },
-  {
     "articul": "NAP-03421",
     "name": "Залізо з вітаміном С Nature's Plus (Iron with Vitamin C) 90 жувальних таблеток зі смаком вишні",
     "brand": "Nature's Plus",
     "barcode": "097467034211",
-    "qty": 6,
-    "price": 535.0,
-    "termin": "2028-01-31 00:00:00"
+    "qty": 4,
+    "price": 537.0,
+    "termin": "2028-08-30 00:00:00"
   },
   {
     "articul": "NAP-03430",
     "name": "Мідь Nature's Plus (Copper) 3 мг 90 таблеток",
     "brand": "Nature's Plus",
     "barcode": "097467034303",
-    "qty": 5,
+    "qty": 4,
     "price": 359.0,
     "termin": "2028-03-31 00:00:00"
   },
@@ -2695,7 +2479,7 @@
     "name": "Норвезькі бурі водорості Nature's Plus (Icelandic Kelp) 300 таблеток",
     "brand": "Nature's Plus",
     "barcode": "097467039506",
-    "qty": 4,
+    "qty": 3,
     "price": 383.0,
     "termin": "2028-12-30 00:00:00"
   },
@@ -2707,6 +2491,15 @@
     "qty": 3,
     "price": 435.0,
     "termin": "2028-09-30 00:00:00"
+  },
+  {
+    "articul": "NAP-04383",
+    "name": "Пробіотик для здоров'я зубів і порожнини рота для дорослих з М18 і натуральним м'ятним смаком, Nature's Plus, 60 пастилок",
+    "brand": "Nature's Plus",
+    "barcode": "097467043831",
+    "qty": 1,
+    "price": 943.0,
+    "termin": ""
   },
   {
     "articul": "NAP-04452",
@@ -2731,7 +2524,7 @@
     "name": "Мультивітаміни для дітей Nature's Plus (Animal Parade Gold) 120 жувальних таблеток зі смаком вишні",
     "brand": "Nature's Plus",
     "barcode": "097467299320",
-    "qty": 5,
+    "qty": 1,
     "price": 887.0,
     "termin": "2027-05-31 00:00:00"
   },
@@ -2794,7 +2587,7 @@
     "name": "Вітаміни для дітей Nature's Plus (Children's Multi-Vitamin, Animal Parade) 180 жувальних цукерок з асорті смаків",
     "brand": "Nature's Plus",
     "barcode": "097467299825",
-    "qty": 5,
+    "qty": 4,
     "price": 955.0,
     "termin": "2028-03-31 00:00:00"
   },
@@ -2839,7 +2632,7 @@
     "name": "Рідкий засіб Hema-Plex, ягідне асорті, Nature's Plus, 250 мл",
     "brand": "Nature's Plus",
     "barcode": "097467376878",
-    "qty": 8,
+    "qty": 7,
     "price": 701.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -2857,8 +2650,8 @@
     "name": "Рідкий хлорофіл з ароматом м'яти Nature's Way (Chlorofresh Liquid Chlorophyll Mint) 473,2 мл",
     "brand": "Nature's Way",
     "barcode": "358008035013",
-    "qty": 30,
-    "price": 567.0,
+    "qty": 40,
+    "price": 568.0,
     "termin": "2027-05-30 00:00:00"
   },
   {
@@ -2866,18 +2659,9 @@
     "name": "Хлорофіл рідкий без запаху Nature's Way (Chlorofresh) 473 мл",
     "brand": "Nature's Way",
     "barcode": "358008035020",
-    "qty": 50,
+    "qty": 30,
     "price": 459.0,
-    "termin": "2027-07-31 00:00:00"
-  },
-  {
-    "articul": "NWY-03550",
-    "name": "Хлорофреш, Концентрат хлорофілу, Nature's Way, 90 гелевих капсул",
-    "brand": "Nature's Way",
-    "barcode": "358008035501",
-    "qty": 3,
-    "price": 590.0,
-    "termin": "2028-07-30 00:00:00"
+    "termin": "2027-08-31 00:00:00"
   },
   {
     "articul": "NWY-11534",
@@ -2893,9 +2677,18 @@
     "name": "Вітекс Nature's Way (Vitex) 400 мг 100 капсул",
     "brand": "Nature's Way",
     "barcode": "033674117507",
-    "qty": 10,
+    "qty": 9,
     "price": 314.0,
     "termin": "2030-02-20 00:00:00"
+  },
+  {
+    "articul": "NWY-11973",
+    "name": "Вітаміни для волосся, шкіри і нігтів з колагеном Nature's Way (Alive Skin, Nails, Hair with Collagen) зі смаком полуниці 60 жувальних таблеток",
+    "brand": "Nature's Way",
+    "barcode": "033674119730",
+    "qty": 6,
+    "price": 725.0,
+    "termin": "2027-05-31 00:00:00"
   },
   {
     "articul": "NWY-12300",
@@ -2911,8 +2704,8 @@
     "name": "Nature's Way, живий! повноцінний мультивітамінний комплекс для жінок віком від 50 років, 50 таблеток.",
     "brand": "Nature's Way",
     "barcode": "033674136621",
-    "qty": 3,
-    "price": 481.0,
+    "qty": 2,
+    "price": 484.0,
     "termin": "2027-04-30 00:00:00"
   },
   {
@@ -2961,15 +2754,6 @@
     "termin": "2027-05-31 00:00:00"
   },
   {
-    "articul": "NWY-15120",
-    "name": "Ним Nature's Way (Neem) 100 вегетаріанських капсул",
-    "brand": "Nature's Way",
-    "barcode": "033674151204",
-    "qty": 1,
-    "price": 327.0,
-    "termin": "2030-02-28 00:00:00"
-  },
-  {
     "articul": "NWY-15350",
     "name": "Корінь дикого ямсу Nature's Way (Wild Yam Root) 350 мг 180 вегетаріанських капсул",
     "brand": "Nature's Way",
@@ -2983,7 +2767,7 @@
     "name": "Ашвагандха Nature's Way (Ashwagandha) 500 мг 60 капсул",
     "brand": "Nature's Way",
     "barcode": "033674153871",
-    "qty": 4,
+    "qty": 1,
     "price": 744.0,
     "termin": "2028-05-31 00:00:00"
   },
@@ -3001,18 +2785,9 @@
     "name": "За д'арко, Pau d'Arco, Nature's Way, внутрішня кора, 545 мг, 100 вегетаріанських капсул",
     "brand": "Nature's Way",
     "barcode": "033674154502",
-    "qty": 5,
-    "price": 318.0,
+    "qty": 6,
+    "price": 317.0,
     "termin": "2029-12-30 00:00:00"
-  },
-  {
-    "articul": "NWY-15685",
-    "name": "Мультивітаміни для чоловіків - найповніший комплекс Nature's Way (Alive! Men's multi-vitamin) 60 таблеток",
-    "brand": "Nature's Way",
-    "barcode": "033674156858",
-    "qty": 3,
-    "price": 811.0,
-    "termin": "2027-01-31 00:00:00"
   },
   {
     "articul": "NWY-15686",
@@ -3051,12 +2826,21 @@
     "termin": "2028-05-30 00:00:00"
   },
   {
+    "articul": "NAP-03760",
+    "name": "Залізо Natures Plus (Hema-Plex Iron with Essential Nutrients for Healthy Red Blood Cells) 30 таблеток",
+    "brand": "Natures Plus",
+    "barcode": "097467037601",
+    "qty": 40,
+    "price": 447.0,
+    "termin": "2029-07-30 00:00:00"
+  },
+  {
     "articul": "NAP-03768",
     "name": "Жувальні таблетки із залізом суміш ягід Nature's Plus (Hema-Plex) 60 жувальних пастилок",
     "brand": "Natures Plus",
     "barcode": "097467037687",
-    "qty": 20,
-    "price": 371.0,
+    "qty": 10,
+    "price": 372.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -3064,8 +2848,8 @@
     "name": "Гема-Плекс харчова добавка із залізом Nature's Plus (Hema-Plex) 60 вегетаріанських капсул",
     "brand": "Natures Plus",
     "barcode": "097467037724",
-    "qty": 30,
-    "price": 507.0,
+    "qty": 20,
+    "price": 501.0,
     "termin": "2029-02-20 00:00:00"
   },
   {
@@ -3091,7 +2875,7 @@
     "name": "Мультивітаміни для дітей, смак вишні, Children's-Cherry Flavor, Animal Parade Gold, Natures Plus, 60 жувальних таблеток",
     "brand": "Natures Plus",
     "barcode": "097467299313",
-    "qty": 6,
+    "qty": 5,
     "price": 563.0,
     "termin": "2028-04-30 00:00:00"
   },
@@ -3100,7 +2884,7 @@
     "name": "Дитячий магній Вишневий аромат Nature's Plus (Animal Parade Mag Kidz Children's Magnesium Cherry Flavor) 90 таблеток",
     "brand": "Natures Plus",
     "barcode": "097467299429",
-    "qty": 5,
+    "qty": 4,
     "price": 442.0,
     "termin": "2027-12-31 00:00:00"
   },
@@ -3132,15 +2916,6 @@
     "termin": "2027-10-30 00:00:00"
   },
   {
-    "articul": "NAP-30002",
-    "name": "Вітаміни для хлопчиків-підлітків Nature's Plus (Power Teen For Him) 60 жувальних таблеток зі смаком ягід без цукру",
-    "brand": "Natures Plus",
-    "barcode": "097467300026",
-    "qty": 3,
-    "price": 812.0,
-    "termin": "2028-07-30 00:00:00"
-  },
-  {
     "articul": "NAP-30004",
     "name": "Source of Life, сила для підлітка, для неї, натуральний смак дикорослих ягід, Nature's Plus, 60 жувальних таблеток",
     "brand": "Natures Plus",
@@ -3157,15 +2932,6 @@
     "qty": 1,
     "price": 234.0,
     "termin": "2028-07-30 00:00:00"
-  },
-  {
-    "articul": "NEL-13260",
-    "name": "Супер Колаген з вітаміном C та біотином NeoCell (Super Collagen + Vitamin C &amp; Biotin) 180 таблеток",
-    "brand": "Neocell",
-    "barcode": "016185132603",
-    "qty": 2,
-    "price": 673.0,
-    "termin": "2026-10-30 00:00:00"
   },
   {
     "articul": "NEL-13262",
@@ -3191,7 +2957,7 @@
     "brand": "Nordic Naturals",
     "barcode": "768990018176",
     "qty": 20,
-    "price": 388.0,
+    "price": 389.0,
     "termin": "2028-01-30 00:00:00"
   },
   {
@@ -3199,7 +2965,7 @@
     "name": "Ultimate Omega2X з вітаміном D3, смак лимону, Nordic Naturals, 60 м'яких капсул",
     "brand": "Nordic Naturals",
     "barcode": "768990021558",
-    "qty": 6,
+    "qty": 4,
     "price": 1988.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -3222,15 +2988,6 @@
     "termin": "2029-07-30 00:00:00"
   },
   {
-    "articul": "NOW-00013",
-    "name": "Амінокислоти для спорту Now Foods (Amino Complete ™) 360 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739000132",
-    "qty": 3,
-    "price": 1197.0,
-    "termin": "2029-08-30 00:00:00"
-  },
-  {
     "articul": "NOW-00035",
     "name": "Аргінін Now Foods (L-Arginine) 1000 мг 120 таблеток",
     "brand": "Now Foods",
@@ -3244,18 +3001,9 @@
     "name": "Аргінін і Орнітин Now Foods (Arginine &amp; Ornithine Sports) 100 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739000408",
-    "qty": 2,
+    "qty": 1,
     "price": 528.0,
     "termin": "2028-09-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00062",
-    "name": "Карнітин Now Foods (L-Carnitine) 250 мг 60 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739000620",
-    "qty": 6,
-    "price": 369.0,
-    "termin": "2028-07-30 00:00:00"
   },
   {
     "articul": "NOW-00068",
@@ -3263,7 +3011,7 @@
     "brand": "Now Foods",
     "barcode": "733739000682",
     "qty": 10,
-    "price": 1269.0,
+    "price": 1270.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -3271,9 +3019,18 @@
     "name": "Карнітин Now Foods (L-Carnitine) 500 мг 60 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739000729",
-    "qty": 10,
-    "price": 664.0,
+    "qty": 7,
+    "price": 663.0,
     "termin": "2027-11-30 00:00:00"
+  },
+  {
+    "articul": "NOW-00075",
+    "name": "Ацетил-Л-карнітин Now Foods (Acetyl-L-Carnitine) 500 мг 50 капсул",
+    "brand": "Now Foods",
+    "barcode": "733739000750",
+    "qty": 7,
+    "price": 409.0,
+    "termin": "2028-06-30 00:00:00"
   },
   {
     "articul": "NOW-00076",
@@ -3289,7 +3046,7 @@
     "name": "Цистеїн Now Foods (L-Cysteine) 500 мг 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739000774",
-    "qty": 3,
+    "qty": 5,
     "price": 599.0,
     "termin": "2030-07-30 00:00:00"
   },
@@ -3307,8 +3064,8 @@
     "name": "Цитрулін Now Foods (L-Citrulline) 750 мг 90 веганських капсул",
     "brand": "Now Foods",
     "barcode": "733739000835",
-    "qty": 6,
-    "price": 688.0,
+    "qty": 10,
+    "price": 689.0,
     "termin": "2029-05-30 00:00:00"
   },
   {
@@ -3316,7 +3073,7 @@
     "name": "ГАМК гамма-аміномасляна кислота Now Foods (GABA) 500 мг 100 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739000873",
-    "qty": 9,
+    "qty": 10,
     "price": 359.0,
     "termin": "2030-12-30 00:00:00"
   },
@@ -3325,36 +3082,9 @@
     "name": "ГАМК гамма-аміномасляна кислота Now Foods (GABA) 500 мг 200 капсул",
     "brand": "Now Foods",
     "barcode": "733739000880",
-    "qty": 4,
-    "price": 629.0,
-    "termin": "2029-03-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00089",
-    "name": "ГАМК гамма-аміномасляна кислота Now Foods (GABA) 750 мг 100 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739000897",
-    "qty": 9,
-    "price": 448.0,
-    "termin": "2031-01-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00092",
-    "name": "Глютамін Now Foods (L-Glutamine) 500 мг 120 рослинних капсул",
-    "brand": "Now Foods",
-    "barcode": "733739000927",
     "qty": 3,
-    "price": 384.0,
-    "termin": "2030-06-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00094",
-    "name": "Глютамін Now Foods (L-Glutamine) 1000 мг 120 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739000941",
-    "qty": 1,
-    "price": 617.0,
-    "termin": "2030-06-30 00:00:00"
+    "price": 634.0,
+    "termin": "2029-03-30 00:00:00"
   },
   {
     "articul": "NOW-00097",
@@ -3388,7 +3118,7 @@
     "name": "Гідрокситриптофан Now Foods (5-HTP Hydroxytryptophan) 100 мг 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739001054",
-    "qty": 9,
+    "qty": 7,
     "price": 375.0,
     "termin": "2030-08-30 00:00:00"
   },
@@ -3397,18 +3127,9 @@
     "name": "Гідрокситриптофан Now Foods (5-HTP) 100 мг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739001061",
-    "qty": 6,
-    "price": 684.0,
+    "qty": 5,
+    "price": 687.0,
     "termin": "2030-03-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00110",
-    "name": "Лізин Now Foods (L-Lysine) 500 мг 100 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739001108",
-    "qty": 1,
-    "price": 288.0,
-    "termin": "2029-09-30 00:00:00"
   },
   {
     "articul": "NOW-00111",
@@ -3424,7 +3145,7 @@
     "name": "Лізин Now Foods (L-Lysine) 1000 мг 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739001139",
-    "qty": 30,
+    "qty": 20,
     "price": 376.0,
     "termin": "2029-09-30 00:00:00"
   },
@@ -3433,7 +3154,7 @@
     "name": "Лізин Now Foods (L-Lysine) 1000 мг 250 таблеток",
     "brand": "Now Foods",
     "barcode": "733739001238",
-    "qty": 2,
+    "qty": 3,
     "price": 802.0,
     "termin": "2030-07-30 00:00:00"
   },
@@ -3442,8 +3163,8 @@
     "name": "Фенілаланін Now Foods (L-Phenylalanine) 500 мг 120 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739001320",
-    "qty": 3,
-    "price": 429.0,
+    "qty": 1,
+    "price": 427.0,
     "termin": "2027-02-20 00:00:00"
   },
   {
@@ -3451,7 +3172,7 @@
     "name": "Пролін Now Foods (L-Proline) 500 мг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739001337",
-    "qty": 4,
+    "qty": 5,
     "price": 484.0,
     "termin": "2028-03-30 00:00:00"
   },
@@ -3460,8 +3181,8 @@
     "name": "Таурін Now Foods (Taurine) 500 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739001405",
-    "qty": 6,
-    "price": 292.0,
+    "qty": 4,
+    "price": 295.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -3469,26 +3190,26 @@
     "name": "Теанін Now Foods (L-Theanine) 100 мг 90 веганських капсул",
     "brand": "Now Foods",
     "barcode": "733739001450",
-    "qty": 4,
+    "qty": 3,
     "price": 503.0,
-    "termin": "2029-11-30 00:00:00"
+    "termin": "2029-07-30 00:00:00"
   },
   {
     "articul": "NOW-00148",
     "name": "Теанін Now Foods (L-Theanine) 200 мг 120 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739001481",
-    "qty": 9,
-    "price": 1033.0,
-    "termin": "2029-08-30 00:00:00"
+    "qty": 8,
+    "price": 1031.0,
+    "termin": "2029-11-30 00:00:00"
   },
   {
     "articul": "NOW-00152",
     "name": "Комплекс амінокислот Now Foods (Tri-Amino) 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739001528",
-    "qty": 5,
-    "price": 594.0,
+    "qty": 4,
+    "price": 596.0,
     "termin": "2028-03-30 00:00:00"
   },
   {
@@ -3523,8 +3244,8 @@
     "name": "Тирозин Now Foods (L-Tyrosine) 750 мг 90 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739001658",
-    "qty": 10,
-    "price": 476.0,
+    "qty": 9,
+    "price": 477.0,
     "termin": "2029-06-30 00:00:00"
   },
   {
@@ -3533,7 +3254,7 @@
     "brand": "Now Foods",
     "barcode": "733739001665",
     "qty": 10,
-    "price": 504.0,
+    "price": 503.0,
     "termin": "2027-09-30 00:00:00"
   },
   {
@@ -3541,44 +3262,26 @@
     "name": "Триптофан Now Foods (L-Tryptophan) 500 мг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739001672",
-    "qty": 6,
+    "qty": 8,
     "price": 978.0,
     "termin": "2027-11-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00169",
-    "name": "Триптофан Now Foods (L-Tryptophan) 1000 мг 60 таблеток",
-    "brand": "Now Foods",
-    "barcode": "733739001696",
-    "qty": 2,
-    "price": 886.0,
-    "termin": "2028-04-30 00:00:00"
   },
   {
     "articul": "NOW-00175",
     "name": "Глутатіон Now Foods (Glutathione) 500 мг 30 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739001757",
-    "qty": 9,
-    "price": 544.0,
+    "qty": 8,
+    "price": 543.0,
     "termin": "2029-06-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00215",
-    "name": "ГАМК гамма-аміномасляна кислота чистий порошок Now Foods (GABA) 170 г",
-    "brand": "Now Foods",
-    "barcode": "733739002150",
-    "qty": 3,
-    "price": 490.0,
-    "termin": "2029-04-30 00:00:00"
   },
   {
     "articul": "NOW-00330",
     "name": "Вітамін А Now Foods (Vitamin A) 10000 МО 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739003300",
-    "qty": 10,
-    "price": 195.0,
+    "qty": 9,
+    "price": 193.0,
     "termin": "2028-03-30 00:00:00"
   },
   {
@@ -3586,8 +3289,8 @@
     "name": "Вітамін A Now Foods (Vitamin A) 25000 МО 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739003409",
-    "qty": 3,
-    "price": 259.0,
+    "qty": 2,
+    "price": 258.0,
     "termin": "2029-08-30 00:00:00"
   },
   {
@@ -3595,7 +3298,7 @@
     "name": "Вітамін Д3 Now Foods (Chewable Vitamin D-3) 5000 МО 120 жувальних таблеток",
     "brand": "Now Foods",
     "barcode": "733739003584",
-    "qty": 7,
+    "qty": 6,
     "price": 359.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -3606,15 +3309,24 @@
     "barcode": "733739003652",
     "qty": 8,
     "price": 238.0,
-    "termin": "2029-07-30 00:00:00"
+    "termin": "2029-09-30 00:00:00"
+  },
+  {
+    "articul": "NOW-00372",
+    "name": "Вітамін Д3 високоактивний Now Foods (Vitamin D-3 5000 МО 120 желатинових капсул",
+    "brand": "Now Foods",
+    "barcode": "733739003720",
+    "qty": 10,
+    "price": 300.0,
+    "termin": "2029-06-30 00:00:00"
   },
   {
     "articul": "NOW-00373",
     "name": "Вітамін Д3 Now Foods (Vitamin D-3) 5000 МО 240 капсул",
     "brand": "Now Foods",
     "barcode": "733739003737",
-    "qty": 10,
-    "price": 519.0,
+    "qty": 9,
+    "price": 521.0,
     "termin": "2029-06-30 00:00:00"
   },
   {
@@ -3622,8 +3334,8 @@
     "name": "Вітамін Д3 Now Foods (Vitamin D-3) 1000 МО 360 желатинових капсул",
     "brand": "Now Foods",
     "barcode": "733739003751",
-    "qty": 3,
-    "price": 431.0,
+    "qty": 4,
+    "price": 432.0,
     "termin": "2029-08-30 00:00:00"
   },
   {
@@ -3631,27 +3343,9 @@
     "name": "Вітамін Д3 Now Foods (Vitamin D-3) 10000 МО 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739003768",
-    "qty": 3,
+    "qty": 2,
     "price": 379.0,
     "termin": "2028-09-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00377",
-    "name": "Вітамін Д3 Now Foods (Vitamin D-3) 2000 МО 240 м'яких капсул",
-    "brand": "Now Foods",
-    "barcode": "733739003775",
-    "qty": 10,
-    "price": 379.0,
-    "termin": "2029-09-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00379",
-    "name": "Вітамін Д3 та МК-7 Now Foods (Liquid D-3 &amp; MK-7) 30 мл",
-    "brand": "Now Foods",
-    "barcode": "733739003799",
-    "qty": 2,
-    "price": 856.0,
-    "termin": "2028-08-30 00:00:00"
   },
   {
     "articul": "NOW-00385",
@@ -3667,8 +3361,8 @@
     "name": "Вітамін B100 Now Foods (Vitamin B-100) 100 веганських капсул",
     "brand": "Now Foods",
     "barcode": "733739004369",
-    "qty": 7,
-    "price": 685.0,
+    "qty": 6,
+    "price": 682.0,
     "termin": "2027-10-30 00:00:00"
   },
   {
@@ -3685,26 +3379,35 @@
     "name": "Вітамін В12 Now Foods (Vitamin B12) 2000 мкг 100 льодяників",
     "brand": "Now Foods",
     "barcode": "733739004598",
-    "qty": 4,
+    "qty": 3,
     "price": 440.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
-    "articul": "NOW-00466",
-    "name": "Вітамін B12 і фолієва кислота Now Foods (Vitamin B12 Folic Acid) 1000 мкг 100 льодяників",
+    "articul": "NOW-00461",
+    "name": "Вітамін B-6 піридоксин Піридоксаль-5-фосфат Now Foods (P-5-P) 50 мг 90 вегетаріанських капсул",
     "brand": "Now Foods",
-    "barcode": "733739004666",
-    "qty": 3,
-    "price": 240.0,
+    "barcode": "733739004611",
+    "qty": 5,
+    "price": 542.0,
     "termin": "2028-09-30 00:00:00"
+  },
+  {
+    "articul": "NOW-00462",
+    "name": "Вітамін В12 Now Foods (B-12) 5000 мкг 60 льодяників",
+    "brand": "Now Foods",
+    "barcode": "733739004628",
+    "qty": 6,
+    "price": 395.0,
+    "termin": "2027-09-30 00:00:00"
   },
   {
     "articul": "NOW-00469",
     "name": "Біотин Now Foods (Biotin) 1000 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739004697",
-    "qty": 20,
-    "price": 220.0,
+    "qty": 10,
+    "price": 221.0,
     "termin": "2028-07-30 00:00:00"
   },
   {
@@ -3717,39 +3420,12 @@
     "termin": "2029-01-30 00:00:00"
   },
   {
-    "articul": "NOW-00485",
-    "name": "ПАБК пара-амінобензойна кислота Вітамін В10 Now Foods (PABA) 500 мг 100 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739004857",
-    "qty": 4,
-    "price": 365.0,
-    "termin": "2027-07-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00486",
-    "name": "Пантотенова кислота Now Foods (Pantothenic Acid) 500 мг 100 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739004864",
-    "qty": 4,
-    "price": 339.0,
-    "termin": "2029-12-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00491",
-    "name": "Метил Фолат Now Foods (Methyl Folate) 1000 мкг 90 таблеток",
-    "brand": "Now Foods",
-    "barcode": "733739004918",
-    "qty": 4,
-    "price": 545.0,
-    "termin": "2027-09-30 00:00:00"
-  },
-  {
     "articul": "NOW-00494",
     "name": "Бетаїн HCL триметилгліцин Now Foods (TMG) 1000 мг 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739004949",
     "qty": 10,
-    "price": 709.0,
+    "price": 708.0,
     "termin": "2028-06-30 00:00:00"
   },
   {
@@ -3757,26 +3433,17 @@
     "name": "Вітамін В-12 метил Now Foods (Methyl B-12) тисяча мкг 100 льодяників",
     "brand": "Now Foods",
     "barcode": "733739004956",
-    "qty": 30,
-    "price": 310.0,
+    "qty": 10,
+    "price": 305.0,
     "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00527",
-    "name": "Інозитол порошок Now Foods (Inositol Powder) 113 г",
-    "brand": "Now Foods",
-    "barcode": "733739005274",
-    "qty": 1,
-    "price": 513.0,
-    "termin": "2029-08-30 00:00:00"
   },
   {
     "articul": "NOW-00670",
     "name": "Вітамін С з шипшиною Now Foods (С-500 RH) 500 мг 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739006707",
-    "qty": 20,
-    "price": 235.0,
+    "qty": 10,
+    "price": 232.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
@@ -3784,34 +3451,25 @@
     "name": "Вітамін C-500 з шипшиною Now Foods (C-500 With Rose Hips) 250 таблеток",
     "brand": "Now Foods",
     "barcode": "733739006721",
-    "qty": 4,
-    "price": 539.0,
-    "termin": "2027-11-30 00:00:00"
+    "qty": 2,
+    "price": 542.0,
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "NOW-00677",
     "name": "Кальцій Аскорбат Вітамін С Now Foods (C-500 Calcium Ascorbate-C) 500 мг 250 капсул",
     "brand": "Now Foods",
     "barcode": "733739006776",
-    "qty": 1,
+    "qty": 3,
     "price": 698.0,
     "termin": "2028-06-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00680",
-    "name": "Вітамін C з шипшиною Now Foods (Vitamin C With Rose Hips) 1000 мг 100 таблеток",
-    "brand": "Now Foods",
-    "barcode": "733739006806",
-    "qty": 4,
-    "price": 371.0,
-    "termin": "2029-10-30 00:00:00"
   },
   {
     "articul": "NOW-00687",
     "name": "Вітамін С c шипшиною і біофлавоноїдами Now Foods (С -1000 Vitamin C with Rose Hips and Bioflavonoids) 1000 мг 250 таблеток",
     "brand": "Now Foods",
     "barcode": "733739006875",
-    "qty": 2,
+    "qty": 1,
     "price": 750.0,
     "termin": "2028-02-20 00:00:00"
   },
@@ -3820,8 +3478,8 @@
     "name": "Вітамін C з біофлавоноїдами Now Foods (Vitamin C) 1000 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739006905",
-    "qty": 3,
-    "price": 398.0,
+    "qty": 5,
+    "price": 392.0,
     "termin": "2029-10-30 00:00:00"
   },
   {
@@ -3829,8 +3487,8 @@
     "name": "Now Foods, C-1000 з цинком для зміцнення імунітету, вітамін C, 1000 мг та цинк, 15 мг, 90 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739006943",
-    "qty": 7,
-    "price": 419.0,
+    "qty": 6,
+    "price": 427.0,
     "termin": "2029-11-30 00:00:00"
   },
   {
@@ -3847,8 +3505,8 @@
     "name": "Вітамін E Now Foods (Е-200) 100 желатинових капсул",
     "brand": "Now Foods",
     "barcode": "733739008251",
-    "qty": 7,
-    "price": 391.0,
+    "qty": 6,
+    "price": 389.0,
     "termin": "2028-09-30 00:00:00"
   },
   {
@@ -3865,25 +3523,16 @@
     "name": "Вітамін Е зі змішаними токоферолами Now Foods (Vitamin E-400) 268 мг 400 МО 50 гелевих капсул",
     "brand": "Now Foods",
     "barcode": "733739008909",
-    "qty": 2,
+    "qty": 3,
     "price": 344.0,
     "termin": "2029-05-30 00:00:00"
-  },
-  {
-    "articul": "NOW-00991",
-    "name": "Вітамін K2 Now Foods Vitamin K2 100 мкг 250 вегетаріанських капсул",
-    "brand": "Now Foods",
-    "barcode": "733739009913",
-    "qty": 0,
-    "price": 900.0,
-    "termin": ""
   },
   {
     "articul": "NOW-00993",
     "name": "MK-7 Вітамін K-2 Now Foods (MK-7 Vitamin K-2) 100 мкг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739009937",
-    "qty": 9,
+    "qty": 6,
     "price": 891.0,
     "termin": "2027-11-30 00:00:00"
   },
@@ -3901,7 +3550,7 @@
     "name": "Добавка для підтримки кісток Now Foods (Bone Strength) 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739012289",
-    "qty": 4,
+    "qty": 3,
     "price": 499.0,
     "termin": "2030-09-30 00:00:00"
   },
@@ -3910,7 +3559,7 @@
     "name": "Жувальні вітаміни з кальцієм магнієм вітаміном Д для дітей апельсин з кислинкою Now Foods (Kid Cal Tart Orange) 100 жувальних таблеток",
     "brand": "Now Foods",
     "barcode": "733739012333",
-    "qty": 5,
+    "qty": 4,
     "price": 688.0,
     "termin": "2028-04-30 00:00:00"
   },
@@ -3928,18 +3577,9 @@
     "name": "Кальцій і Магній з вітаміном Д3 Now Foods (Calcium &amp; Magnesium) 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739012517",
-    "qty": 10,
+    "qty": 7,
     "price": 450.0,
     "termin": "2028-05-30 00:00:00"
-  },
-  {
-    "articul": "NOW-01252",
-    "name": "Кальцій і магній Now Foods (Calcium and Magnesium) 240 гелевих капсул",
-    "brand": "Now Foods",
-    "barcode": "733739012524",
-    "qty": 3,
-    "price": 804.0,
-    "termin": "2027-08-30 00:00:00"
   },
   {
     "articul": "NOW-01270",
@@ -3947,33 +3587,42 @@
     "brand": "Now Foods",
     "barcode": "733739012708",
     "qty": 10,
-    "price": 332.0,
-    "termin": "2029-04-30 00:00:00"
+    "price": 333.0,
+    "termin": "2030-10-30 00:00:00"
   },
   {
-    "articul": "NOW-01273",
-    "name": "Кораловий кальцій 1000 Now Foods (Coral Calcium) 1000 мг 100 капсул",
+    "articul": "NOW-01290",
+    "name": "Магній цитрат Now Foods (Magnesium Citrate) 200 мг 100 таблеток",
     "brand": "Now Foods",
-    "barcode": "733739012739",
-    "qty": 2,
-    "price": 508.0,
-    "termin": "2030-06-30 00:00:00"
+    "barcode": "733739012906",
+    "qty": 4,
+    "price": 542.0,
+    "termin": "2030-09-30 00:00:00"
   },
   {
-    "articul": "NOW-01283",
-    "name": "Магній аспартат Now Foods (Magnesium) 400 мг 180 капсул",
+    "articul": "NOW-01292",
+    "name": "Магній цитрат Now Foods (Magnesium Citrate) 200 мг 250 таблеток",
     "brand": "Now Foods",
-    "barcode": "733739012838",
-    "qty": 2,
-    "price": 578.0,
-    "termin": "2029-02-20 00:00:00"
+    "barcode": "733739012920",
+    "qty": 1,
+    "price": 1193.0,
+    "termin": "2030-07-30 00:00:00"
+  },
+  {
+    "articul": "NOW-01295",
+    "name": "Магній цитрат Now Foods (Magnesium Citrate Powder) 227 г",
+    "brand": "Now Foods",
+    "barcode": "733739012951",
+    "qty": 1,
+    "price": 552.0,
+    "termin": "2030-07-30 00:00:00"
   },
   {
     "articul": "NOW-01297",
     "name": "Магній цитрат Now Foods (Magnesium Citrate) 134 мг 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739012975",
-    "qty": 2,
+    "qty": 3,
     "price": 552.0,
     "termin": "2029-03-30 00:00:00"
   },
@@ -3983,7 +3632,7 @@
     "brand": "Now Foods",
     "barcode": "733739012982",
     "qty": 10,
-    "price": 873.0,
+    "price": 878.0,
     "termin": "2028-08-30 00:00:00"
   },
   {
@@ -3992,7 +3641,7 @@
     "brand": "Now Foods",
     "barcode": "733739013002",
     "qty": 50,
-    "price": 713.0,
+    "price": 712.0,
     "termin": "2030-09-30 00:00:00"
   },
   {
@@ -4000,7 +3649,7 @@
     "name": "Магній малат Now Foods (Magnesium Malate) 180 капсул",
     "brand": "Now Foods",
     "barcode": "733739013033",
-    "qty": 10,
+    "qty": 8,
     "price": 669.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -4045,8 +3694,8 @@
     "name": "Хром Піколинат Now Foods (Chromium Picolinate) 200 мкг 100 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739014207",
-    "qty": 6,
-    "price": 210.0,
+    "qty": 20,
+    "price": 214.0,
     "termin": "2030-02-28 00:00:00"
   },
   {
@@ -4055,7 +3704,7 @@
     "brand": "Now Foods",
     "barcode": "733739014221",
     "qty": 1,
-    "price": 459.0,
+    "price": 464.0,
     "termin": "2030-02-20 00:00:00"
   },
   {
@@ -4072,9 +3721,18 @@
     "name": "Хром Now Foods (GTF Chromium) 200 мкг 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739014306",
-    "qty": 4,
+    "qty": 3,
     "price": 238.0,
     "termin": "2030-01-30 00:00:00"
+  },
+  {
+    "articul": "NOW-01433",
+    "name": "Гліцинат міді Now Foods (Copper Glycinate) 3 мг 120 таблеток",
+    "brand": "Now Foods",
+    "barcode": "733739014337",
+    "qty": 3,
+    "price": 353.0,
+    "termin": "2027-08-30 00:00:00"
   },
   {
     "articul": "NOW-01435",
@@ -4090,8 +3748,8 @@
     "name": "Залізо комплекс Now Foods (Iron Complex) 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739014405",
-    "qty": 7,
-    "price": 366.0,
+    "qty": 6,
+    "price": 368.0,
     "termin": "2028-10-30 00:00:00"
   },
   {
@@ -4099,7 +3757,7 @@
     "name": "Комплекс заліза Now Foods (Iron Complex) 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739014412",
-    "qty": 8,
+    "qty": 4,
     "price": 385.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -4108,8 +3766,8 @@
     "name": "Залізо Now Foods (Iron) 18 мг 120 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739014436",
-    "qty": 8,
-    "price": 337.0,
+    "qty": 9,
+    "price": 338.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -4117,36 +3775,36 @@
     "name": "Залізо Now Foods (Iron) 36 мг 90 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739014443",
-    "qty": 20,
-    "price": 356.0,
-    "termin": "2029-01-30 00:00:00"
+    "qty": 10,
+    "price": 355.0,
+    "termin": "2029-09-30 00:00:00"
   },
   {
     "articul": "NOW-01446",
     "name": "Цитрат калію Now Foods (Pure Potassium Citrate Powder) 340 г",
     "brand": "Now Foods",
     "barcode": "733739014467",
-    "qty": 6,
-    "price": 513.0,
+    "qty": 5,
+    "price": 512.0,
     "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "NOW-01448",
-    "name": "Калій Цитрат Now Foods (Potassium Citrate) 99 мг 180 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739014481",
-    "qty": 4,
-    "price": 385.0,
-    "termin": "2029-12-30 00:00:00"
   },
   {
     "articul": "NOW-01452",
     "name": "Калій плюс Йод Now Foods (Potassium Plus Iodine) 180 таблеток",
     "brand": "Now Foods",
     "barcode": "733739014528",
-    "qty": 6,
-    "price": 429.0,
+    "qty": 4,
+    "price": 433.0,
     "termin": "2029-04-30 00:00:00"
+  },
+  {
+    "articul": "NOW-01480",
+    "name": "Селен без дріжджів Now Foods (Selenium Yeast Free) 100 мкг 100 таблеток",
+    "brand": "Now Foods",
+    "barcode": "733739014801",
+    "qty": 7,
+    "price": 213.0,
+    "termin": "2029-01-30 00:00:00"
   },
   {
     "articul": "NOW-01482",
@@ -4162,7 +3820,7 @@
     "name": "Селен без дріжджів Now Foods (Selenium) 200 мкг 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739014856",
-    "qty": 20,
+    "qty": 10,
     "price": 252.0,
     "termin": "2030-04-30 00:00:00"
   },
@@ -4180,9 +3838,9 @@
     "name": "Цинк ОптіЦинк Now Foods (OptiZinc) 30 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739015105",
-    "qty": 9,
+    "qty": 8,
     "price": 331.0,
-    "termin": "2030-04-30 00:00:00"
+    "termin": "2030-05-30 00:00:00"
   },
   {
     "articul": "NOW-01522",
@@ -4198,7 +3856,7 @@
     "name": "NOW Foods, піколінат цинку, 50 мг, 30 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739015495",
-    "qty": 3,
+    "qty": 1,
     "price": 153.0,
     "termin": "2030-11-30 00:00:00"
   },
@@ -4207,9 +3865,27 @@
     "name": "Піколинат цинку Now Foods (Zinc Picolinate) 50 мг 60 капсул",
     "brand": "Now Foods",
     "barcode": "733739015501",
-    "qty": 5,
-    "price": 240.0,
+    "qty": 20,
+    "price": 244.0,
     "termin": "2030-05-30 00:00:00"
+  },
+  {
+    "articul": "NOW-01552",
+    "name": "Піколинат цинку Now Foods (Zinc Picolinate) 50 мг 120 рослинних капсул",
+    "brand": "Now Foods",
+    "barcode": "733739015525",
+    "qty": 4,
+    "price": 450.0,
+    "termin": "2030-10-30 00:00:00"
+  },
+  {
+    "articul": "NOW-01554",
+    "name": "Гліцинат цинку Now Foods (Zinc Glycinate) 30 мг 120 гелевих капсул",
+    "brand": "Now Foods",
+    "barcode": "733739015549",
+    "qty": 1,
+    "price": 511.0,
+    "termin": "2030-08-30 00:00:00"
   },
   {
     "articul": "NOW-01607",
@@ -4217,25 +3893,34 @@
     "brand": "Now Foods",
     "barcode": "733739016072",
     "qty": 1,
-    "price": 462.0,
-    "termin": "2028-02-28 00:00:00"
+    "price": 459.0,
+    "termin": "2028-02-20 00:00:00"
   },
   {
     "articul": "NOW-01648",
     "name": "Омега-3 + ЕПК 180 і ДГК 120 Now Foods (Omega-3 180 EPA / 120 DHA) 200 гелевих капсул",
     "brand": "Now Foods",
     "barcode": "733739016485",
-    "qty": 8,
+    "qty": 6,
     "price": 617.0,
     "termin": "2028-11-30 00:00:00"
+  },
+  {
+    "articul": "NOW-01653",
+    "name": "Омега-3 180 ЕПК / 120 ДГК Now Foods (Omega-3 180 EPA / 120 DHA) 500 желатинових капсул",
+    "brand": "Now Foods",
+    "barcode": "733739016539",
+    "qty": 10,
+    "price": 1339.0,
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "NOW-01662",
     "name": "Омега-3 500 ЕПК / 250 ДГК Now Foods (Ultra Omega-3 Cardiovascular Support 550 EPA / 250 DHA) 180 желатинових капсул",
     "brand": "Now Foods",
     "barcode": "733739016621",
-    "qty": 10,
-    "price": 1384.0,
+    "qty": 9,
+    "price": 1368.0,
     "termin": "2029-08-30 00:00:00"
   },
   {
@@ -4244,7 +3929,7 @@
     "brand": "Now Foods",
     "barcode": "733739016638",
     "qty": 3,
-    "price": 862.0,
+    "price": 855.0,
     "termin": "2029-09-30 00:00:00"
   },
   {
@@ -4257,21 +3942,21 @@
     "termin": "2028-01-30 00:00:00"
   },
   {
+    "articul": "NOW-01682",
+    "name": "Омега подвійна сила Now Foods (Super Omega EPA) 120 капсул",
+    "brand": "Now Foods",
+    "barcode": "733739016829",
+    "qty": 10,
+    "price": 685.0,
+    "termin": "2028-04-30 00:00:00"
+  },
+  {
     "articul": "NOW-01685",
     "name": "Омега-3 Now Foods (Omega-3 Mini) 180 м'яких таблеток",
     "brand": "Now Foods",
     "barcode": "733739016850",
-    "qty": 10,
-    "price": 535.0,
-    "termin": "2028-05-30 00:00:00"
-  },
-  {
-    "articul": "NOW-01686",
-    "name": "Риб'ячий жир Омега 3 + вітамін Д3 Now Foods (Tri-3D Omega) 90 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739016867",
-    "qty": 2,
-    "price": 646.0,
+    "qty": 8,
+    "price": 532.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -4282,24 +3967,6 @@
     "qty": 5,
     "price": 599.0,
     "termin": "2027-10-30 00:00:00"
-  },
-  {
-    "articul": "NOW-01720",
-    "name": "Олія огуречника Now Foods (Borage Oil) 1000 мг 60 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739017208",
-    "qty": 4,
-    "price": 517.0,
-    "termin": "2027-05-30 00:00:00"
-  },
-  {
-    "articul": "NOW-01722",
-    "name": "Олія бурачника Now Foods (Borage Oil) 1000 мг 120 м'яких капсул",
-    "brand": "Now Foods",
-    "barcode": "733739017222",
-    "qty": 2,
-    "price": 976.0,
-    "termin": ""
   },
   {
     "articul": "NOW-01723",
@@ -4351,7 +4018,7 @@
     "name": "Олія примули вечірньої Now Foods (Super Primrose) 120 желатинових капсул",
     "brand": "Now Foods",
     "barcode": "733739017574",
-    "qty": 5,
+    "qty": 3,
     "price": 866.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -4369,25 +4036,16 @@
     "name": "Полікосанол Now Foods (Policosanol) 90 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739018243",
-    "qty": 2,
+    "qty": 3,
     "price": 671.0,
     "termin": "2029-09-30 00:00:00"
-  },
-  {
-    "articul": "NOW-01837",
-    "name": "Омега 3-6-9 Now Foods (Omega 3-6-9) 1000 мг 250 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739018373",
-    "qty": 1,
-    "price": 950.0,
-    "termin": "2027-02-20 00:00:00"
   },
   {
     "articul": "NOW-01840",
     "name": "Гарбузова олія Now Foods (Pumpkin Seed Oil) 1000 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739018403",
-    "qty": 2,
+    "qty": 1,
     "price": 498.0,
     "termin": "2028-05-30 00:00:00"
   },
@@ -4396,18 +4054,9 @@
     "name": "Олія зародків пшениці Now Foods (Wheat Germ Oil) 473 мл",
     "brand": "Now Foods",
     "barcode": "733739018809",
-    "qty": 1,
+    "qty": 2,
     "price": 607.0,
     "termin": "2027-07-30 00:00:00"
-  },
-  {
-    "articul": "NOW-01908",
-    "name": "Вітаміни для балансу рідини в організмі Now Foods (Water Out) 100 вегетаріанських капсул",
-    "brand": "Now Foods",
-    "barcode": "733739019080",
-    "qty": 6,
-    "price": 432.0,
-    "termin": "2029-09-30 00:00:00"
   },
   {
     "articul": "NOW-02025",
@@ -4415,7 +4064,7 @@
     "brand": "Now Foods",
     "barcode": "733739020253",
     "qty": 10,
-    "price": 614.0,
+    "price": 615.0,
     "termin": "2029-05-30 00:00:00"
   },
   {
@@ -4423,7 +4072,7 @@
     "name": "Хітозан Now Foods (Chitosan) 500 мг 240 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739020260",
-    "qty": 8,
+    "qty": 7,
     "price": 1081.0,
     "termin": "2029-04-30 00:00:00"
   },
@@ -4432,8 +4081,8 @@
     "name": "Креатин Now Foods (Creatine Monohydrate Sports) 750 мг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739020352",
-    "qty": 5,
-    "price": 495.0,
+    "qty": 3,
+    "price": 488.0,
     "termin": "2028-08-30 00:00:00"
   },
   {
@@ -4478,7 +4127,7 @@
     "brand": "Now Foods",
     "barcode": "733739021717",
     "qty": 1,
-    "price": 604.0,
+    "price": 618.0,
     "termin": "2030-05-30 00:00:00"
   },
   {
@@ -4489,6 +4138,15 @@
     "qty": 4,
     "price": 587.0,
     "termin": "2026-10-30 00:00:00"
+  },
+  {
+    "articul": "NOW-02200",
+    "name": "Цинк Магній Вітамін В6 для спорту Now Foods (ZMA Sports) 90 капсул",
+    "brand": "Now Foods",
+    "barcode": "733739022004",
+    "qty": 2,
+    "price": 780.0,
+    "termin": "2029-07-30 00:00:00"
   },
   {
     "articul": "NOW-02201",
@@ -4504,8 +4162,8 @@
     "name": "Формула підтримки чоловічої сили Now Foods (TestoJack 300) 300 мг 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739022028",
-    "qty": 6,
-    "price": 901.0,
+    "qty": 2,
+    "price": 902.0,
     "termin": "2027-12-30 00:00:00"
   },
   {
@@ -4518,29 +4176,20 @@
     "termin": "2028-03-30 00:00:00"
   },
   {
-    "articul": "NOW-02212",
-    "name": "Лецитин Now Foods (Lecithin) 1200 мг 200 капсул",
+    "articul": "NOW-02313",
+    "name": "Лецитин Now Foods (Sunflower Lecithin) 1200 мг 200 желатинових капсул",
     "brand": "Now Foods",
-    "barcode": "733739022127",
-    "qty": 9,
-    "price": 646.0,
-    "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "NOW-02311",
-    "name": "Лецитин Now Foods (Sunflower Lecithin) 1200 мг 100 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739023117",
-    "qty": 7,
-    "price": 411.0,
-    "termin": "2029-06-30 00:00:00"
+    "barcode": "733739023131",
+    "qty": 2,
+    "price": 834.0,
+    "termin": "2029-02-20 00:00:00"
   },
   {
     "articul": "NOW-02314",
     "name": "Лецитин Now Foods (Sunflower Lecithin Essential Nutrient) 454 г",
     "brand": "Now Foods",
     "barcode": "733739023148",
-    "qty": 8,
+    "qty": 7,
     "price": 850.0,
     "termin": "2029-02-20 00:00:00"
   },
@@ -4549,7 +4198,7 @@
     "name": "Лецитин Now Foods (Sunflower Lecithin) 473 мл",
     "brand": "Now Foods",
     "barcode": "733739023728",
-    "qty": 2,
+    "qty": 4,
     "price": 688.0,
     "termin": "2029-09-30 00:00:00"
   },
@@ -4559,7 +4208,7 @@
     "brand": "Now Foods",
     "barcode": "733739023902",
     "qty": 50,
-    "price": 1609.0,
+    "price": 1608.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -4572,22 +4221,13 @@
     "termin": "2026-09-30 00:00:00"
   },
   {
-    "articul": "NOW-02432",
-    "name": "Вітаміни для печінки Now Foods (Liver Caps) 100 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739024329",
-    "qty": 3,
-    "price": 569.0,
-    "termin": "2027-12-30 00:00:00"
-  },
-  {
     "articul": "NOW-02448",
     "name": "Препарат для печінки Now Foods 90 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739024480",
-    "qty": 4,
+    "qty": 3,
     "price": 624.0,
-    "termin": "2029-04-30 00:00:00"
+    "termin": "2029-10-30 00:00:00"
   },
   {
     "articul": "NOW-02460",
@@ -4613,15 +4253,15 @@
     "brand": "Now Foods",
     "barcode": "733739026323",
     "qty": 10,
-    "price": 661.0,
-    "termin": "2026-09-30 00:00:00"
+    "price": 658.0,
+    "termin": "2028-06-30 00:00:00"
   },
   {
     "articul": "NOW-02675",
     "name": "Ламінарія морська Now Foods (Kelp) 325 г йоду 250 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739026750",
-    "qty": 2,
+    "qty": 4,
     "price": 498.0,
     "termin": "2029-08-30 00:00:00"
   },
@@ -4639,8 +4279,8 @@
     "name": "Спіруліна органічна Now Foods (Spirulina Organic) 500 мг 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739026965",
-    "qty": 10,
-    "price": 236.0,
+    "qty": 20,
+    "price": 250.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
@@ -4676,7 +4316,7 @@
     "brand": "Now Foods",
     "barcode": "733739027153",
     "qty": 50,
-    "price": 502.0,
+    "price": 490.0,
     "termin": "2029-07-30 00:00:00"
   },
   {
@@ -4684,7 +4324,7 @@
     "name": "Cертифікована органічна спіруліна Now Foods (Сertified Organic Spirulina) 1000 мг 240 таблеток",
     "brand": "Now Foods",
     "barcode": "733739027177",
-    "qty": 9,
+    "qty": 5,
     "price": 911.0,
     "termin": "2029-11-30 00:00:00"
   },
@@ -4707,39 +4347,39 @@
     "termin": "2028-10-30 00:00:00"
   },
   {
-    "articul": "NOW-02926",
-    "name": "Пробіотики Now Foods (Probiotic-10) 25 млрд 50 капсул",
+    "articul": "NOW-02921",
+    "name": "Вітаміни для здоров'я носа вух і горла Now Foods (OralBiotic) 60 таблеток для розсмоктування",
     "brand": "Now Foods",
-    "barcode": "733739029263",
+    "barcode": "733739029218",
     "qty": 5,
-    "price": 669.0,
-    "termin": "2027-07-30 00:00:00"
+    "price": 665.0,
+    "termin": "2027-05-30 00:00:00"
   },
   {
     "articul": "NOW-02930",
     "name": "Пробіотики Now Foods (8 Billion Acidophilus &amp; Bifidus) 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739029300",
-    "qty": 5,
+    "qty": 4,
     "price": 436.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
-    "articul": "NOW-02934",
-    "name": "Сахароміцети Буларді Now Foods (Saccharomyces Boulardii) 60 рослинних капсул",
+    "articul": "NOW-02933",
+    "name": "Пробіотики Now Foods (Probiotic-10) 25 млрд КОЕ 100 капсул",
     "brand": "Now Foods",
-    "barcode": "733739029348",
-    "qty": 2,
-    "price": 591.0,
-    "termin": "2027-06-30 00:00:00"
+    "barcode": "733739029331",
+    "qty": 3,
+    "price": 1334.0,
+    "termin": "2027-07-30 00:00:00"
   },
   {
     "articul": "NOW-02938",
     "name": "Бетаїн HCL Now Foods (Betaine HCL) 648 мг 120 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739029386",
-    "qty": 10,
-    "price": 612.0,
+    "qty": 20,
+    "price": 614.0,
     "termin": "2028-07-30 00:00:00"
   },
   {
@@ -4747,25 +4387,25 @@
     "name": "Бромелайн Now Foods (Bromelain) 500 мг 60 капсул",
     "brand": "Now Foods",
     "barcode": "733739029430",
-    "qty": 3,
+    "qty": 2,
     "price": 597.0,
     "termin": "2029-06-30 00:00:00"
   },
   {
-    "articul": "NOW-02944",
-    "name": "Інулін Now Foods (Inulin Prebiotic Fos Powder) 227 г",
+    "articul": "NOW-02959",
+    "name": "Добавка для перетравлення глютену Now Foods (Gluten Digest) 60 рослинних капсул",
     "brand": "Now Foods",
-    "barcode": "733739029447",
-    "qty": 2,
-    "price": 416.0,
-    "termin": "2028-06-30 00:00:00"
+    "barcode": "733739029591",
+    "qty": 3,
+    "price": 628.0,
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "NOW-02960",
     "name": "Ензими Now Foods (Super Enzymes) 90 таблеток",
     "brand": "Now Foods",
     "barcode": "733739029607",
-    "qty": 8,
+    "qty": 4,
     "price": 668.0,
     "termin": "2029-03-30 00:00:00"
   },
@@ -4774,7 +4414,7 @@
     "name": "Супер Ензими Now Foods (Super Enzymes) 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739029638",
-    "qty": 9,
+    "qty": 1,
     "price": 668.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -4783,7 +4423,7 @@
     "name": "Суперферменти Now Foods (Super Enzymes Formulated with Bromelain) 180 капсул",
     "brand": "Now Foods",
     "barcode": "733739029645",
-    "qty": 5,
+    "qty": 4,
     "price": 1182.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -4793,7 +4433,7 @@
     "brand": "Now Foods",
     "barcode": "733739029669",
     "qty": 10,
-    "price": 538.0,
+    "price": 539.0,
     "termin": "2029-03-30 00:00:00"
   },
   {
@@ -4801,7 +4441,7 @@
     "name": "Травні ферменти папайї Now Foods (Papaya Enzymes) 180 льодяників",
     "brand": "Now Foods",
     "barcode": "733739029706",
-    "qty": 7,
+    "qty": 5,
     "price": 406.0,
     "termin": "2026-10-30 00:00:00"
   },
@@ -4819,7 +4459,7 @@
     "name": "Серрапептаза Now Foods (Serrapeptase) 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739029737",
-    "qty": 6,
+    "qty": 4,
     "price": 624.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -4846,7 +4486,7 @@
     "name": "Альфа-ліпоєва кислота Now Foods (Alpha Lipoic Acid) 100 мг 60 капcул",
     "brand": "Now Foods",
     "barcode": "733739030405",
-    "qty": 9,
+    "qty": 8,
     "price": 326.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -4855,7 +4495,7 @@
     "name": "Альфа-ліпоєва кислота Now Foods (Alpha Lipoic Acid) 250 мг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739030436",
-    "qty": 9,
+    "qty": 8,
     "price": 804.0,
     "termin": "2029-08-30 00:00:00"
   },
@@ -4864,8 +4504,8 @@
     "name": "Альфа-ліпоєва кислота Now Foods (Alpha Lipoic Acid) 600 мг 60 капсул",
     "brand": "Now Foods",
     "barcode": "733739030467",
-    "qty": 10,
-    "price": 737.0,
+    "qty": 9,
+    "price": 733.0,
     "termin": "2029-08-30 00:00:00"
   },
   {
@@ -4891,7 +4531,7 @@
     "name": "Індол-3-карбінол Now Foods (Indole-3-Carbinol) 200 мг 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739030566",
-    "qty": 3,
+    "qty": 6,
     "price": 720.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -4919,7 +4559,7 @@
     "brand": "Now Foods",
     "barcode": "733739030702",
     "qty": 10,
-    "price": 1053.0,
+    "price": 1049.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -4932,20 +4572,11 @@
     "termin": "2029-03-30 00:00:00"
   },
   {
-    "articul": "NOW-03086",
-    "name": "Колагенові пептиди Now Foods (Collagen Peptides Powder) 227 г",
-    "brand": "Now Foods",
-    "barcode": "733739030863",
-    "qty": 4,
-    "price": 616.0,
-    "termin": "2029-08-30 00:00:00"
-  },
-  {
     "articul": "NOW-03092",
     "name": "Дофамін і Мукуна для здоров'я мозку Допа Мукуна Now Foods (DOPA Mucuna) 90 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739030924",
-    "qty": 6,
+    "qty": 4,
     "price": 456.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -4954,8 +4585,8 @@
     "name": "Добавка для підтримки мозку Допа Мукуна Now Foods (Dopa Mucuna) 180 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739030931",
-    "qty": 6,
-    "price": 845.0,
+    "qty": 1,
+    "price": 822.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
@@ -4977,31 +4608,22 @@
     "termin": "2029-07-30 00:00:00"
   },
   {
-    "articul": "NOW-03103",
-    "name": "НАДН Now Foods (NADH) 10 мг 60 рослинних капсул",
-    "brand": "Now Foods",
-    "barcode": "733739031037",
-    "qty": 1,
-    "price": 1469.0,
-    "termin": "2027-01-30 00:00:00"
-  },
-  {
     "articul": "NOW-03134",
     "name": "Колаген другого типу для суглобів Now Foods (UC-II) 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739031341",
-    "qty": 8,
-    "price": 915.0,
-    "termin": "2028-05-30 00:00:00"
+    "qty": 6,
+    "price": 912.0,
+    "termin": "2028-12-30 00:00:00"
   },
   {
     "articul": "NOW-03156",
     "name": "Гіалуронова кислота Now Foods (Hyaluronic Acid) 50 мг 60 капсул",
     "brand": "Now Foods",
     "barcode": "733739031563",
-    "qty": 6,
-    "price": 450.0,
-    "termin": "2028-07-30 00:00:00"
+    "qty": 5,
+    "price": 445.0,
+    "termin": "2029-10-30 00:00:00"
   },
   {
     "articul": "NOW-03159",
@@ -5026,8 +4648,8 @@
     "name": "Глюкозамін Хондроїтин МСМ Now Foods (Glucosamine &amp; Chondroitin with MSM) 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739031709",
-    "qty": 8,
-    "price": 634.0,
+    "qty": 2,
+    "price": 627.0,
     "termin": "2029-10-30 00:00:00"
   },
   {
@@ -5049,29 +4671,11 @@
     "termin": "2026-10-30 00:00:00"
   },
   {
-    "articul": "NOW-03176",
-    "name": "Коензим Q10 Now Foods (CoQ10) 200 мг 60 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739031761",
-    "qty": 4,
-    "price": 853.0,
-    "termin": "2030-10-30 00:00:00"
-  },
-  {
-    "articul": "NOW-03192",
-    "name": "Коензим Q10 з селеном і вітаміном Е Now Foods (CoQ10) 50 мг 50 гелевих капсул",
-    "brand": "Now Foods",
-    "barcode": "733739031921",
-    "qty": 1,
-    "price": 411.0,
-    "termin": "2029-12-30 00:00:00"
-  },
-  {
     "articul": "NOW-03199",
     "name": "Коензим Q10 Now Foods (CoQ10) 400 мг 30 гелевих капсул",
     "brand": "Now Foods",
     "barcode": "733739031990",
-    "qty": 6,
+    "qty": 5,
     "price": 1004.0,
     "termin": "2030-07-30 00:00:00"
   },
@@ -5080,16 +4684,25 @@
     "name": "Коензим Q10 Now Foods (Coenzyme Q10) 100 мг 30 капсул",
     "brand": "Now Foods",
     "barcode": "733739032102",
-    "qty": 10,
+    "qty": 9,
     "price": 334.0,
     "termin": "2029-07-31 00:00:00"
+  },
+  {
+    "articul": "NOW-03213",
+    "name": "Коензим Q10 Now Foods (CoQ10) 100 мг 180 капсул",
+    "brand": "Now Foods",
+    "barcode": "733739032133",
+    "qty": 1,
+    "price": 1782.0,
+    "termin": ""
   },
   {
     "articul": "NOW-03242",
     "name": "Глюкозамін та хондроїтин екстра сила Now Foods (Glucosamine &amp; Chondroitin) 60 таблеток",
     "brand": "Now Foods",
     "barcode": "733739032423",
-    "qty": 3,
+    "qty": 2,
     "price": 767.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -5098,8 +4711,8 @@
     "name": "Астаксантин Now Foods (Astaxanthin) 4 мг 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739032515",
-    "qty": 4,
-    "price": 526.0,
+    "qty": 1,
+    "price": 511.0,
     "termin": "2028-04-30 00:00:00"
   },
   {
@@ -5107,7 +4720,7 @@
     "name": "Мелатонін Now Foods (Melatonin) 3 мг 180 капсул",
     "brand": "Now Foods",
     "barcode": "733739032577",
-    "qty": 3,
+    "qty": 2,
     "price": 348.0,
     "termin": "2028-12-30 00:00:00"
   },
@@ -5116,7 +4729,7 @@
     "name": "Вітаміни для очей Now Foods (Ocu Support) 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739033017",
-    "qty": 4,
+    "qty": 1,
     "price": 955.0,
     "termin": "2029-12-30 00:00:00"
   },
@@ -5125,7 +4738,7 @@
     "name": "Вітаміни для мозку Now Foods (Brain Elevate) 60 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739033031",
-    "qty": 2,
+    "qty": 3,
     "price": 576.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -5143,7 +4756,7 @@
     "name": "Жироспалювач Now Foods (Diet Support) 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739033079",
-    "qty": 2,
+    "qty": 1,
     "price": 893.0,
     "termin": "2026-10-30 00:00:00"
   },
@@ -5153,7 +4766,7 @@
     "brand": "Now Foods",
     "barcode": "733739033086",
     "qty": 10,
-    "price": 579.0,
+    "price": 578.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -5193,6 +4806,15 @@
     "termin": "2027-04-30 00:00:00"
   },
   {
+    "articul": "NOW-03342",
+    "name": "Релора Now Foods (Relora) 300 мг 60 рослинних капсул",
+    "brand": "Now Foods",
+    "barcode": "733739033420",
+    "qty": 2,
+    "price": 590.0,
+    "termin": "2027-12-30 00:00:00"
+  },
+  {
     "articul": "NOW-03347",
     "name": "Каприлова кислота Now Foods (Caprylic Acid) 100 м'яких капсул",
     "brand": "Now Foods",
@@ -5206,7 +4828,7 @@
     "name": "Вітаміни для щитовидної залози енергія Now Foods (Thyroid Energy) 90 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739033680",
-    "qty": 4,
+    "qty": 3,
     "price": 536.0,
     "termin": "2027-02-20 00:00:00"
   },
@@ -5215,7 +4837,7 @@
     "name": "Вітаміни для щитовидної залози Now Foods (Thyroid Energy) 180 капсул",
     "brand": "Now Foods",
     "barcode": "733739033697",
-    "qty": 20,
+    "qty": 10,
     "price": 1030.0,
     "termin": "2027-02-28 00:00:00"
   },
@@ -5233,7 +4855,7 @@
     "name": "Травні ферменти Now Foods (Gastro Comfort with PepZin GI) 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739035202",
-    "qty": 6,
+    "qty": 2,
     "price": 801.0,
     "termin": "2028-03-30 00:00:00"
   },
@@ -5242,35 +4864,26 @@
     "name": "Мелатонін Now Foods (Melatonin) 5 мг 180 капсул",
     "brand": "Now Foods",
     "barcode": "733739035561",
-    "qty": 4,
+    "qty": 2,
     "price": 494.0,
     "termin": "2029-07-30 00:00:00"
-  },
-  {
-    "articul": "NOW-03557",
-    "name": "Мелатонін Now Foods (Melatonin Extra Strength) 10 мг 100 вегетаріанських капсул",
-    "brand": "Now Foods",
-    "barcode": "733739035578",
-    "qty": 6,
-    "price": 422.0,
-    "termin": "2028-08-30 00:00:00"
   },
   {
     "articul": "NOW-03770",
     "name": "Мультивітаміни Now Foods (Daily Vits) 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739037701",
-    "qty": 4,
-    "price": 530.0,
-    "termin": "2028-07-30 00:00:00"
+    "qty": 3,
+    "price": 532.0,
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "NOW-03775",
     "name": "Мультивітаміни і мінерали Now Foods (Daily Vits) 30 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739037756",
-    "qty": 4,
-    "price": 239.0,
+    "qty": 1,
+    "price": 240.0,
     "termin": "2026-07-30 00:00:00"
   },
   {
@@ -5278,9 +4891,9 @@
     "name": "Мультивітаміни і мінерали Now Foods (Daily Vits) 120 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739037763",
-    "qty": 7,
-    "price": 565.0,
-    "termin": "2027-10-30 00:00:00"
+    "qty": 8,
+    "price": 630.0,
+    "termin": "2027-04-30 00:00:00"
   },
   {
     "articul": "NOW-03798",
@@ -5297,7 +4910,7 @@
     "brand": "Now Foods",
     "barcode": "733739038029",
     "qty": 20,
-    "price": 776.0,
+    "price": 771.0,
     "termin": "2027-09-30 00:00:00"
   },
   {
@@ -5305,18 +4918,9 @@
     "name": "Мультивітаміни для чоловіків комплекс Now Foods (ADAM) 90 м'яких капсул",
     "brand": "Now Foods",
     "barcode": "733739038807",
-    "qty": 10,
-    "price": 1009.0,
+    "qty": 4,
+    "price": 1013.0,
     "termin": "2027-10-30 00:00:00"
-  },
-  {
-    "articul": "NOW-03882",
-    "name": "Вітаміни для дітей зі смаком ягід Now Foods (Kid Vits) 120 жувальних таблеток",
-    "brand": "Now Foods",
-    "barcode": "733739038821",
-    "qty": 3,
-    "price": 493.0,
-    "termin": "2027-04-30 00:00:00"
   },
   {
     "articul": "NOW-03910",
@@ -5328,20 +4932,11 @@
     "termin": "2027-10-30 00:00:00"
   },
   {
-    "articul": "NOW-04012",
-    "name": "Женьшень Now Foods (Panax Ginseng) 500 мг 100 вегетаріанських капсул",
-    "brand": "Now Foods",
-    "barcode": "733739040121",
-    "qty": 1,
-    "price": 465.0,
-    "termin": "2027-08-30 00:00:00"
-  },
-  {
     "articul": "NOW-04233",
     "name": "Чай з кори мурашиного дерева без кофеїну Now Foods (Real Tea Pau D'Arco) 24 пакетики 48 г",
     "brand": "Now Foods",
     "barcode": "733739042330",
-    "qty": 5,
+    "qty": 6,
     "price": 282.0,
     "termin": "2026-10-30 00:00:00"
   },
@@ -5359,7 +4954,7 @@
     "name": "Ашваганда Now Foods (Ashwagandha) 450 мг 180 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739045935",
-    "qty": 10,
+    "qty": 9,
     "price": 720.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -5368,8 +4963,8 @@
     "name": "Ашваганда екстракт кореня Now Foods (Ashwagandha) 450 мг 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739046031",
-    "qty": 50,
-    "price": 430.0,
+    "qty": 30,
+    "price": 431.0,
     "termin": "2028-01-30 00:00:00"
   },
   {
@@ -5377,7 +4972,7 @@
     "name": "Астрагал Now Foods (Astragalus) 500 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739046055",
-    "qty": 9,
+    "qty": 6,
     "price": 303.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -5387,7 +4982,7 @@
     "brand": "Now Foods",
     "barcode": "733739046062",
     "qty": 10,
-    "price": 365.0,
+    "price": 363.0,
     "termin": "2029-02-28 00:00:00"
   },
   {
@@ -5405,7 +5000,7 @@
     "brand": "Now Foods",
     "barcode": "733739046086",
     "qty": 10,
-    "price": 319.0,
+    "price": 320.0,
     "termin": "2027-10-30 00:00:00"
   },
   {
@@ -5413,7 +5008,7 @@
     "name": "Котячий кіготь Now Foods (Cat`s Claw) 500 мг 100 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739046185",
-    "qty": 8,
+    "qty": 9,
     "price": 320.0,
     "termin": "2028-04-30 00:00:00"
   },
@@ -5422,8 +5017,8 @@
     "name": "Крушина Now Foods (Cascara Sagrada) 450 мг 100 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739046208",
-    "qty": 10,
-    "price": 264.0,
+    "qty": 8,
+    "price": 265.0,
     "termin": "2029-05-30 00:00:00"
   },
   {
@@ -5440,9 +5035,9 @@
     "name": "Корінь кульбаби Now Foods (Dandelion Root) 500 мг 100 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739046451",
-    "qty": 6,
-    "price": 286.0,
-    "termin": "2029-01-30 00:00:00"
+    "qty": 2,
+    "price": 288.0,
+    "termin": "2029-05-30 00:00:00"
   },
   {
     "articul": "NOW-04677",
@@ -5467,8 +5062,8 @@
     "name": "Гінкго білоба Now Foods (Ginkgo Biloba) 120 мг 50 капсул",
     "brand": "Now Foods",
     "barcode": "733739046826",
-    "qty": 8,
-    "price": 289.0,
+    "qty": 4,
+    "price": 288.0,
     "termin": "2029-06-30 00:00:00"
   },
   {
@@ -5503,9 +5098,18 @@
     "name": "Кінський каштан Now Foods (Horse Chestnut) 300 мг 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739047137",
-    "qty": 2,
-    "price": 536.0,
+    "qty": 3,
+    "price": 533.0,
     "termin": "2027-04-30 00:00:00"
+  },
+  {
+    "articul": "NOW-04718",
+    "name": "Корінь солодки Now Foods (Liсorice Root) 450 мг 100 капсул",
+    "brand": "Now Foods",
+    "barcode": "733739047182",
+    "qty": 10,
+    "price": 324.0,
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "NOW-04721",
@@ -5521,7 +5125,7 @@
     "name": "Екстракт листя оливи Now Foods (Olive Leaf Extract) 500 мг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739047229",
-    "qty": 5,
+    "qty": 3,
     "price": 541.0,
     "termin": "2029-05-30 00:00:00"
   },
@@ -5542,15 +5146,6 @@
     "qty": 4,
     "price": 350.0,
     "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "NOW-04726",
-    "name": "Кора мурашиного дерева По д'Арко Now Foods (Pau D 'Arco) 500 мг 250 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739047267",
-    "qty": 2,
-    "price": 603.0,
-    "termin": "2029-04-30 00:00:00"
   },
   {
     "articul": "NOW-04727",
@@ -5575,8 +5170,8 @@
     "name": "Розторопша Now Foods (Silymarin) 300 мг 50 капсул",
     "brand": "Now Foods",
     "barcode": "733739047380",
-    "qty": 10,
-    "price": 307.0,
+    "qty": 5,
+    "price": 304.0,
     "termin": "2027-08-30 00:00:00"
   },
   {
@@ -5584,8 +5179,8 @@
     "name": "Силімарин екстракт розторопші плямистої Now Foods (Silymarin Milk Thistle) 300 мг 100 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739047397",
-    "qty": 8,
-    "price": 578.0,
+    "qty": 10,
+    "price": 609.0,
     "termin": "2029-08-30 00:00:00"
   },
   {
@@ -5593,8 +5188,8 @@
     "name": "Со Пальметто Now Foods (Saw Palmetto) 550 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739047472",
-    "qty": 10,
-    "price": 365.0,
+    "qty": 7,
+    "price": 362.0,
     "termin": "2028-02-20 00:00:00"
   },
   {
@@ -5602,8 +5197,8 @@
     "name": "Со Пальметто Now Foods (Saw Palmetto Berries) 550 мг 250 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739047489",
-    "qty": 4,
-    "price": 757.0,
+    "qty": 2,
+    "price": 775.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -5612,16 +5207,16 @@
     "brand": "Now Foods",
     "barcode": "733739047502",
     "qty": 3,
-    "price": 317.0,
-    "termin": "2029-03-30 00:00:00"
+    "price": 320.0,
+    "termin": "2029-05-30 00:00:00"
   },
   {
     "articul": "NOW-04753",
     "name": "Силімарин розторопша плямиста Now Foods (Silymarin Milk Thistle Extract) 300 мг 200 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739047533",
-    "qty": 7,
-    "price": 978.0,
+    "qty": 5,
+    "price": 981.0,
     "termin": "2029-06-30 00:00:00"
   },
   {
@@ -5656,8 +5251,8 @@
     "name": "Трифала Now Foods (Triphala) 500 мг 120 таблеток",
     "brand": "Now Foods",
     "barcode": "733739047649",
-    "qty": 3,
-    "price": 468.0,
+    "qty": 1,
+    "price": 466.0,
     "termin": "2027-02-28 00:00:00"
   },
   {
@@ -5665,7 +5260,7 @@
     "name": "Екстракт вітексу священного Now Foods (Chaste Berry Vitex Extract) 300 мг 90 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739047731",
-    "qty": 5,
+    "qty": 4,
     "price": 559.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -5674,7 +5269,7 @@
     "name": "Їжовик гребінчастий, Lion's Mane, Now Foods, 500 мг, 60 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739047892",
-    "qty": 8,
+    "qty": 7,
     "price": 720.0,
     "termin": "2026-10-30 00:00:00"
   },
@@ -5683,7 +5278,7 @@
     "name": "Розторопша максимально сильна дія NOW Foods (Milk Thistle Extract Maximum Strength) 750 мг 90 веганських капсул",
     "brand": "Now Foods",
     "barcode": "733739047953",
-    "qty": 6,
+    "qty": 3,
     "price": 839.0,
     "termin": "2029-10-30 00:00:00"
   },
@@ -5695,15 +5290,6 @@
     "qty": 9,
     "price": 439.0,
     "termin": "2027-05-30 00:00:00"
-  },
-  {
-    "articul": "NOW-04936",
-    "name": "Екстракт босвеллії Now Foods (Boswellia Extract) 500 мг 90 капсул",
-    "brand": "Now Foods",
-    "barcode": "733739049360",
-    "qty": 8,
-    "price": 694.0,
-    "termin": "2027-11-30 00:00:00"
   },
   {
     "articul": "NOW-05102",
@@ -5746,27 +5332,18 @@
     "name": "Яблучна клітковина Now Foods (Pure Apple Fiber) 340 г",
     "brand": "Now Foods",
     "barcode": "733739059086",
-    "qty": 6,
-    "price": 376.0,
+    "qty": 30,
+    "price": 379.0,
     "termin": "2029-09-30 00:00:00"
   },
   {
-    "articul": "NOW-05973",
-    "name": "Лушпиння подорожника Now Foods (Psyllium Husk) 700 мг 180 капсул",
+    "articul": "NOW-05981",
+    "name": "Насіння подорожника Now Foods (Healthy Foods Whole Psyllium Husks) 454 г",
     "brand": "Now Foods",
-    "barcode": "733739059734",
-    "qty": 2,
-    "price": 515.0,
-    "termin": "2029-10-30 00:00:00"
-  },
-  {
-    "articul": "NOW-05980",
-    "name": "Подорожник Now Foods (Whole Psyllium Husks) 340 г",
-    "brand": "Now Foods",
-    "barcode": "733739059802",
-    "qty": 8,
-    "price": 485.0,
-    "termin": "2028-10-30 00:00:00"
+    "barcode": "733739059819",
+    "qty": 30,
+    "price": 579.0,
+    "termin": "2029-06-30 00:00:00"
   },
   {
     "articul": "NOW-06425",
@@ -5787,6 +5364,15 @@
     "termin": "2028-03-30 00:00:00"
   },
   {
+    "articul": "NOW-06512",
+    "name": "Глюкоманнан Now Foods (Glucomannan) 575 мг 180 капсул",
+    "brand": "Now Foods",
+    "barcode": "733739065124",
+    "qty": 2,
+    "price": 666.0,
+    "termin": "2029-07-30 00:00:00"
+  },
+  {
     "articul": "NOW-06919",
     "name": "Стевія підсолоджувач Now Foods (Better Stevia Instant Tabs) 175 таблеток",
     "brand": "Now Foods",
@@ -5796,15 +5382,6 @@
     "termin": "2027-06-30 00:00:00"
   },
   {
-    "articul": "NOW-06948",
-    "name": "Органічний кленовий сироп клас A темний колір Now Foods (Organic Maple Syrup Grade A Dark) 473 мл",
-    "brand": "Now Foods",
-    "barcode": "733739069481",
-    "qty": 1,
-    "price": 553.0,
-    "termin": "2027-11-30 00:00:00"
-  },
-  {
     "articul": "NOW-06957",
     "name": "Стевія Now Foods (Original Better Stevia) 100 пакетиків",
     "brand": "Now Foods",
@@ -5812,15 +5389,6 @@
     "qty": 1,
     "price": 318.0,
     "termin": "2028-06-30 00:00:00"
-  },
-  {
-    "articul": "NOW-07484",
-    "name": "Дифузор &quot;Сонний щеня&quot; Now Foods (Diffuser &quot;Sleepy Puppy&quot;) 1 шт",
-    "brand": "Now Foods",
-    "barcode": "733739074843",
-    "qty": 1,
-    "price": 2369.0,
-    "termin": "2030-01-24 00:00:00"
   },
   {
     "articul": "NOW-07570_P",
@@ -5881,8 +5449,8 @@
     "name": "Гелева зубна паста з гідрокарбонатом натрію без фтористих з'єднань м'ята Now Foods (Xyliwhite ™ Toothpaste Gel Platinum Mint) 181 г",
     "brand": "Now Foods",
     "barcode": "733739080912",
-    "qty": 7,
-    "price": 223.0,
+    "qty": 5,
+    "price": 224.0,
     "termin": "2028-03-30 00:00:00"
   },
   {
@@ -5890,7 +5458,7 @@
     "name": "Зубна паста-гель з корицею Now Foods (Cinnafresh Toothpaste Gel) 181 г",
     "brand": "Now Foods",
     "barcode": "733739080929",
-    "qty": 1,
+    "qty": 2,
     "price": 202.0,
     "termin": "2028-04-30 00:00:00"
   },
@@ -5920,15 +5488,6 @@
     "qty": 3,
     "price": 559.0,
     "termin": "2025-12-30 00:00:00"
-  },
-  {
-    "articul": "NRX-00072",
-    "name": "Жироспалювач Nutrex Research (Lipo 6 Black Hers Ultra Concentrate) 60 капсул",
-    "brand": "Nutrex",
-    "barcode": "853237000721",
-    "qty": 1,
-    "price": 745.0,
-    "termin": "2028-06-30 00:00:00"
   },
   {
     "articul": "NBC-00451",
@@ -5980,7 +5539,7 @@
     "name": "Холін Nutricost (CDP Choline) 300 мг 60 капсул",
     "brand": "Nutricost",
     "barcode": "857077008756",
-    "qty": 9,
+    "qty": 8,
     "price": 806.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -5989,7 +5548,7 @@
     "name": "Магній гліцинат Nutricost (Magnesium Glycinate) 250 г",
     "brand": "Nutricost",
     "barcode": "810139571568",
-    "qty": 10,
+    "qty": 9,
     "price": 821.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -5998,7 +5557,7 @@
     "name": "Бустер оксиду азоту Nutricost (Nitric Oxide Booster) 750 мг 90 капсул",
     "brand": "Nutricost",
     "barcode": "810139572053",
-    "qty": 9,
+    "qty": 7,
     "price": 365.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -6034,7 +5593,7 @@
     "name": "Жовч великої рогатої худоби для травлення Nutricost (Ox Bile) 500 мг 30 капсул",
     "brand": "Nutricost",
     "barcode": "810139574064",
-    "qty": 9,
+    "qty": 6,
     "price": 295.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -6070,7 +5629,7 @@
     "name": "Аргінін і Цитрулін Nutricost (L-Arginine + L-Citrulline) 750 мг 240 капсул",
     "brand": "Nutricost",
     "barcode": "810014671253",
-    "qty": 10,
+    "qty": 8,
     "price": 880.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -6082,15 +5641,6 @@
     "qty": 10,
     "price": 602.0,
     "termin": "2028-10-30 00:00:00"
-  },
-  {
-    "articul": "NCS-67142",
-    "name": "Листя оливи 20% олеуропеїну для крові Nutricost (Olive Leaf, 20% Oleuropein) 750 мг 90 капсул",
-    "brand": "Nutricost",
-    "barcode": "810014671420",
-    "qty": 2,
-    "price": 542.0,
-    "termin": "2028-08-30 00:00:00"
   },
   {
     "articul": "NCS-67170",
@@ -6115,7 +5665,7 @@
     "name": "Інозитол Nutricost (Inositol) 500 мг, 240 капсул",
     "brand": "Nutricost",
     "barcode": "810014671765",
-    "qty": 10,
+    "qty": 9,
     "price": 861.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -6142,8 +5692,8 @@
     "name": "Борна Кислота для жінок Nutricost (Boric Acid) 600 мг 30 капсул",
     "brand": "Nutricost",
     "barcode": "810014673035",
-    "qty": 10,
-    "price": 349.0,
+    "qty": 8,
+    "price": 350.0,
     "termin": "2029-05-30 00:00:00"
   },
   {
@@ -6214,7 +5764,7 @@
     "name": "Цитрулін Малат 2 до 1 Nutricost (L-Citrulline Malate 2/1) 300 г",
     "brand": "Nutricost",
     "barcode": "810014675053",
-    "qty": 8,
+    "qty": 6,
     "price": 1013.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -6241,8 +5791,8 @@
     "name": "Вітамін B2 рибофлавін Nutricost (Riboflavin) 400 мг, 120 капсул",
     "brand": "Nutricost",
     "barcode": "810014675442",
-    "qty": 10,
-    "price": 710.0,
+    "qty": 8,
+    "price": 709.0,
     "termin": "2028-09-30 00:00:00"
   },
   {
@@ -6264,15 +5814,6 @@
     "termin": "2028-11-30 00:00:00"
   },
   {
-    "articul": "NCS-67728",
-    "name": "Йохімбін HCL афродизіак Nutricost (Yohimbine HCL) 5 мг 30 капсул",
-    "brand": "Nutricost",
-    "barcode": "810014677286",
-    "qty": 3,
-    "price": 204.0,
-    "termin": "2028-08-30 00:00:00"
-  },
-  {
     "articul": "NCS-67841",
     "name": "Цитрусовий бергамот для вирівнювання холестерину Nutricost (Citrus Bergamot) 1200 мг 120 капсул",
     "brand": "Nutricost",
@@ -6286,7 +5827,7 @@
     "name": "Вітамін B12 метилкобаламін Nutricost (Methylcobalamin) 1000 мкг 120 капсул",
     "brand": "Nutricost",
     "barcode": "810014678481",
-    "qty": 10,
+    "qty": 9,
     "price": 389.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -6298,15 +5839,6 @@
     "qty": 10,
     "price": 651.0,
     "termin": "2028-09-30 00:00:00"
-  },
-  {
-    "articul": "NCS-67911",
-    "name": "Альфа-ГФХ Nutricost (Alpha GPC) 600 мг 60 капсул",
-    "brand": "Nutricost",
-    "barcode": "810014679112",
-    "qty": 6,
-    "price": 666.0,
-    "termin": "2028-10-30 00:00:00"
   },
   {
     "articul": "NCS-67916",
@@ -6322,7 +5854,7 @@
     "name": "Ашваганда KSM-66 Nutricost (KSM-66) 600 мг 60 капсул",
     "brand": "Nutricost",
     "barcode": "810014679273",
-    "qty": 9,
+    "qty": 8,
     "price": 708.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -6363,22 +5895,13 @@
     "termin": ""
   },
   {
-    "articul": "BIRBGNCRCP",
-    "name": "Органічна крем-піна очищаюча для купання 0+ Officina Naturae 200 мл",
-    "brand": "Officina Naturae",
-    "barcode": "8033148532876",
-    "qty": 2,
-    "price": 455.0,
-    "termin": "2027-07-30 00:00:00"
-  },
-  {
-    "articul": "BIRBGSCC",
-    "name": "Органічний дитячий гель для волосся й тіла 2 в 1 6 міс + Officina Naturae 200 мл",
-    "brand": "Officina Naturae",
-    "barcode": "8033148532883",
-    "qty": 2,
-    "price": 455.0,
-    "termin": "2029-12-12 00:00:00"
+    "articul": "PPLS-3897",
+    "name": "T-100 Hardcore OLIMP 120 caps",
+    "brand": "Olimp",
+    "barcode": "5901330087547",
+    "qty": 1,
+    "price": 1579.0,
+    "termin": ""
   },
   {
     "articul": "PPLS-4560",
@@ -6399,33 +5922,6 @@
     "termin": "2027-05-30 00:00:00"
   },
   {
-    "articul": "OPN-02450",
-    "name": "Вітамінний комплекс для жінок Optimum Nutrition (Opti-Women) 60 капсул",
-    "brand": "Optimum Nutrition",
-    "barcode": "748927024500",
-    "qty": 50,
-    "price": 724.0,
-    "termin": "2026-11-30 00:00:00"
-  },
-  {
-    "articul": "OPN-02452",
-    "name": "Вітамінний комплекс для жінок Optimum Nutrition (Opti-Women) 120 капсул",
-    "brand": "Optimum Nutrition",
-    "barcode": "748927024524",
-    "qty": 40,
-    "price": 1115.0,
-    "termin": "2027-06-30 00:00:00"
-  },
-  {
-    "articul": "OPN-05227",
-    "name": "Комплекс мультивітамінів для чоловіків Optimum Nutrition (Opti-Men) 150 таблеток",
-    "brand": "Optimum Nutrition",
-    "barcode": "748927052275",
-    "qty": 2,
-    "price": 1601.0,
-    "termin": "2027-04-30 00:00:00"
-  },
-  {
     "articul": "OGK-25007",
     "name": "Organika, канадський бджолиний прополіс, 30 мл (1 рідк. унція)",
     "brand": "Organika",
@@ -6435,220 +5931,13 @@
     "termin": "2029-08-30 00:00:00"
   },
   {
-    "articul": "OST-01080",
-    "name": "Комплекс цинку і магнію OstroVit (MgZB ZMA)  90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232610956",
-    "qty": 10,
-    "price": 113.0,
-    "termin": "2028-09-11 00:00:00"
-  },
-  {
-    "articul": "OST-01081",
-    "name": "Магній + вітаміни OstroVit (MAGNEZ MAX + VITAMIN) 60 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232612158",
-    "qty": 10,
-    "price": 119.0,
-    "termin": "2028-01-30 00:00:00"
-  },
-  {
-    "articul": "OST-01082",
-    "name": "Мелатонін OstroVit  (MELATONIN) 180 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232617849",
-    "qty": 2,
-    "price": 156.0,
-    "termin": "2028-07-30 00:00:00"
-  },
-  {
-    "articul": "OST-01092",
-    "name": "Цинк піколинат OstroVit  (ZINC PICOLINATE) 150 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903246224535",
-    "qty": 3,
-    "price": 185.0,
-    "termin": "2028-10-20 00:00:00"
-  },
-  {
-    "articul": "OST-01102",
-    "name": "Вітамін С із шипшиною OstroVit (Pharma Elite Vitamin C From Rose Hips) 30 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903246226461",
-    "qty": 1,
-    "price": 303.0,
-    "termin": "2027-05-19 00:00:00"
-  },
-  {
-    "articul": "OST-01110",
-    "name": "Риб'ячий жир, COD LIVER OIL, OstroVit, 60 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903246222920",
-    "qty": 4,
-    "price": 257.0,
-    "termin": "2026-12-28 00:00:00"
-  },
-  {
-    "articul": "OST-01128",
-    "name": "Бакопа Моньє OstroVit (BACOPA MONNIERI) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903246220841",
-    "qty": 10,
-    "price": 166.0,
-    "termin": "2028-06-04 00:00:00"
-  },
-  {
-    "articul": "OST-01136",
-    "name": "Протисудомний препарат OstroVit  (MAGNEZ MAX SKURCZ) 60 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232612165",
-    "qty": 20,
-    "price": 116.0,
-    "termin": "2028-07-17 00:00:00"
-  },
-  {
-    "articul": "OST-01148",
-    "name": "Вітамін К2 200 OstroVit (VITAMIN K2 200 NATTO MK-7) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903246226782",
-    "qty": 10,
-    "price": 322.0,
-    "termin": "2028-10-23 00:00:00"
-  },
-  {
-    "articul": "OST-01161",
-    "name": "Вітамін В комплекс OstroVit (VITAMIN B COMPLEX) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232610949",
-    "qty": 7,
-    "price": 164.0,
-    "termin": "2028-10-25 00:00:00"
-  },
-  {
-    "articul": "OST-01171",
-    "name": "Біотин плюс OstroVit (BIOTIN PLUS) 100 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903246225075",
-    "qty": 10,
-    "price": 157.0,
-    "termin": "2028-10-28 00:00:00"
-  },
-  {
-    "articul": "OST-01174",
-    "name": "Омега 3-6-9 OstroVit (OMEGA 3-6-9) 180 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903246221916",
-    "qty": 6,
-    "price": 468.0,
-    "termin": ""
-  },
-  {
-    "articul": "OST-01180",
-    "name": "Омега 3 OstroVit (OMEGA 3) 180 капсул",
-    "brand": "OstroVit",
-    "barcode": "5902232613124",
-    "qty": 2,
-    "price": 399.0,
-    "termin": "2027-03-11 00:00:00"
-  },
-  {
-    "articul": "OST-01184",
-    "name": "Вітаміни та мінерали OstroVit (100% VIT&amp;MIN) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232611069",
-    "qty": 20,
-    "price": 183.0,
-    "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "OST-01186",
-    "name": "Вітамін С OstroVit  (VITAMIN C) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232610925",
-    "qty": 0,
-    "price": 147.0,
-    "termin": ""
-  },
-  {
-    "articul": "OST-01314",
-    "name": "Аргінін 3000 OstroVit (ARGININE 3000) 150 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903246226102",
-    "qty": 10,
-    "price": 473.0,
-    "termin": "2027-08-30 00:00:00"
-  },
-  {
-    "articul": "OST-01348",
-    "name": "КЛК (кон'югована лінолева кислота) OstroVit (CLA 1000) 90 капсул",
-    "brand": "OstroVit",
-    "barcode": "5902232613063",
-    "qty": 20,
-    "price": 261.0,
-    "termin": "2028-04-05 00:00:00"
-  },
-  {
     "articul": "OST-01355",
     "name": "Берберин OstroVit (Berberine VEGE) 90 таблеток",
     "brand": "OstroVit",
     "barcode": "5902232619324",
     "qty": 50,
-    "price": 214.0,
+    "price": 213.0,
     "termin": "2028-06-06 00:00:00"
-  },
-  {
-    "articul": "OST-01357",
-    "name": "Гуарана OstroVit (GUARANA Vega) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5902232612042",
-    "qty": 4,
-    "price": 257.0,
-    "termin": "2028-09-30 00:00:00"
-  },
-  {
-    "articul": "OST-01373",
-    "name": "L-карнітин 1250 OstroVit (L-CARNITINE 1250) 60 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903246222401",
-    "qty": 8,
-    "price": 374.0,
-    "termin": "2027-11-30 00:00:00"
-  },
-  {
-    "articul": "OST-22025",
-    "name": "Магній, цинк та вітамін В6 OstroVit (MGZB ULTRA) 120 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903246220254",
-    "qty": 10,
-    "price": 231.0,
-    "termin": "2028-09-08 00:00:00"
-  },
-  {
-    "articul": "OST-22917",
-    "name": "Кофеїн OstroVit (Caffeine) 200 мг 200 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903246229172",
-    "qty": 10,
-    "price": 244.0,
-    "termin": "2028-09-30 00:00:00"
-  },
-  {
-    "articul": "OST-22951",
-    "name": "Цитрат магнію 400 мг + B6 OstroVit (Magnesium Citrate 400 mg +B6) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903246229516",
-    "qty": 50,
-    "price": 169.0,
-    "termin": "2028-06-18 00:00:00"
-  },
-  {
-    "articul": "OST-61860",
-    "name": "Лецитин OstroVit (Lecithin) 1200 мг 70 капсул",
-    "brand": "OstroVit",
-    "barcode": "5902232618600",
-    "qty": 0,
-    "price": 227.0,
-    "termin": ""
   },
   {
     "articul": "OST-90000",
@@ -6660,40 +5949,13 @@
     "termin": ""
   },
   {
-    "articul": "OST-90135",
-    "name": "Ашваганда OstroVit (Ashwagandha) 200 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903933901350",
-    "qty": 20,
-    "price": 254.0,
-    "termin": "2027-11-18 00:00:00"
-  },
-  {
     "articul": "OST-90201",
     "name": "Левова грива OstroVit (Lion's Mane VEGE) 60 капсул",
     "brand": "OstroVit",
     "barcode": "5903933902012",
-    "qty": 40,
-    "price": 293.0,
+    "qty": 1,
+    "price": 251.0,
     "termin": "2027-02-13 00:00:00"
-  },
-  {
-    "articul": "OST-90230",
-    "name": "Селен OstroVit (Selenium) 220 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903933902302",
-    "qty": 3,
-    "price": 170.0,
-    "termin": ""
-  },
-  {
-    "articul": "OSV-00026-2",
-    "name": "OstroVit-Казеїн Micellar Casein OstroVit 700 г Ваніль",
-    "brand": "OstroVit",
-    "barcode": "5902232610475",
-    "qty": 4,
-    "price": 702.0,
-    "termin": ""
   },
   {
     "articul": "OSV-00026-3",
@@ -6705,105 +5967,6 @@
     "termin": ""
   },
   {
-    "articul": "OSV-00070-1",
-    "name": "OstroVit-Креатин OstroVit (Creatine Monohydrate) 300 г Апельсин",
-    "brand": "OstroVit",
-    "barcode": "5902232611793",
-    "qty": 1,
-    "price": 255.0,
-    "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "OSV-00070-8",
-    "name": "OstroVit-Креатин Creatine Monohydrate OstroVit 300 г Кола",
-    "brand": "OstroVit",
-    "barcode": "5902232617580",
-    "qty": 20,
-    "price": 242.0,
-    "termin": "2028-10-21 00:00:00"
-  },
-  {
-    "articul": "OSV-00075-3",
-    "name": "OstroVit-Креатин Creatine Monohydrate OstroVit 500 г Лимон",
-    "brand": "OstroVit",
-    "barcode": "5902232611595",
-    "qty": 20,
-    "price": 348.0,
-    "termin": "2028-08-21 00:00:00"
-  },
-  {
-    "articul": "OSV-00075-6",
-    "name": "Креатин OstroVit  (Creatine Monohydrate) 500 г Апельсин",
-    "brand": "OstroVit",
-    "barcode": "5902232611601",
-    "qty": 10,
-    "price": 415.0,
-    "termin": "2028-10-24 00:00:00"
-  },
-  {
-    "articul": "OSV-00075-8",
-    "name": "OstroVit-Креатин Creatine Monohydrate OstroVit 500 г Яблуко",
-    "brand": "OstroVit",
-    "barcode": "5902232617641",
-    "qty": 10,
-    "price": 404.0,
-    "termin": "2028-10-15 00:00:00"
-  },
-  {
-    "articul": "OSV-00253",
-    "name": "OstroVit-PABA Vege OstroVit 120 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903933903231",
-    "qty": 6,
-    "price": 330.0,
-    "termin": "2027-09-06 00:00:00"
-  },
-  {
-    "articul": "OSV-00298",
-    "name": "OstroVit-Echinacea Extract OstroVit 50 г",
-    "brand": "OstroVit",
-    "barcode": "5903933901244",
-    "qty": 3,
-    "price": 173.0,
-    "termin": "2026-04-26 00:00:00"
-  },
-  {
-    "articul": "OSV-00334",
-    "name": "Арахісова паста 100% Peanut Butter Crunchy OstroVit 500 г",
-    "brand": "OstroVit",
-    "barcode": "5903933906744",
-    "qty": 0,
-    "price": 152.0,
-    "termin": ""
-  },
-  {
-    "articul": "OSV-00347",
-    "name": "OstroVit-Вітаміни Bison Beard OstroVit 60 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903246227529",
-    "qty": 10,
-    "price": 365.0,
-    "termin": "2027-01-22 00:00:00"
-  },
-  {
-    "articul": "OSV-00349",
-    "name": "Вітамін Д3 4000 + К2 OstroVit (Vitamin D3 4000 + K2) 120 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903933906249",
-    "qty": 6,
-    "price": 406.0,
-    "termin": "2027-08-30 00:00:00"
-  },
-  {
-    "articul": "OSV-00357",
-    "name": "Електроліти OstroVit (OstroVit-Electrolyte) 90 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903933908236",
-    "qty": 7,
-    "price": 257.0,
-    "termin": "2028-06-25 00:00:00"
-  },
-  {
     "articul": "OSV-00363-7",
     "name": "OstroVit-Шейкер Shaker Sport OstroVit 700 мл Синій",
     "brand": "OstroVit",
@@ -6813,15 +5976,6 @@
     "termin": ""
   },
   {
-    "articul": "OSV-00370",
-    "name": "OstroVit-Echinacea OstroVit 90 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903933904030",
-    "qty": 5,
-    "price": 243.0,
-    "termin": "2026-10-19 00:00:00"
-  },
-  {
     "articul": "OSV-00469",
     "name": "OstroVit-Barley Grass Powder Vege OstroVit 200 г",
     "brand": "OstroVit",
@@ -6829,24 +5983,6 @@
     "qty": 1,
     "price": 169.0,
     "termin": "2026-10-31 00:00:00"
-  },
-  {
-    "articul": "OSV-00473",
-    "name": "OstroVit-Stabilolactic OstroVit 100 таблеток",
-    "brand": "OstroVit",
-    "barcode": "5903933914664",
-    "qty": 1,
-    "price": 309.0,
-    "termin": ""
-  },
-  {
-    "articul": "PPLS-61761",
-    "name": "Creatine Monohydrate OstroVit 300 g watermelon",
-    "brand": "OstroVit",
-    "barcode": "5902232617610",
-    "qty": 2,
-    "price": 242.0,
-    "termin": "2028-10-17 00:00:00"
   },
   {
     "articul": "sale_OSV-00470",
@@ -6867,58 +6003,22 @@
     "termin": "2027-08-30 00:00:00"
   },
   {
-    "articul": "PST-00320",
-    "name": "Хайлайтер тон 320 зоряний пил Pastel (Profashion StarDust) 1 шт",
-    "brand": "Pastel",
-    "barcode": "8690644003202",
-    "qty": 2,
-    "price": 160.0,
-    "termin": "2028-07-30 00:00:00"
-  },
-  {
     "articul": "PED-00203",
     "name": "Покращення апетиту у дітей сироп Pediakid (Appetite Tone) 125 мл",
     "brand": "Pediakid",
     "barcode": "3700225600203",
-    "qty": 20,
+    "qty": 10,
     "price": 442.0,
     "termin": "2027-11-30 00:00:00"
-  },
-  {
-    "articul": "PED-00210",
-    "name": "Хороший сон сироп для дітей Pediakid (Sleep Sommeil) 125 мл",
-    "brand": "Pediakid",
-    "barcode": "3700225600210",
-    "qty": 2,
-    "price": 442.0,
-    "termin": "2027-04-30 00:00:00"
-  },
-  {
-    "articul": "PED-00241",
-    "name": "Засіб від запорів, Transit Doux, Pediakid, для покращення моторики кишківника, смак яблука, 125 мл",
-    "brand": "Pediakid",
-    "barcode": "3700225600241",
-    "qty": 4,
-    "price": 442.0,
-    "termin": "2027-09-30 00:00:00"
   },
   {
     "articul": "PED-00258",
     "name": "Мультивітаміни для дітей сироп Pediakid (22 Vitamins &amp; Minerals) 125 мл",
     "brand": "Pediakid",
     "barcode": "3700225600258",
-    "qty": 4,
+    "qty": 1,
     "price": 442.0,
     "termin": "2027-12-30 00:00:00"
-  },
-  {
-    "articul": "PED-00289",
-    "name": "Залізо та вітамін В сироп для дітей Pediakid (Fer + Vitamines B) 125 мл",
-    "brand": "Pediakid",
-    "barcode": "3700225600289",
-    "qty": 2,
-    "price": 442.0,
-    "termin": "2028-04-30 00:00:00"
   },
   {
     "articul": "PED-00296",
@@ -6934,9 +6034,18 @@
     "name": "Формула при синуситі сироп для дітей Pediakid (Nose-Throat) 125 мл",
     "brand": "Pediakid",
     "barcode": "3700225602023",
-    "qty": 4,
+    "qty": 3,
     "price": 442.0,
     "termin": "2028-07-30 00:00:00"
+  },
+  {
+    "articul": "PED-02184",
+    "name": "Вітамін Д3 для дітей Pediakid (Vitamin D3) 20 мл",
+    "brand": "Pediakid",
+    "barcode": "3700225602184",
+    "qty": 1,
+    "price": 371.0,
+    "termin": "2027-04-30 00:00:00"
   },
   {
     "articul": "PED-02207",
@@ -6948,15 +6057,6 @@
     "termin": "2028-05-30 00:00:00"
   },
   {
-    "articul": "PED-02283",
-    "name": "Мультивітаміни для дітей Pediakid GOMMES MULTIVITAMINEES 60 ведмедиків",
-    "brand": "Pediakid",
-    "barcode": "3700225602283",
-    "qty": 2,
-    "price": 379.0,
-    "termin": "2028-03-30 00:00:00"
-  },
-  {
     "articul": "PED-02313",
     "name": "Вітамін С для дітей Pediakid GOMMES VITAMINE C 60 ведмедиків",
     "brand": "Pediakid",
@@ -6964,15 +6064,6 @@
     "qty": 6,
     "price": 379.0,
     "termin": "2028-03-30 00:00:00"
-  },
-  {
-    "articul": "PED-02320",
-    "name": "Підтримка імунітету у дітей Pediakid GOMMES IMMUNITE 60 ведмедиків",
-    "brand": "Pediakid",
-    "barcode": "3700225602320",
-    "qty": 5,
-    "price": 379.0,
-    "termin": "2028-04-30 00:00:00"
   },
   {
     "articul": "PED-02337",
@@ -6997,7 +6088,7 @@
     "name": "Гель для ясен Перші зубки, Gel Premieres Dents, Pediakid, 15 мл",
     "brand": "Pediakid",
     "barcode": "3700225602504",
-    "qty": 4,
+    "qty": 3,
     "price": 292.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -7006,7 +6097,7 @@
     "name": "Засіб від нудоти блювання укачування в транспорті для дітей Pediakid (Nauseesvomissements Mal Des Transports) 10 стиків",
     "brand": "Pediakid",
     "barcode": "3700225602511",
-    "qty": 10,
+    "qty": 9,
     "price": 392.0,
     "termin": "2028-03-30 00:00:00"
   },
@@ -7015,7 +6106,7 @@
     "name": "Сироп від сухого і вологого кашлю, Toux Seche Et Grasse, Pediakid, 125 мл",
     "brand": "Pediakid",
     "barcode": "3700225602580",
-    "qty": 5,
+    "qty": 4,
     "price": 442.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -7024,27 +6115,18 @@
     "name": "Засіб проти паразитів для дітей Pediakid (Phytovermil) 125 мл",
     "brand": "Pediakid",
     "barcode": "3700225602610",
-    "qty": 10,
+    "qty": 9,
     "price": 442.0,
-    "termin": "2028-02-11 00:00:00"
+    "termin": "2028-02-28 00:00:00"
   },
   {
     "articul": "PED-02641",
     "name": "Дитячий спрей для вух Pediakid Oti-Protect 30 мл",
     "brand": "Pediakid",
     "barcode": "3700225602641",
-    "qty": 5,
+    "qty": 3,
     "price": 344.0,
     "termin": "2027-02-28 00:00:00"
-  },
-  {
-    "articul": "PUM-01400",
-    "name": "Pendulum, акермансія, 30 капсул",
-    "brand": "Pendulum",
-    "barcode": "850043014003",
-    "qty": 1,
-    "price": 1777.0,
-    "termin": ""
   },
   {
     "articul": "PIX-31004",
@@ -7069,8 +6151,8 @@
     "name": "Power Pump - 500g Mojito Power Pro",
     "brand": "Power Pro",
     "barcode": "4820231512426",
-    "qty": 3,
-    "price": 638.0,
+    "qty": 2,
+    "price": 566.0,
     "termin": "2027-08-30 00:00:00"
   },
   {
@@ -7078,18 +6160,9 @@
     "name": "Power Pro 36% Power Pro 60 g орехи",
     "brand": "Power Pro",
     "barcode": "4820231512686",
-    "qty": 7,
+    "qty": 2,
     "price": 47.0,
     "termin": "2026-10-31 00:00:00"
-  },
-  {
-    "articul": "PPLS-45727",
-    "name": "Balance-X Powerful Progress 90 caps",
-    "brand": "Powerful Progress",
-    "barcode": "4820453457277",
-    "qty": 1,
-    "price": 272.0,
-    "termin": "2027-02-02 00:00:00"
   },
   {
     "articul": "PHV-77951",
@@ -7101,29 +6174,20 @@
     "termin": "2026-09-30 00:00:00"
   },
   {
-    "articul": "PE-01821",
-    "name": "Комплекс вітамінів групи В Pure Encapsulations (PureGenomics B-Complex) 120 капсул",
+    "articul": "PE1762",
+    "name": "Добавка для покращення сну Pure Encapsulations (Best-Rest Formula) 120 капсул",
     "brand": "Pure Encapsulations",
-    "barcode": "766298018218",
-    "qty": 5,
-    "price": 1325.0,
-    "termin": "2026-12-30 00:00:00"
-  },
-  {
-    "articul": "PE1249",
-    "name": "Вітаміни для травлення Pure Encapsulations (G.I. Fortify) 400 г",
-    "brand": "Pure Encapsulations",
-    "barcode": "766298007120",
-    "qty": 3,
-    "price": 1432.0,
-    "termin": "2027-02-20 00:00:00"
+    "barcode": "766298010960",
+    "qty": 20,
+    "price": 2403.0,
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "SALE_PE1375",
     "name": "(ТЕРМІН!!!) Карнозин Pure Encapsulations (L-Carnosine) 60 капсул",
     "brand": "Pure Encapsulations",
     "barcode": "",
-    "qty": 2,
+    "qty": 1,
     "price": 2184.0,
     "termin": "2025-11-30 00:00:00"
   },
@@ -7141,7 +6205,7 @@
     "name": "Коензим Q-10 Puritan's Pride Q-SORB ™ Co Q-10 200 мг 60 гелевих капсул",
     "brand": "Puritan's Pride",
     "barcode": "025077000609",
-    "qty": 9,
+    "qty": 8,
     "price": 701.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -7151,7 +6215,7 @@
     "brand": "Puritan's Pride",
     "barcode": "025077000647",
     "qty": 4,
-    "price": 698.0,
+    "price": 701.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
@@ -7164,49 +6228,13 @@
     "termin": "2028-12-30 00:00:00"
   },
   {
-    "articul": "PTP-10100",
-    "name": "Л-цистеїн Puritan's Pride (L-Cysteine) 500 мг 50 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "074312101007",
-    "qty": 9,
-    "price": 376.0,
-    "termin": "2027-07-30 00:00:00"
-  },
-  {
-    "articul": "PTP-10190",
-    "name": "Вітаміни групи В Puritan's Pride (Vitamin B-Complex and Vitamin B-12) 90 таблеток",
-    "brand": "Puritan's Pride",
-    "barcode": "074312101908",
-    "qty": 6,
-    "price": 230.0,
-    "termin": "2027-12-30 00:00:00"
-  },
-  {
-    "articul": "PTP-10430",
-    "name": "Вітамін C з біофлавоноїдами і шипшиною Puritan's Pride (Vitamin C with bioflavonoids &amp; rose hips) 500 мг 100 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "074312104305",
-    "qty": 10,
-    "price": 231.0,
-    "termin": "2028-04-30 00:00:00"
-  },
-  {
     "articul": "PTP-10525",
     "name": "Куркумін Puritan's Pride (Turmeric) 400 мг 100 капсул",
     "brand": "Puritan's Pride",
     "barcode": "074312105258",
-    "qty": 7,
+    "qty": 8,
     "price": 196.0,
     "termin": "2028-05-30 00:00:00"
-  },
-  {
-    "articul": "PTP-11133",
-    "name": "Фермент папайї, Papaya Enzyme, Puritan's Pride, 250 жувальних таблеток",
-    "brand": "Puritan's Pride",
-    "barcode": "074312111334",
-    "qty": 5,
-    "price": 215.0,
-    "termin": "2027-05-30 00:00:00"
   },
   {
     "articul": "PTP-11370",
@@ -7227,15 +6255,6 @@
     "termin": "2029-04-30 00:00:00"
   },
   {
-    "articul": "PTP-11800",
-    "name": "Стрес формула Puritan's Pride (Stress Formula) 60 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "074312118005",
-    "qty": 6,
-    "price": 264.0,
-    "termin": "2027-09-30 00:00:00"
-  },
-  {
     "articul": "PTP-11832",
     "name": "Водні таблетки Extra Strength ™, Extra Strength Water Pill ™, Puritan's Pride, 100 таблеток",
     "brand": "Puritan's Pride",
@@ -7245,20 +6264,11 @@
     "termin": "2027-05-30 00:00:00"
   },
   {
-    "articul": "PTP-11861",
-    "name": "Діметиламіноетанол Puritan's Pride (DMAE) 100 мг 100 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "074312118616",
-    "qty": 6,
-    "price": 340.0,
-    "termin": "2029-04-30 00:00:00"
-  },
-  {
     "articul": "PTP-11944",
     "name": "Екстракт розторопші 4:1 Puritan's Pride (Milk Thistle 4:1 Extract) 1000 мг 90 капсул",
     "brand": "Puritan's Pride",
     "barcode": "074312119446",
-    "qty": 30,
+    "qty": 20,
     "price": 318.0,
     "termin": "2028-02-20 00:00:00"
   },
@@ -7286,7 +6296,7 @@
     "brand": "Puritan's Pride",
     "barcode": "074312125706",
     "qty": 10,
-    "price": 209.0,
+    "price": 208.0,
     "termin": "2028-04-30 00:00:00"
   },
   {
@@ -7308,15 +6318,6 @@
     "termin": "2027-05-30 00:00:00"
   },
   {
-    "articul": "PTP-12941",
-    "name": "Яблучний оцет Puritan's Pride (Apple Cider Vinegar) 480 мг 200 таблеток",
-    "brand": "Puritan's Pride",
-    "barcode": "074312129414",
-    "qty": 10,
-    "price": 301.0,
-    "termin": "2027-01-30 00:00:00"
-  },
-  {
     "articul": "PTP-13070",
     "name": "Вітамін К Puritan's Pride (Vitamin K) 100 мкг 100 таблеток",
     "brand": "Puritan's Pride",
@@ -7330,7 +6331,7 @@
     "name": "Селен Puritan's Pride (Selenium) 200 мкг 100 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "074312132018",
-    "qty": 10,
+    "qty": 9,
     "price": 197.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -7351,24 +6352,6 @@
     "qty": 10,
     "price": 779.0,
     "termin": "2029-05-30 00:00:00"
-  },
-  {
-    "articul": "PTP-13430",
-    "name": "Біотин і Кальцій Puritan's Pride (Biotin with Calcium) 5000 мкг / 222 мг 60 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077134304",
-    "qty": 10,
-    "price": 172.0,
-    "termin": "2027-08-30 00:00:00"
-  },
-  {
-    "articul": "PTP-13481",
-    "name": "Лютеїн з зеаксантином, Lutein with Zeaxanthin, Puritan's Pride, 6 мг, 100 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "074312134814",
-    "qty": 8,
-    "price": 268.0,
-    "termin": "2027-11-30 00:00:00"
   },
   {
     "articul": "PTP-13531",
@@ -7398,15 +6381,6 @@
     "termin": "2027-02-20 00:00:00"
   },
   {
-    "articul": "PTP-13840",
-    "name": "Вітамін Е-Селен натуральний, Vitamin E-with Selenium Natural, Puritan's Pride, 400 МО, 100 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "074312138409",
-    "qty": 10,
-    "price": 458.0,
-    "termin": "2027-11-30 00:00:00"
-  },
-  {
     "articul": "PTP-14174",
     "name": "Глюкозамін сульфат Puritan's Pride (Glucosamine Sulfate) 1000 мг 240 капсул",
     "brand": "Puritan's Pride",
@@ -7429,8 +6403,8 @@
     "name": "Хелатний Кальцій Магній Цинк Puritan's Pride (Chelated Calcium Magnesium Zinc) 1000 мг/400 мг/25 мг 100 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "074312142901",
-    "qty": 20,
-    "price": 272.0,
+    "qty": 4,
+    "price": 289.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
@@ -7450,15 +6424,6 @@
     "qty": 1,
     "price": 359.0,
     "termin": "2028-06-30 00:00:00"
-  },
-  {
-    "articul": "PTP-14596",
-    "name": "Гідролізований колаген, Hydrolyzed Collagen, Puritan's Pride, 1000 мг, 180 таблеток",
-    "brand": "Puritan's Pride",
-    "barcode": "074312145964",
-    "qty": 3,
-    "price": 527.0,
-    "termin": "2027-11-30 00:00:00"
   },
   {
     "articul": "PTP-15255",
@@ -7510,7 +6475,7 @@
     "name": "Магній Puritan's Pride (Magnesium)  500 мг, 100 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "074312155352",
-    "qty": 8,
+    "qty": 1,
     "price": 310.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -7520,44 +6485,17 @@
     "brand": "Puritan's Pride",
     "barcode": "074312155802",
     "qty": 10,
-    "price": 330.0,
+    "price": 331.0,
     "termin": "2027-12-30 00:00:00"
-  },
-  {
-    "articul": "PTP-16351",
-    "name": "Йохимбе Puritan's Pride (Yohimbe Bark) 2000 мг 50 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "074312163517",
-    "qty": 9,
-    "price": 269.0,
-    "termin": "2027-08-30 00:00:00"
   },
   {
     "articul": "PTP-17311",
     "name": "Ультра чоловічі вітаміни плюс, Ultra Man ™ 50 Plus, Puritan's Pride, 60 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "025077173112",
-    "qty": 8,
+    "qty": 7,
     "price": 443.0,
     "termin": "2028-05-30 00:00:00"
-  },
-  {
-    "articul": "PTP-17582",
-    "name": "Формула для волосся, шкіри і нігтів, Hair, Skin,Nails Formula, Puritan's Pride, 120 таблеток",
-    "brand": "Puritan's Pride",
-    "barcode": "025077075829",
-    "qty": 10,
-    "price": 554.0,
-    "termin": "2027-11-30 00:00:00"
-  },
-  {
-    "articul": "PTP-17610",
-    "name": "ГАМК гамма-аміномасляна кислота, GABA Gamma Aminobutyric Acid, Puritan's Pride, 750 мг, 90 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077176106",
-    "qty": 1,
-    "price": 412.0,
-    "termin": "2027-01-30 00:00:00"
   },
   {
     "articul": "PTP-17618",
@@ -7573,7 +6511,7 @@
     "name": "Вітамін Д3 Puritan's Pride (Vitamin D3) 2000 МО 100 капсул",
     "brand": "Puritan's Pride",
     "barcode": "025077176212",
-    "qty": 8,
+    "qty": 7,
     "price": 211.0,
     "termin": "2028-05-30 00:00:00"
   },
@@ -7587,15 +6525,6 @@
     "termin": "2026-12-30 00:00:00"
   },
   {
-    "articul": "PTP-17895",
-    "name": "Глюкозамін хондроїтин і МСМ Puritan's Pride (Triple Strength MSM) 750 мг / 597 мг 90 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077178957",
-    "qty": 6,
-    "price": 565.0,
-    "termin": "2028-01-30 00:00:00"
-  },
-  {
     "articul": "PTP-17896",
     "name": "Глюкозамін хондроїтин і МСМ Puritan's Pride (Triple Strength MSM) 750 мг / 597 мг 180 капсул",
     "brand": "Puritan's Pride",
@@ -7605,20 +6534,11 @@
     "termin": "2028-08-30 00:00:00"
   },
   {
-    "articul": "PTP-17897",
-    "name": "Глюкозамін хондроїтин і МСМ Puritan's Pride (Triple Strength MSM) 750 мг / 597 мг 60 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077178971",
-    "qty": 9,
-    "price": 387.0,
-    "termin": "2028-01-30 00:00:00"
-  },
-  {
     "articul": "PTP-17903",
     "name": "Мелатонін Puritan's Pride (Melatonin) 3 мг 120 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "074312179037",
-    "qty": 7,
+    "qty": 9,
     "price": 207.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -7645,7 +6565,7 @@
     "name": "Жіночі полівітаміни One Daily, One Daily Women's Multivitamin, Puritan's Pride, 100 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "025077190928",
-    "qty": 8,
+    "qty": 4,
     "price": 358.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -7654,25 +6574,16 @@
     "name": "Глюкозамін хондроїтин потрійної сили з вітаміном D3, Triple Strength Glucosamine Chondroitin with Vitamin D3, Puritan's Pride, 160 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "025077193752",
-    "qty": 9,
+    "qty": 10,
     "price": 897.0,
     "termin": "2028-04-30 00:00:00"
-  },
-  {
-    "articul": "PTP-19607",
-    "name": "Глюкозамін хондроїтин потрійний сили з вітаміном D3, Triple Strength Glucosamine Chondroitin with Vitamin D3, Puritan's Pride, 80 таблеток",
-    "brand": "Puritan's Pride",
-    "barcode": "025077196074",
-    "qty": 20,
-    "price": 405.0,
-    "termin": "2028-01-30 00:00:00"
   },
   {
     "articul": "PTP-21083",
     "name": "Берберин, Berberine, Puritan's Pride, 500 мг, 60 капсул",
     "brand": "Puritan's Pride",
     "barcode": "025077210831",
-    "qty": 1,
+    "qty": 5,
     "price": 781.0,
     "termin": "2027-04-30 00:00:00"
   },
@@ -7681,7 +6592,7 @@
     "name": "Ашваганда KSM-66®, Ashwagandha KSM-66®, Puritan's Pride, 450мг, 60 капсул",
     "brand": "Puritan's Pride",
     "barcode": "074312004315",
-    "qty": 3,
+    "qty": 2,
     "price": 710.0,
     "termin": "2027-03-30 00:00:00"
   },
@@ -7708,7 +6619,7 @@
     "name": "Глюкозамін хондроїтин і МСМ Puritan's Pride (Double Strength MSM) 500 мг / 400 мг 240 капсул",
     "brand": "Puritan's Pride",
     "barcode": "025077278145",
-    "qty": 10,
+    "qty": 8,
     "price": 934.0,
     "termin": "2028-01-30 00:00:00"
   },
@@ -7731,15 +6642,6 @@
     "termin": "2027-03-30 00:00:00"
   },
   {
-    "articul": "PTP-32948",
-    "name": "Омега-3 риб'ячий жир один раз на день Puritan's Pride (One Per Day Omega-3 Fish Oil) 1360 мг 90 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077329489",
-    "qty": 10,
-    "price": 757.0,
-    "termin": "2028-04-30 00:00:00"
-  },
-  {
     "articul": "PTP-35872",
     "name": "Вітамін Д3 Puritan's Pride (Vitamin D3) 10000 МО 100 капсул",
     "brand": "Puritan's Pride",
@@ -7758,15 +6660,6 @@
     "termin": "2028-03-30 00:00:00"
   },
   {
-    "articul": "PTP-50094",
-    "name": "Полікозанол, Policosanol, Puritan's Pride, 20 мг, 60 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077500949",
-    "qty": 2,
-    "price": 288.0,
-    "termin": "2028-02-20 00:00:00"
-  },
-  {
     "articul": "PTP-50779",
     "name": "Формула для волосся шкіри нігтів Puritan's Pride (Hair, Skin &amp; Nails) 30 капсул",
     "brand": "Puritan's Pride",
@@ -7776,15 +6669,6 @@
     "termin": "2026-12-30 00:00:00"
   },
   {
-    "articul": "PTP-50858",
-    "name": "Вітамін Е Puritan's Pride (Vitamin E) 400 МО 50 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077508587",
-    "qty": 6,
-    "price": 224.0,
-    "termin": "2028-02-20 00:00:00"
-  },
-  {
     "articul": "PTP-51464",
     "name": "Біотин Puritan's Pride (Biotin) 10000 мкг 100 капсул",
     "brand": "Puritan's Pride",
@@ -7792,15 +6676,6 @@
     "qty": 20,
     "price": 393.0,
     "termin": "2027-05-30 00:00:00"
-  },
-  {
-    "articul": "PTP-53621",
-    "name": "Магній цитрат Puritan's Pride (Magnesium Citrate) 200 мг 90 капсул",
-    "brand": "Puritan's Pride",
-    "barcode": "025077002238",
-    "qty": 2,
-    "price": 362.0,
-    "termin": "2028-02-20 00:00:00"
   },
   {
     "articul": "PPS-50972",
@@ -7839,15 +6714,6 @@
     "termin": "2026-06-26 00:00:00"
   },
   {
-    "articul": "RUL-03690",
-    "name": "Креатин Rule One (R1) ( Creatine 30 serv ) 120 Капсул",
-    "brand": "Rule One (R1)",
-    "barcode": "196671003690",
-    "qty": 1,
-    "price": 711.0,
-    "termin": ""
-  },
-  {
     "articul": "AFA-86002",
     "name": "Самоочищуюча щітка для кішок, Safari, 1 щітка для наклейки",
     "brand": "Safari",
@@ -7875,15 +6741,6 @@
     "termin": "2028-12-30 00:00:00"
   },
   {
-    "articul": "SKH-52158",
-    "name": "Гістамін блок плюс Seeking Health (Histamine Block Plus) 60 капсул",
-    "brand": "Seeking Health",
-    "barcode": "810007521589",
-    "qty": 4,
-    "price": 1878.0,
-    "termin": "2027-01-30 00:00:00"
-  },
-  {
     "articul": "MBE-01407",
     "name": "Бальзам проти комах, олія кедра, герані і розмарину, Sierra Bees, 17 г",
     "brand": "Sierra Bees",
@@ -7906,9 +6763,18 @@
     "name": "Пассифлора Solaray (Passion Flower) 350 мг 100 капсул",
     "brand": "Solaray",
     "barcode": "076280014303",
-    "qty": 4,
+    "qty": 6,
     "price": 409.0,
     "termin": "2029-01-30 00:00:00"
+  },
+  {
+    "articul": "SOR-01440",
+    "name": "По Д’арко, Pau D'Arco Inner Bark, Solaray, 550 мг, 100 капсул",
+    "brand": "Solaray",
+    "barcode": "076280014402",
+    "qty": 4,
+    "price": 334.0,
+    "termin": "2029-03-30 00:00:00"
   },
   {
     "articul": "SOR-01645",
@@ -7916,7 +6782,7 @@
     "brand": "Solaray",
     "barcode": "076280016451",
     "qty": 20,
-    "price": 331.0,
+    "price": 333.0,
     "termin": "2029-03-30 00:00:00"
   },
   {
@@ -7924,18 +6790,9 @@
     "name": "Препарат для здоров'я простати, Prostate Blend SP-16, Solaray, 100 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280021608",
-    "qty": 5,
+    "qty": 6,
     "price": 454.0,
     "termin": "2028-08-30 00:00:00"
-  },
-  {
-    "articul": "SOR-02170",
-    "name": "Спокійний сон Solaray (Sleep Blend SP-17) 100 капсул",
-    "brand": "Solaray",
-    "barcode": "076280021707",
-    "qty": 2,
-    "price": 306.0,
-    "termin": "2029-03-30 00:00:00"
   },
   {
     "articul": "SOR-03080",
@@ -7956,20 +6813,20 @@
     "termin": "2029-04-30 00:00:00"
   },
   {
-    "articul": "SOR-04560",
-    "name": "Кальцій, магній і цинк, Calcium, Magnesium, Zinc, Solaray, 100 вегетаріанських капсул",
+    "articul": "SOR-04432",
+    "name": "Вітамін C з біофлавоноїдами Solaray (Vitamin C + Bioflavonoids) 1000 мг 100 капсул",
     "brand": "Solaray",
-    "barcode": "076280045604",
-    "qty": 1,
-    "price": 358.0,
-    "termin": "2029-04-30 00:00:00"
+    "barcode": "076280044324",
+    "qty": 2,
+    "price": 399.0,
+    "termin": "2028-05-30 00:00:00"
   },
   {
     "articul": "SOR-04585",
     "name": "Кальцій цитрат Solaray (Calcium Citrate) 1000 мг 120 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280045857",
-    "qty": 4,
+    "qty": 2,
     "price": 432.0,
     "termin": "2029-06-30 00:00:00"
   },
@@ -7996,7 +6853,7 @@
     "name": "Селен без дріжджів Solaray (Selenium Yeast-Free) 200 мкг 90 капсул",
     "brand": "Solaray",
     "barcode": "076280046786",
-    "qty": 3,
+    "qty": 5,
     "price": 351.0,
     "termin": "2029-03-30 00:00:00"
   },
@@ -8041,17 +6898,8 @@
     "name": "Бетаїн HCL з пепсином Solaray (High Potency Betaine HCL with Pepsin) 650 мг 100 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280048148",
-    "qty": 5,
+    "qty": 4,
     "price": 494.0,
-    "termin": "2029-04-30 00:00:00"
-  },
-  {
-    "articul": "SOR-04816",
-    "name": "Бетаїн HCL + пепсин Solaray (HCL with Pepsin) 180 капсул",
-    "brand": "Solaray",
-    "barcode": "076280048162",
-    "qty": 2,
-    "price": 652.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -8062,15 +6910,6 @@
     "qty": 2,
     "price": 450.0,
     "termin": "2028-12-30 00:00:00"
-  },
-  {
-    "articul": "SOR-08130",
-    "name": "Каприл, уповільнене вивільнення, Solaray, 100 капсул в рослинній оболонці",
-    "brand": "Solaray",
-    "barcode": "076280081305",
-    "qty": 0,
-    "price": 474.0,
-    "termin": ""
   },
   {
     "articul": "SOR-08363",
@@ -8086,18 +6925,9 @@
     "name": "Підтримка мозку дітей зі смаком винограду Solaray (Focus For Children) 60 жувальних таблеток",
     "brand": "Solaray",
     "barcode": "076280083781",
-    "qty": 1,
+    "qty": 2,
     "price": 608.0,
     "termin": "2029-04-30 00:00:00"
-  },
-  {
-    "articul": "SOR-13223",
-    "name": "Магній аспартат Solaray (Magnesium) 180 капсул",
-    "brand": "Solaray",
-    "barcode": "076280132236",
-    "qty": 1,
-    "price": 525.0,
-    "termin": "2027-04-30 00:00:00"
   },
   {
     "articul": "SOR-17560",
@@ -8140,8 +6970,8 @@
     "name": "Цитрат магнію Solaray (Magnesium Citrate) 400 мг 180 капсул",
     "brand": "Solaray",
     "barcode": "076280374025",
-    "qty": 8,
-    "price": 666.0,
+    "qty": 20,
+    "price": 675.0,
     "termin": "2027-09-30 00:00:00"
   },
   {
@@ -8149,8 +6979,8 @@
     "name": "Вітамін Д3 + К2 без сої Solaray (Vitamin D3 + K2) 60 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280385847",
-    "qty": 30,
-    "price": 565.0,
+    "qty": 50,
+    "price": 590.0,
     "termin": "2029-03-30 00:00:00"
   },
   {
@@ -8172,20 +7002,11 @@
     "termin": "2029-03-30 00:00:00"
   },
   {
-    "articul": "SOR-46301",
-    "name": "Цитрат магнію Solaray (Magnesium Citrate) 400 мг 90 вегетаріанських капсул",
-    "brand": "Solaray",
-    "barcode": "076280463019",
-    "qty": 2,
-    "price": 395.0,
-    "termin": "2029-03-30 00:00:00"
-  },
-  {
     "articul": "SOR-47102",
     "name": "Цинк Цитрат Solaray (Zinc Citrate) 50 мг 60 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280471021",
-    "qty": 7,
+    "qty": 8,
     "price": 216.0,
     "termin": "2029-02-20 00:00:00"
   },
@@ -8194,8 +7015,8 @@
     "name": "Цинк мідь Solaray (Zinc Copper) 100 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280471052",
-    "qty": 1,
-    "price": 334.0,
+    "qty": 10,
+    "price": 361.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -8203,8 +7024,8 @@
     "name": "Берберин Solaray  (Berberine) 500 мг, 60 капсул",
     "brand": "Solaray",
     "barcode": "076280477054",
-    "qty": 3,
-    "price": 771.0,
+    "qty": 10,
+    "price": 787.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -8217,6 +7038,15 @@
     "termin": "2028-10-30 00:00:00"
   },
   {
+    "articul": "SOR-54901",
+    "name": "Гліцинат магнію з високою засвоюваністю Solaray 350 мг, 120 вегетаріанських капсул",
+    "brand": "Solaray",
+    "barcode": "076280549010",
+    "qty": 20,
+    "price": 699.0,
+    "termin": "2029-05-30 00:00:00"
+  },
+  {
     "articul": "SOR-57445",
     "name": "Вітамін Д3 і К2 Solaray (Vitamin D-3 &amp; K-2) 5000 МО / 50 мкг 120 капсул",
     "brand": "Solaray",
@@ -8224,6 +7054,15 @@
     "qty": 10,
     "price": 1056.0,
     "termin": "2029-04-30 00:00:00"
+  },
+  {
+    "articul": "SOR-62754",
+    "name": "Монолаурін Solaray (Monolaurin Supplement) 500 мг 60 вегетаріанських капсул",
+    "brand": "Solaray",
+    "barcode": "076280627541",
+    "qty": 3,
+    "price": 416.0,
+    "termin": "2026-10-30 00:00:00"
   },
   {
     "articul": "SOR-71983",
@@ -8239,9 +7078,18 @@
     "name": "Магній Гліцинат Solaray (Magnesium Glycinate) 350 мг 240 капсул",
     "brand": "Solaray",
     "barcode": "076280895049",
-    "qty": 20,
+    "qty": 10,
     "price": 1215.0,
     "termin": "2029-04-30 00:00:00"
+  },
+  {
+    "articul": "SOL-00314",
+    "name": "Біотин Solgar (Biotin) 5000 мкг 100 капсул",
+    "brand": "Solgar",
+    "barcode": "033984003149",
+    "qty": 1,
+    "price": 831.0,
+    "termin": "2028-03-30 00:00:00"
   },
   {
     "articul": "SOL-00432",
@@ -8253,21 +7101,12 @@
     "termin": "2028-02-20 00:00:00"
   },
   {
-    "articul": "SOL-00518",
-    "name": "Кальцій і магній з вітаміном Д3 Solgar (Calcium Magnesium D3) 150 таблеток",
-    "brand": "Solgar",
-    "barcode": "033984005181",
-    "qty": 2,
-    "price": 660.0,
-    "termin": "2027-01-30 00:00:00"
-  },
-  {
     "articul": "SOL-00520",
     "name": "Кальцій Магній Цинк Solgar (Calcium Magnesium Plus Zinc) 100 таблеток",
     "brand": "Solgar",
     "barcode": "033984005204",
     "qty": 10,
-    "price": 471.0,
+    "price": 470.0,
     "termin": "2028-10-30 00:00:00"
   },
   {
@@ -8275,7 +7114,7 @@
     "name": "Кальцій Магній Цинк Solgar (Calcium Magnesium Plus Zinc) 250 таблеток",
     "brand": "Solgar",
     "barcode": "033984005211",
-    "qty": 8,
+    "qty": 6,
     "price": 878.0,
     "termin": "2028-03-30 00:00:00"
   },
@@ -8311,8 +7150,8 @@
     "name": "Цистеїн Solgar (L-Cysteine) 500 мг 90 вегетаріанських капсул",
     "brand": "Solgar",
     "barcode": "033984009622",
-    "qty": 10,
-    "price": 957.0,
+    "qty": 8,
+    "price": 958.0,
     "termin": "2028-01-30 00:00:00"
   },
   {
@@ -8320,7 +7159,7 @@
     "name": "Дитячий комплекс з вітамінами і мінералами зі смаком ягід Solgar (Kangavites Complete Multivitamin &amp; Mineral Chewable) 120 жувальних таблеток",
     "brand": "Solgar",
     "barcode": "033984010161",
-    "qty": 7,
+    "qty": 10,
     "price": 706.0,
     "termin": "2028-03-03 00:00:00"
   },
@@ -8338,7 +7177,7 @@
     "name": "Естер-С вітамін C Solgar (Ester-C Plus) 500 мг 100 вегетаріанських капсул",
     "brand": "Solgar",
     "barcode": "033984010390",
-    "qty": 2,
+    "qty": 1,
     "price": 653.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -8347,7 +7186,7 @@
     "name": "Естер-С вітамін C Solgar (Ester-C Plus) 500 мг 250 вегетаріанських капсул",
     "brand": "Solgar",
     "barcode": "033984010499",
-    "qty": 1,
+    "qty": 2,
     "price": 1432.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -8365,7 +7204,7 @@
     "name": "Комплекс вітамінів В Solgar (B-Complex 100) 100 капсул",
     "brand": "Solgar",
     "barcode": "033984011502",
-    "qty": 1,
+    "qty": 3,
     "price": 903.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -8374,7 +7213,7 @@
     "name": "B-комплекс &quot;100&quot; Solgar (B-Complex &quot;100&quot;) 250 рослинних капсул",
     "brand": "Solgar",
     "barcode": "033984011519",
-    "qty": 2,
+    "qty": 1,
     "price": 2013.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -8392,7 +7231,7 @@
     "name": "Глютамін Solgar L-Glutamine 500 мг 100 капсул",
     "brand": "Solgar",
     "barcode": "033984013216",
-    "qty": 8,
+    "qty": 9,
     "price": 584.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -8401,7 +7240,7 @@
     "name": "Гліцин Solgar (Glycine) 500 мг 100 капсул на рослинній основі",
     "brand": "Solgar",
     "barcode": "033984013704",
-    "qty": 3,
+    "qty": 2,
     "price": 530.0,
     "termin": "2028-03-30 00:00:00"
   },
@@ -8424,20 +7263,11 @@
     "termin": "2027-04-01 00:00:00"
   },
   {
-    "articul": "SOL-01734",
-    "name": "МСМ метилсульфонілметан Solgar (MSM) 120 таблеток",
-    "brand": "Solgar",
-    "barcode": "033984017344",
-    "qty": 2,
-    "price": 704.0,
-    "termin": "2027-06-30 00:00:00"
-  },
-  {
     "articul": "SOL-01735",
     "name": "Вітаміни для шкіри волосся і нігтів Solgar (Skin Nails &amp; Hair Advanced MSM Formula) 60 таблеток",
     "brand": "Solgar",
     "barcode": "033984017351",
-    "qty": 50,
+    "qty": 40,
     "price": 529.0,
     "termin": "2027-08-31 00:00:00"
   },
@@ -8446,9 +7276,9 @@
     "name": "Вітаміни для волосся шкіри і нігтів Solgar (Skin Nails &amp; Hair) 120 таблеток",
     "brand": "Solgar",
     "barcode": "033984017368",
-    "qty": 50,
+    "qty": 40,
     "price": 931.0,
-    "termin": "2027-02-01 00:00:00"
+    "termin": "2027-08-31 00:00:00"
   },
   {
     "articul": "SOL-01935",
@@ -8464,7 +7294,7 @@
     "name": "Мелатонін Solgar (Melatonin) 5 мг 120 таблеток",
     "brand": "Solgar",
     "barcode": "033984019379",
-    "qty": 2,
+    "qty": 1,
     "price": 642.0,
     "termin": "2027-04-30 00:00:00"
   },
@@ -8491,18 +7321,9 @@
     "name": "Калій Solgar (Potassium) 99 мг 100 таблеток",
     "brand": "Solgar",
     "barcode": "033984022607",
-    "qty": 6,
+    "qty": 5,
     "price": 412.0,
     "termin": "2028-04-30 00:00:00"
-  },
-  {
-    "articul": "SOL-02295",
-    "name": "Вітаміни для підтримки простати Solgar (Gold Specifics Prostate Support) 60 вегетаріанських капсул",
-    "brand": "Solgar",
-    "barcode": "033984022959",
-    "qty": 1,
-    "price": 1283.0,
-    "termin": "2027-07-30 00:00:00"
   },
   {
     "articul": "SOL-02327",
@@ -8518,7 +7339,7 @@
     "name": "Ресвератрол Solgar (Resveratrol) 250 мг 30 капсул",
     "brand": "Solgar",
     "barcode": "033984023369",
-    "qty": 4,
+    "qty": 6,
     "price": 1054.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -8528,17 +7349,8 @@
     "brand": "Solgar",
     "barcode": "033984023802",
     "qty": 5,
-    "price": 407.0,
+    "price": 405.0,
     "termin": "2029-02-20 00:00:00"
-  },
-  {
-    "articul": "SOL-02381",
-    "name": "Вітамін С з шипшиною Solgar (Vitamin C With Rose Hips) 500 мг 250 таблеток",
-    "brand": "Solgar",
-    "barcode": "033984023819",
-    "qty": 1,
-    "price": 910.0,
-    "termin": "2028-05-30 00:00:00"
   },
   {
     "articul": "SOL-02484",
@@ -8554,9 +7366,27 @@
     "name": "Селен бездріжджовий Solgar (Selenium Yeast-Free) 100 таблеток",
     "brand": "Solgar",
     "barcode": "033984025516",
-    "qty": 10,
-    "price": 332.0,
+    "qty": 3,
+    "price": 333.0,
     "termin": "2027-10-30 00:00:00"
+  },
+  {
+    "articul": "SOL-02558",
+    "name": "Селен Solgar (Selenium) 200 мкг 250 таблеток",
+    "brand": "Solgar",
+    "barcode": "033984025585",
+    "qty": 1,
+    "price": 1145.0,
+    "termin": "2027-07-30 00:00:00"
+  },
+  {
+    "articul": "SOL-02714",
+    "name": "Тоналін КЛК Solgar (Tonalin CLA) 1300 мг 60 гелевих капсул",
+    "brand": "Solgar",
+    "barcode": "033984027145",
+    "qty": 1,
+    "price": 882.0,
+    "termin": "2028-10-30 00:00:00"
   },
   {
     "articul": "SOL-02761",
@@ -8572,8 +7402,8 @@
     "name": "Вітамін В6 Solgar (Vitamin B6) 100 мг 100 таблеток",
     "brand": "Solgar",
     "barcode": "033984031203",
-    "qty": 10,
-    "price": 330.0,
+    "qty": 5,
+    "price": 331.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
@@ -8581,36 +7411,27 @@
     "name": "Вітамін В12 Solgar (Vitamin B12) 100 мкг 100 таблеток",
     "brand": "Solgar",
     "barcode": "033984031807",
-    "qty": 6,
+    "qty": 5,
     "price": 299.0,
     "termin": "2028-06-30 00:00:00"
   },
   {
-    "articul": "SOL-03230",
-    "name": "Вітамін B12 сублінгвальний Solgar (Sublingual Vitamin B12) 1000 мкг 250 капсул",
+    "articul": "SOL-03260",
+    "name": "Вітамін С Solgar (Vitamin C) 500 мг 100 капсул",
     "brand": "Solgar",
-    "barcode": "033984032309",
+    "barcode": "033984032606",
     "qty": 1,
-    "price": 1121.0,
-    "termin": "2028-07-30 00:00:00"
+    "price": 474.0,
+    "termin": "2027-09-30 00:00:00"
   },
   {
     "articul": "SOL-03310",
     "name": "Вітамін Д3 Solgar (Vitamin D3) 25 мкг 1000 МО 90 таблеток",
     "brand": "Solgar",
     "barcode": "033984033108",
-    "qty": 5,
-    "price": 338.0,
-    "termin": "2027-01-30 00:00:00"
-  },
-  {
-    "articul": "SOL-03312",
-    "name": "Вітамін Д3 Solgar (Vitamin D3) 125 мкг 5000 МО 60 вегетаріанських капсул",
-    "brand": "Solgar",
-    "barcode": "033984033122",
     "qty": 3,
-    "price": 498.0,
-    "termin": "2028-06-30 00:00:00"
+    "price": 341.0,
+    "termin": "2027-01-30 00:00:00"
   },
   {
     "articul": "SOL-03720",
@@ -8620,6 +7441,15 @@
     "qty": 50,
     "price": 387.0,
     "termin": "2027-08-31 00:00:00"
+  },
+  {
+    "articul": "SOL-03818",
+    "name": "Хлорела Solgar (Chlorella) 520 мг 100 капсул",
+    "brand": "Solgar",
+    "barcode": "033984038189",
+    "qty": 3,
+    "price": 866.0,
+    "termin": "2027-08-30 00:00:00"
   },
   {
     "articul": "SOL-31045",
@@ -8640,30 +7470,12 @@
     "termin": "2027-02-20 00:00:00"
   },
   {
-    "articul": "SOL-50497",
-    "name": "Вітаміни для підтримки суглобів Solgar (Joint Comfort) 30 капсул",
-    "brand": "Solgar",
-    "barcode": "033984504974",
-    "qty": 1,
-    "price": 902.0,
-    "termin": "2027-07-31 00:00:00"
-  },
-  {
     "articul": "SOL-52387",
     "name": "Біотин Solgar (Biotin) 10000 мкг 60 капсул",
     "brand": "Solgar",
     "barcode": "033984523876",
     "qty": 20,
     "price": 775.0,
-    "termin": "2027-09-30 00:00:00"
-  },
-  {
-    "articul": "SOL-52392",
-    "name": "Біотин Solgar (Biotin Super High Potency) 10000 мкг 120 капсул",
-    "brand": "Solgar",
-    "barcode": "033984523920",
-    "qty": 5,
-    "price": 1110.0,
     "termin": "2027-09-30 00:00:00"
   },
   {
@@ -8685,6 +7497,42 @@
     "termin": "2029-01-30 00:00:00"
   },
   {
+    "articul": "SN1599",
+    "name": "Магній + яблучна кислота Source Naturals (Magnesium Malate) 625 мг 100 капсул",
+    "brand": "Source Naturals",
+    "barcode": "021078015994",
+    "qty": 4,
+    "price": 378.0,
+    "termin": "2029-07-30 00:00:00"
+  },
+  {
+    "articul": "SNS-00184",
+    "name": "Комплекс амінокислот Source Naturals (Amino Day) 120 таблеток",
+    "brand": "Source Naturals",
+    "barcode": "021078001843",
+    "qty": 1,
+    "price": 1020.0,
+    "termin": ""
+  },
+  {
+    "articul": "SNS-00261",
+    "name": "Малат Магнію Source Naturals ( Magnesium Malate) 1250 мг 90 таблеток",
+    "brand": "Source Naturals",
+    "barcode": "021078002611",
+    "qty": 3,
+    "price": 418.0,
+    "termin": "2028-11-30 00:00:00"
+  },
+  {
+    "articul": "SNS-00803",
+    "name": "Магній комплекс Ультра-Маг Source Naturals (Ultra-Mag Magnesium Complex) 120 таблеток",
+    "brand": "Source Naturals",
+    "barcode": "021078008033",
+    "qty": 8,
+    "price": 645.0,
+    "termin": "2029-10-30 00:00:00"
+  },
+  {
     "articul": "SNS-00876",
     "name": "Триметилгліцин, ТМГ, TMG, 750 мг, Source Naturals, 60 таблеток",
     "brand": "Source Naturals",
@@ -8699,7 +7547,7 @@
     "brand": "Source Naturals",
     "barcode": "021078411048",
     "qty": 10,
-    "price": 566.0,
+    "price": 568.0,
     "termin": "2028-09-30 00:00:00"
   },
   {
@@ -8725,16 +7573,25 @@
     "name": "ДІМ (Дііндолілметан), DIM (Diindolylmethane), Source Naturals, 200 мг, 60 таблеток",
     "brand": "Source Naturals",
     "barcode": "021078025894",
-    "qty": 1,
+    "qty": 2,
     "price": 532.0,
     "termin": "2029-04-30 00:00:00"
+  },
+  {
+    "articul": "SPR-00008",
+    "name": "Протеїновий батончик Sporter Milk Pro 60 г Печиво",
+    "brand": "Sporter",
+    "barcode": "4820249722770",
+    "qty": 1,
+    "price": 65.0,
+    "termin": ""
   },
   {
     "articul": "SPR-72075_1",
     "name": "Протеїновий батончик з смаком тірамісу Sporter (ZerOne) 1 шт 50 г",
     "brand": "Sporter",
     "barcode": "4820249720769",
-    "qty": 6,
+    "qty": 9,
     "price": 41.0,
     "termin": "2026-12-25 00:00:00"
   },
@@ -8745,6 +7602,15 @@
     "barcode": "850025118750",
     "qty": 1,
     "price": 607.0,
+    "termin": ""
+  },
+  {
+    "articul": "24196",
+    "name": "Omega-3 Liquid Stark Pharm 250 мл",
+    "brand": "Stark Pharm",
+    "barcode": "4829888052439",
+    "qty": 1,
+    "price": 428.0,
     "termin": ""
   },
   {
@@ -8761,7 +7627,7 @@
     "name": "Серветки від вугрів максимальна сила без спирту Stridex 90 м'яких серветок",
     "brand": "Stridex",
     "barcode": "041388097091",
-    "qty": 6,
+    "qty": 7,
     "price": 421.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -8784,11 +7650,20 @@
     "termin": "2027-12-27 00:00:00"
   },
   {
+    "articul": "SUH-72031",
+    "name": "Фарба для волосся чорний Surya Brasil (Hair Color) 70 мл",
+    "brand": "Surya Brasil",
+    "barcode": "7896544720312",
+    "qty": 1,
+    "price": 1057.0,
+    "termin": ""
+  },
+  {
     "articul": "SW030",
     "name": "Ціанокобаламін B-12 Swanson (Vitamin B-12 Cyanocobalamin) 500 мкг 100 капсул",
     "brand": "Swanson",
     "barcode": "087614010304",
-    "qty": 20,
+    "qty": 10,
     "price": 157.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -8825,7 +7700,7 @@
     "brand": "Swanson",
     "barcode": "087614110967",
     "qty": 50,
-    "price": 281.0,
+    "price": 282.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -8833,7 +7708,7 @@
     "name": "Пиколинат цинку краща форма тіла, Zinc Picolinate Body Preferred Form, Swanson, 60 капсул",
     "brand": "Swanson",
     "barcode": "087614111131",
-    "qty": 50,
+    "qty": 40,
     "price": 147.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -8844,7 +7719,16 @@
     "barcode": "087614112343",
     "qty": 10,
     "price": 113.0,
-    "termin": "2027-07-30 00:00:00"
+    "termin": "2027-09-30 00:00:00"
+  },
+  {
+    "articul": "SW1239",
+    "name": "Біотин, Biotin, Swanson, 5,000 мкг, 30 капсул",
+    "brand": "Swanson",
+    "barcode": "087614112398",
+    "qty": 1,
+    "price": 107.0,
+    "termin": "2028-07-30 00:00:00"
   },
   {
     "articul": "SW1240",
@@ -8865,21 +7749,12 @@
     "termin": "2028-10-30 00:00:00"
   },
   {
-    "articul": "SW1248",
-    "name": "Вітамін B12 Swanson (Vitamin B-12) 500 мкг 30 капсул",
-    "brand": "Swanson",
-    "barcode": "087614112480",
-    "qty": 2,
-    "price": 88.0,
-    "termin": "2028-09-30 00:00:00"
-  },
-  {
     "articul": "SW1364",
     "name": "Магній Таурат, Magnesium Taurate, Swanson, 100 мг 120 капсул",
     "brand": "Swanson",
     "barcode": "087614113647",
-    "qty": 10,
-    "price": 634.0,
+    "qty": 8,
+    "price": 635.0,
     "termin": "2028-11-30 00:00:00"
   },
   {
@@ -8914,7 +7789,7 @@
     "name": "Куркума та Чорний Перець Swanson (Full Spectrum Turmeric &amp; Black Pepper) 60 капсул",
     "brand": "Swanson",
     "barcode": "087614116136",
-    "qty": 20,
+    "qty": 10,
     "price": 302.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -8928,20 +7803,11 @@
     "termin": "2027-03-30 00:00:00"
   },
   {
-    "articul": "SW1745",
-    "name": "Джерело йоду, Kelp Iodine Source, Swanson, 225 мкг 250 таблеток",
-    "brand": "Swanson",
-    "barcode": "087614117454",
-    "qty": 1,
-    "price": 306.0,
-    "termin": "2028-05-30 00:00:00"
-  },
-  {
     "articul": "SW235",
     "name": "Селен L-селенометіонін, Selenium L-Selenomethionine, Swanson, 100 мкг, 200 капсул",
     "brand": "Swanson",
     "barcode": "087614012353",
-    "qty": 2,
+    "qty": 1,
     "price": 237.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -8953,6 +7819,15 @@
     "qty": 40,
     "price": 276.0,
     "termin": "2028-12-30 00:00:00"
+  },
+  {
+    "articul": "SW498",
+    "name": "Мелатонін, Melatonin, Swanson, 3 мг, 60 капсул",
+    "brand": "Swanson",
+    "barcode": "087614014982",
+    "qty": 1,
+    "price": 68.0,
+    "termin": ""
   },
   {
     "articul": "SW502",
@@ -8968,7 +7843,7 @@
     "name": "Насіння подорожника, Psyllium Husks, Swanson, 610 мг, 100 капсул",
     "brand": "Swanson",
     "barcode": "087614018027",
-    "qty": 6,
+    "qty": 2,
     "price": 206.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -8977,7 +7852,7 @@
     "name": "Потрійний комплекс магнію, Triple Magnesium Complex, Swanson, 400 мг, 100 капсул",
     "brand": "Swanson",
     "barcode": "087614018089",
-    "qty": 50,
+    "qty": 30,
     "price": 262.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -8987,7 +7862,7 @@
     "brand": "Swanson",
     "barcode": "087614018720",
     "qty": 9,
-    "price": 293.0,
+    "price": 294.0,
     "termin": "2027-11-30 00:00:00"
   },
   {
@@ -9004,7 +7879,7 @@
     "name": "Хром Піколинат Swanson (Chromium Picolinate) 200 мкг 100 капсул",
     "brand": "Swanson",
     "barcode": "087614019222",
-    "qty": 20,
+    "qty": 10,
     "price": 154.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -9023,35 +7898,17 @@
     "brand": "Swanson",
     "barcode": "087614019505",
     "qty": 2,
-    "price": 381.0,
+    "price": 392.0,
     "termin": "2027-09-30 00:00:00"
-  },
-  {
-    "articul": "SW961",
-    "name": "Мака, Maca, Swanson, 500 мг, 100 капсул",
-    "brand": "Swanson",
-    "barcode": "087614019611",
-    "qty": 3,
-    "price": 247.0,
-    "termin": "2028-11-30 00:00:00"
   },
   {
     "articul": "SW983",
     "name": "Джімнема Сильвестра лист, Gymnema Sylvestre Leaf, Swanson, 400 мг, 100 капсул",
     "brand": "Swanson",
     "barcode": "087614019833",
-    "qty": 20,
+    "qty": 10,
     "price": 194.0,
     "termin": "2027-06-30 00:00:00"
-  },
-  {
-    "articul": "SW988",
-    "name": "Босвелія Swanson (Boswellia) 400 мг 100 капсул",
-    "brand": "Swanson",
-    "barcode": "087614019888",
-    "qty": 2,
-    "price": 267.0,
-    "termin": "2028-10-30 00:00:00"
   },
   {
     "articul": "SWA025",
@@ -9063,29 +7920,11 @@
     "termin": "2027-08-30 00:00:00"
   },
   {
-    "articul": "SWA027",
-    "name": "Лактобацили Гассері Swanson (Lactobacillus Gasseri) 60 капсул",
-    "brand": "Swanson",
-    "barcode": "087614190273",
-    "qty": 3,
-    "price": 368.0,
-    "termin": "2027-06-30 00:00:00"
-  },
-  {
-    "articul": "SWF098",
-    "name": "100% сертифікований органічний зелений чай матча, 100% Certified Organic Matcha Green Tea, Swanson, 50 г",
-    "brand": "Swanson",
-    "barcode": "087614240985",
-    "qty": 1,
-    "price": 655.0,
-    "termin": "2026-03-30 00:00:00"
-  },
-  {
     "articul": "SWH287",
     "name": "Екстракт ашваганди, Ashwagandha Extract, Swanson, 450 мг, 60 капсул",
     "brand": "Swanson",
     "barcode": "087614142876",
-    "qty": 6,
+    "qty": 3,
     "price": 266.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -9094,7 +7933,7 @@
     "name": "Вітаміни для жіночого збудження Swanson (Ultimate Women's Intimate Performance) 90 таблеток",
     "brand": "Swanson",
     "barcode": "087614080062",
-    "qty": 3,
+    "qty": 2,
     "price": 391.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -9112,7 +7951,7 @@
     "name": "Спіруліна, Spirulina, Swanson, 500 мг, 180 таблеток",
     "brand": "Swanson",
     "barcode": "087614060101",
-    "qty": 5,
+    "qty": 2,
     "price": 361.0,
     "termin": "2028-05-30 00:00:00"
   },
@@ -9121,7 +7960,7 @@
     "name": "Спіруліна, 100% Certified Organic Spirulina, Swanson, 500 мг, 180 таблеток",
     "brand": "Swanson",
     "barcode": "087614060446",
-    "qty": 4,
+    "qty": 3,
     "price": 368.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -9130,7 +7969,7 @@
     "name": "Сульфорафан з екстракту капусти брокколі, Sulforaphane from Broccoli Sprout Extract, Swanson, 400 мкг, 60 капсул",
     "brand": "Swanson",
     "barcode": "087614060484",
-    "qty": 50,
+    "qty": 40,
     "price": 276.0,
     "termin": "2028-12-30 00:00:00"
   },
@@ -9139,7 +7978,7 @@
     "name": "Селениум Комплекс, Selenium Complex, Swanson, 200 мкг 90 капсул",
     "brand": "Swanson",
     "barcode": "087614020679",
-    "qty": 10,
+    "qty": 2,
     "price": 122.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -9148,7 +7987,7 @@
     "name": "Хелатованих марганцевий гліцинат Альбіон Swanson  (Albion Chelated Magnesium Glycinate) 133 мг, 90 капсул",
     "brand": "Swanson",
     "barcode": "087614020730",
-    "qty": 20,
+    "qty": 10,
     "price": 362.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -9166,7 +8005,7 @@
     "name": "Бор від Albion Bororganic Glycine , Boron from Albion Bororganic Glycine, Swanson, 6 мг 60 капсул",
     "brand": "Swanson",
     "barcode": "087614210285",
-    "qty": 3,
+    "qty": 10,
     "price": 130.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -9175,7 +8014,7 @@
     "name": "Альфа-ліпоєва кислота, Alpha Lipoic Acid, Swanson, 600 мг, 60 капсул",
     "brand": "Swanson",
     "barcode": "087614021676",
-    "qty": 10,
+    "qty": 6,
     "price": 583.0,
     "termin": "2027-07-30 00:00:00"
   },
@@ -9193,7 +8032,7 @@
     "name": "Індол-3-карбінол з ресвератрол, Indole-3-Carbinol with Resveratrol, Swanson, 200 мг 60 капсул",
     "brand": "Swanson",
     "barcode": "087614023151",
-    "qty": 50,
+    "qty": 40,
     "price": 514.0,
     "termin": "2026-02-27 00:00:00"
   },
@@ -9202,7 +8041,7 @@
     "name": "Хілат Меди, Albion Chelated Copper, Swanson, 2 мг, 60 капсул",
     "brand": "Swanson",
     "barcode": "087614024684",
-    "qty": 8,
+    "qty": 6,
     "price": 106.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -9216,20 +8055,11 @@
     "termin": "2027-02-20 00:00:00"
   },
   {
-    "articul": "SWU534",
-    "name": "Пробіотики для жінок Swanson (FemFlora Probiotic for Women) 9,8 мільярдів КОЕ 60 капсул",
-    "brand": "Swanson",
-    "barcode": "087614025346",
-    "qty": 2,
-    "price": 423.0,
-    "termin": "2027-10-30 00:00:00"
-  },
-  {
     "articul": "SWU913",
     "name": "Літій оротат, Lithium Orotate, Swanson, 5 мг, Elemental Lithium 60 капсул",
     "brand": "Swanson",
     "barcode": "087614029139",
-    "qty": 10,
+    "qty": 9,
     "price": 229.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -9247,7 +8077,7 @@
     "name": "5-HTP максимальна сила, 5-HTP - Maximum Strength, Swanson, 200 мг, 60 капсул",
     "brand": "Swanson",
     "barcode": "087614029634",
-    "qty": 1,
+    "qty": 2,
     "price": 442.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -9256,7 +8086,7 @@
     "name": "Біотин Swanson (Biotin) 5000 мкг 100 капсул",
     "brand": "Swanson",
     "barcode": "087614018775",
-    "qty": 40,
+    "qty": 30,
     "price": 193.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -9274,7 +8104,7 @@
     "name": "Swanson, ашваганда, 450 мг, 100 капсул",
     "brand": "Swanson",
     "barcode": "087614019574",
-    "qty": 50,
+    "qty": 20,
     "price": 260.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -9293,7 +8123,7 @@
     "brand": "Swanson",
     "barcode": "087614113715",
     "qty": 10,
-    "price": 300.0,
+    "price": 308.0,
     "termin": "2029-07-30 00:00:00"
   },
   {
@@ -9310,9 +8140,18 @@
     "name": "Піколинат цинку підвищеної сили дії Swanson (Extra Strength Zinc Picolinate) 50 мг 60 капсул",
     "brand": "Swanson",
     "barcode": "087614118130",
-    "qty": 3,
+    "qty": 1,
     "price": 208.0,
     "termin": "2028-10-30 00:00:00"
+  },
+  {
+    "articul": "SWV-11877",
+    "name": "Swanson, куркума та чорний перець, 90 вегетаріанських капсул",
+    "brand": "Swanson",
+    "barcode": "087614118772",
+    "qty": 1,
+    "price": 348.0,
+    "termin": ""
   },
   {
     "articul": "SWV-21034",
@@ -9364,8 +8203,8 @@
     "name": "Комплекс вітамінів групи В від стресу Thorne Research (Stress B-Complex) 60 рослинних капсул",
     "brand": "Thorne Research",
     "barcode": "693749002963",
-    "qty": 1,
-    "price": 751.0,
+    "qty": 10,
+    "price": 791.0,
     "termin": "2027-12-30 00:00:00"
   },
   {
@@ -9373,8 +8212,8 @@
     "name": "Мідь Бісгліцинат Thorne Research (Copper Bisglycinate) 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749003410",
-    "qty": 5,
-    "price": 579.0,
+    "qty": 4,
+    "price": 583.0,
     "termin": "2028-07-30 00:00:00"
   },
   {
@@ -9382,9 +8221,9 @@
     "name": "Бігліцинат заліза Thorne Research (Iron Bisglycinate) 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749003458",
-    "qty": 10,
+    "qty": 50,
     "price": 491.0,
-    "termin": "2028-06-30 00:00:00"
+    "termin": "2028-09-30 00:00:00"
   },
   {
     "articul": "THR-00464",
@@ -9394,6 +8233,15 @@
     "qty": 10,
     "price": 1664.0,
     "termin": "2027-05-30 00:00:00"
+  },
+  {
+    "articul": "THR-00635",
+    "name": "Креатин Thorne Research (Creatine) 450 г",
+    "brand": "Thorne Research",
+    "barcode": "693749006350",
+    "qty": 3,
+    "price": 1432.0,
+    "termin": "2027-01-30 00:00:00"
   },
   {
     "articul": "THR-00671",
@@ -9409,16 +8257,16 @@
     "name": "Мультивітаміни та мультимінерали базові поживні речовини Thorne Research (Basic Nutrients 2/Day) 2 рази на день 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749006848",
-    "qty": 20,
-    "price": 1109.0,
-    "termin": "2027-09-30 00:00:00"
+    "qty": 10,
+    "price": 1105.0,
+    "termin": "2027-10-30 00:00:00"
   },
   {
     "articul": "THR-00692",
     "name": "Цинк піколинат Thorne Research (Zinc Picolinate) 30 мг 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749006923",
-    "qty": 4,
+    "qty": 3,
     "price": 618.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -9436,8 +8284,17 @@
     "name": "Вітамін С із флавоноїдами Thorne Research (Vitamin C with Flavonoids) 90 капсул",
     "brand": "Thorne Research",
     "barcode": "693749012481",
-    "qty": 5,
+    "qty": 7,
     "price": 698.0,
+    "termin": "2027-09-30 00:00:00"
+  },
+  {
+    "articul": "THR-01250",
+    "name": "Від старіння Нікотинамід кверцетин та ресвератрол Thorne Research (ResveraCel) 60 капсул",
+    "brand": "Thorne Research",
+    "barcode": "693749012504",
+    "qty": 6,
+    "price": 1953.0,
     "termin": "2027-09-30 00:00:00"
   },
   {
@@ -9454,8 +8311,8 @@
     "name": "Пренатальні вітаміни Thorne Research (Basic Prenatal) 90 капсул",
     "brand": "Thorne Research",
     "barcode": "693749015048",
-    "qty": 20,
-    "price": 1086.0,
+    "qty": 10,
+    "price": 1090.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
@@ -9468,13 +8325,22 @@
     "termin": "2027-08-03 00:00:00"
   },
   {
+    "articul": "THR-10403",
+    "name": "Комплекс основних вітамінів групи B Thorne Research (Basic B Complex) 60 вегетаріанських капсул",
+    "brand": "Thorne Research",
+    "barcode": "693749104032",
+    "qty": 10,
+    "price": 829.0,
+    "termin": "2028-03-30 00:00:00"
+  },
+  {
     "articul": "THR-10603",
     "name": "Вітамін B комплекс Thorne Research (B-Complex #6) 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749106036",
-    "qty": 1,
-    "price": 798.0,
-    "termin": "2027-12-30 00:00:00"
+    "qty": 2,
+    "price": 782.0,
+    "termin": "2027-06-30 00:00:00"
   },
   {
     "articul": "THR-11203",
@@ -9482,35 +8348,26 @@
     "brand": "Thorne Research",
     "barcode": "693749112037",
     "qty": 50,
-    "price": 790.0,
+    "price": 791.0,
     "termin": "2027-09-30 00:00:00"
-  },
-  {
-    "articul": "THR-12502",
-    "name": "Вітамін В12 метилкобаламін Thorne Research (Methylcobalamin В12) 1000 мкг 60 капсул",
-    "brand": "Thorne Research",
-    "barcode": "693749125020",
-    "qty": 3,
-    "price": 737.0,
-    "termin": "2027-11-30 00:00:00"
   },
   {
     "articul": "THR-12901",
     "name": "Вітамінно-мінеральний комплекс Thorne Research (5-MTHF) 1 мг 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749129011",
-    "qty": 1,
+    "qty": 2,
     "price": 764.0,
     "termin": "2027-05-30 00:00:00"
   },
   {
-    "articul": "THR-13801",
-    "name": "Вітамін Д3 Thorne Research (Vitamin D3) 5000 МО 60 капсул",
+    "articul": "THR-16801",
+    "name": "Вітамін Д3 Thorne Research (Vitamin D3) 1000 МО 30 мл краплі",
     "brand": "Thorne Research",
-    "barcode": "693749138013",
-    "qty": 1,
-    "price": 570.0,
-    "termin": "2027-12-30 00:00:00"
+    "barcode": "693749168010",
+    "qty": 9,
+    "price": 614.0,
+    "termin": "2027-06-30 00:00:00"
   },
   {
     "articul": "THR-21002",
@@ -9518,7 +8375,7 @@
     "brand": "Thorne Research",
     "barcode": "693749210023",
     "qty": 10,
-    "price": 455.0,
+    "price": 456.0,
     "termin": "2028-06-30 00:00:00"
   },
   {
@@ -9535,7 +8392,7 @@
     "name": "Цинк Піколинат посилений Thorne Research (Zinc Picolinate) 30 мг 180 капсул",
     "brand": "Thorne Research",
     "barcode": "693749221029",
-    "qty": 2,
+    "qty": 1,
     "price": 1217.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -9547,15 +8404,6 @@
     "qty": 30,
     "price": 405.0,
     "termin": "2027-09-30 00:00:00"
-  },
-  {
-    "articul": "THR-24203",
-    "name": "Мікроелементи Thorne Research (Trace Minerals) 90 капсул",
-    "brand": "Thorne Research",
-    "barcode": "693749242031",
-    "qty": 1,
-    "price": 660.0,
-    "termin": "2027-12-30 00:00:00"
   },
   {
     "articul": "THR-25502",
@@ -9571,8 +8419,8 @@
     "name": "Магній Цитрамат Thorne Research (Magnesium Citramate) 90 капсул",
     "brand": "Thorne Research",
     "barcode": "693749272021",
-    "qty": 10,
-    "price": 664.0,
+    "qty": 7,
+    "price": 668.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -9580,7 +8428,7 @@
     "name": "Бетаїн HCL соляна кислота та пепсин Thorne Research (Betaine HCL Hydrochloric Acid Pepsin) 225 капсул",
     "brand": "Thorne Research",
     "barcode": "693749415022",
-    "qty": 8,
+    "qty": 9,
     "price": 1396.0,
     "termin": "2026-12-31 00:00:00"
   },
@@ -9589,8 +8437,8 @@
     "name": "Вітамін Д/К2 Thorne Research Vitamin D/K2 30 мл",
     "brand": "Thorne Research",
     "barcode": "693749500018",
-    "qty": 10,
-    "price": 1017.0,
+    "qty": 30,
+    "price": 1034.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
@@ -9603,13 +8451,13 @@
     "termin": "2028-04-30 00:00:00"
   },
   {
-    "articul": "THR-51602",
-    "name": "Лізин Thorne Research (L-lysine) 500 мг 60 капсул",
+    "articul": "THR-51202",
+    "name": "Гліцин Thorne Research (Glycine) 500 мг 250 капсул",
     "brand": "Thorne Research",
-    "barcode": "693749516026",
-    "qty": 1,
-    "price": 419.0,
-    "termin": "2028-03-30 00:00:00"
+    "barcode": "693749512028",
+    "qty": 5,
+    "price": 951.0,
+    "termin": "2028-07-30 00:00:00"
   },
   {
     "articul": "THR-51802",
@@ -9618,6 +8466,15 @@
     "barcode": "693749518020",
     "qty": 1,
     "price": 781.0,
+    "termin": "2028-07-30 00:00:00"
+  },
+  {
+    "articul": "THR-56002",
+    "name": "Ацетилцистеїн Thorne Research (NAC) 90 капсул",
+    "brand": "Thorne Research",
+    "barcode": "693749560029",
+    "qty": 1,
+    "price": 930.0,
     "termin": "2028-07-30 00:00:00"
   },
   {
@@ -9634,7 +8491,7 @@
     "name": "Коензим Q-10 (убіхінон) Thorne Research (Q-Best 100) 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749624011",
-    "qty": 10,
+    "qty": 8,
     "price": 1627.0,
     "termin": "2027-07-30 00:00:00"
   },
@@ -9652,7 +8509,7 @@
     "name": "Вітаміни для підтримки шлунка Thorne Research (GI-Encap) 180 капсул",
     "brand": "Thorne Research",
     "barcode": "693749714019",
-    "qty": 5,
+    "qty": 2,
     "price": 1217.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -9661,7 +8518,7 @@
     "name": "Вітаміни для жінок Thorne Research (Formula SF) 250 гелевих таблеток",
     "brand": "Thorne Research",
     "barcode": "693749722014",
-    "qty": 3,
+    "qty": 2,
     "price": 1312.0,
     "termin": "2026-11-30 00:00:00"
   },
@@ -9670,7 +8527,7 @@
     "name": "Залізо з кофакторами Thorne Research (Ferrasorb) 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749750031",
-    "qty": 30,
+    "qty": 10,
     "price": 795.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -9680,8 +8537,8 @@
     "brand": "Thorne Research",
     "barcode": "693749751045",
     "qty": 10,
-    "price": 1263.0,
-    "termin": "2027-02-28 00:00:00"
+    "price": 1259.0,
+    "termin": "2027-06-30 00:00:00"
   },
   {
     "articul": "THR-75502",
@@ -9706,7 +8563,7 @@
     "name": "Вітаміни для очищення печінки Thorne Research (Liver Cleanse) 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749769026",
-    "qty": 8,
+    "qty": 7,
     "price": 751.0,
     "termin": "2026-12-30 00:00:00"
   },
@@ -9724,9 +8581,9 @@
     "name": "Вітаміни для щитовидної залози Thorne Research (Thyrocsin) 120 капсул",
     "brand": "Thorne Research",
     "barcode": "693749784012",
-    "qty": 10,
+    "qty": 9,
     "price": 1228.0,
-    "termin": "2027-07-30 00:00:00"
+    "termin": "2027-11-30 00:00:00"
   },
   {
     "articul": "THR-78703",
@@ -9762,7 +8619,7 @@
     "barcode": "693749803034",
     "qty": 50,
     "price": 570.0,
-    "termin": "2027-11-30 00:00:00"
+    "termin": "2028-02-20 00:00:00"
   },
   {
     "articul": "TOB-48215",
@@ -9788,53 +8645,8 @@
     "brand": "Tucks",
     "barcode": "041388007304",
     "qty": 10,
-    "price": 519.0,
+    "price": 520.0,
     "termin": "2027-05-30 00:00:00"
-  },
-  {
-    "articul": "UNN-03052",
-    "name": "Повноцінний засіб для підтримки суглобів Universal Nutrition (Animal Flex) 44 пакетики",
-    "brand": "Universal Nutrition",
-    "barcode": "039442030528",
-    "qty": 2,
-    "price": 1725.0,
-    "termin": "2027-04-30 00:00:00"
-  },
-  {
-    "articul": "UNN-03288",
-    "name": "Universal Nutrition, Animal Flex, порошок для підтримки суглобів зі смаком вишні, 369 г (13 унцій)",
-    "brand": "Universal Nutrition",
-    "barcode": "039442032881",
-    "qty": 6,
-    "price": 1675.0,
-    "termin": "2027-06-30 00:00:00"
-  },
-  {
-    "articul": "UNN-04710",
-    "name": "Мультивітамін для прийому кожен день Universal Nutrition (Daily Formula) 100 таблеток",
-    "brand": "Universal Nutrition (USA)",
-    "barcode": "039442047076",
-    "qty": 1,
-    "price": 500.0,
-    "termin": "2027-05-30 00:00:00"
-  },
-  {
-    "articul": "98721_Q110",
-    "name": "Гребінець Uppercut (CT7 Tortoise Flip Comb) 1 шт",
-    "brand": "Uppercut",
-    "barcode": "817891020129",
-    "qty": 1,
-    "price": 291.0,
-    "termin": "2030-12-12 00:00:00"
-  },
-  {
-    "articul": "98721_Q45",
-    "name": "Матова помада Uppercut (Matt Pomade) 100 г",
-    "brand": "Uppercut",
-    "barcode": "817891025254",
-    "qty": 2,
-    "price": 647.0,
-    "termin": "2028-01-31 00:00:00"
   },
   {
     "articul": "VSL-06927",
@@ -9868,7 +8680,7 @@
     "name": "Покращене захисний засіб для шкіри, Vaseline, 0,35 унції (10 г)",
     "brand": "Vaseline",
     "barcode": "305212750003",
-    "qty": 5,
+    "qty": 3,
     "price": 119.0,
     "termin": "2028-01-01 00:00:00"
   },
@@ -9891,6 +8703,15 @@
     "termin": "2027-05-30 00:00:00"
   },
   {
+    "articul": "PPLS-52084",
+    "name": "Creatine Monohydrate Willmax 500 g orange",
+    "brand": "Willmax",
+    "barcode": "4820217520841",
+    "qty": 1,
+    "price": 552.0,
+    "termin": ""
+  },
+  {
     "articul": "PPLS-52090",
     "name": "Creatine Monohydrate Willmax 500 g apple",
     "brand": "Willmax",
@@ -9909,12 +8730,12 @@
     "termin": "2027-01-30 00:00:00"
   },
   {
-    "articul": "YUE-00186",
-    "name": "Чупачупси з різними фруктовими смаками органік YumEarth (Pops) 50 шт 349 г",
-    "brand": "YumEarth",
-    "barcode": "890146001869",
-    "qty": 3,
-    "price": 507.0,
-    "termin": "2027-12-19 00:00:00"
+    "articul": "ZIO-10240",
+    "name": "Zion Health, Glow Beauty Mask, зміцнювальний екстракт троянди, 56,69 г (2 унції)",
+    "brand": "Zion Health",
+    "barcode": "093141102405",
+    "qty": 1,
+    "price": 373.0,
+    "termin": ""
   }
 ]
