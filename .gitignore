@@ -64,4 +64,5 @@ exports/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+pages
 
