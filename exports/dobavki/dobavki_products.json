@@ -842,7 +842,7 @@
     "brand": "Doctor's Best",
     "barcode": "753950000872",
     "qty": 10,
-    "price": 900.0,
+    "price": 899.0,
     "termin": "2028-01-30 00:00:00"
   },
   {
@@ -1201,7 +1201,7 @@
     "name": "Міо інозитол та Д хіро інозитол Fairhaven Health (Myo + D-Chiro Inositol) 120 капсул",
     "brand": "Fairhaven Health",
     "barcode": "896593002275",
-    "qty": 30,
+    "qty": 20,
     "price": 1050.0,
     "termin": "2028-05-30 00:00:00"
   },
@@ -2083,7 +2083,7 @@
     "name": "Магній гліцинат, Magnesium Glycinate, My Nutrі Week, 120 капсул",
     "brand": "My Nutri Week",
     "barcode": "4820236532443",
-    "qty": 6,
+    "qty": 5,
     "price": 400.0,
     "termin": "2027-11-30 00:00:00"
   },
@@ -2335,7 +2335,7 @@
     "name": "Берберин Natural Factors (Berberine)  500 мг, 120 вегетаріанських капсул",
     "brand": "Natural Factors",
     "barcode": "627765035438",
-    "qty": 4,
+    "qty": 3,
     "price": 991.0,
     "termin": "2029-03-30 00:00:00"
   },
@@ -2785,7 +2785,7 @@
     "name": "За д'арко, Pau d'Arco, Nature's Way, внутрішня кора, 545 мг, 100 вегетаріанських капсул",
     "brand": "Nature's Way",
     "barcode": "033674154502",
-    "qty": 6,
+    "qty": 5,
     "price": 317.0,
     "termin": "2029-12-30 00:00:00"
   },
@@ -3064,7 +3064,7 @@
     "name": "Цитрулін Now Foods (L-Citrulline) 750 мг 90 веганських капсул",
     "brand": "Now Foods",
     "barcode": "733739000835",
-    "qty": 10,
+    "qty": 9,
     "price": 689.0,
     "termin": "2029-05-30 00:00:00"
   },
@@ -3280,8 +3280,8 @@
     "name": "Вітамін А Now Foods (Vitamin A) 10000 МО 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739003300",
-    "qty": 9,
-    "price": 193.0,
+    "qty": 8,
+    "price": 192.0,
     "termin": "2028-03-30 00:00:00"
   },
   {
@@ -3460,7 +3460,7 @@
     "name": "Кальцій Аскорбат Вітамін С Now Foods (C-500 Calcium Ascorbate-C) 500 мг 250 капсул",
     "brand": "Now Foods",
     "barcode": "733739006776",
-    "qty": 3,
+    "qty": 2,
     "price": 698.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -3775,7 +3775,7 @@
     "name": "Залізо Now Foods (Iron) 36 мг 90 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739014443",
-    "qty": 10,
+    "qty": 9,
     "price": 355.0,
     "termin": "2029-09-30 00:00:00"
   },
@@ -4064,7 +4064,7 @@
     "brand": "Now Foods",
     "barcode": "733739020253",
     "qty": 10,
-    "price": 615.0,
+    "price": 616.0,
     "termin": "2029-05-30 00:00:00"
   },
   {
@@ -4576,7 +4576,7 @@
     "name": "Дофамін і Мукуна для здоров'я мозку Допа Мукуна Now Foods (DOPA Mucuna) 90 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739030924",
-    "qty": 4,
+    "qty": 3,
     "price": 456.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -5224,7 +5224,7 @@
     "name": "Сереноя Со Пальметто Now Foods (Saw Palmetto Extract) 320 мг 90 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739047564",
-    "qty": 6,
+    "qty": 5,
     "price": 1090.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -6097,7 +6097,7 @@
     "name": "Засіб від нудоти блювання укачування в транспорті для дітей Pediakid (Nauseesvomissements Mal Des Transports) 10 стиків",
     "brand": "Pediakid",
     "barcode": "3700225602511",
-    "qty": 9,
+    "qty": 8,
     "price": 392.0,
     "termin": "2028-03-30 00:00:00"
   },
@@ -7060,7 +7060,7 @@
     "name": "Монолаурін Solaray (Monolaurin Supplement) 500 мг 60 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280627541",
-    "qty": 3,
+    "qty": 2,
     "price": 416.0,
     "termin": "2026-10-30 00:00:00"
   },
@@ -7573,7 +7573,7 @@
     "name": "ДІМ (Дііндолілметан), DIM (Diindolylmethane), Source Naturals, 200 мг, 60 таблеток",
     "brand": "Source Naturals",
     "barcode": "021078025894",
-    "qty": 2,
+    "qty": 1,
     "price": 532.0,
     "termin": "2029-04-30 00:00:00"
   },
@@ -8438,7 +8438,7 @@
     "brand": "Thorne Research",
     "barcode": "693749500018",
     "qty": 30,
-    "price": 1034.0,
+    "price": 1035.0,
     "termin": "2027-06-30 00:00:00"
   },
   {
@@ -8590,7 +8590,7 @@
     "name": "Вітаміни для мозку Thorne Research (Methyl-Guard) 180 капсул",
     "brand": "Thorne Research",
     "barcode": "693749787037",
-    "qty": 6,
+    "qty": 5,
     "price": 1620.0,
     "termin": "2027-06-30 00:00:00"
   },
