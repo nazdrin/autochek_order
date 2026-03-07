@@ -46,6 +46,13 @@ SUP6_ITEMS_JSON = (os.getenv("SUP6_ITEMS_JSON") or "").strip()
 SUP6_ORDER_JSON = (os.getenv("SUP6_ORDER_JSON") or os.getenv("BIOTUS_ORDER_JSON") or "").strip()
 SUP6_BIOTUS_FULL_NAME = (os.getenv("BIOTUS_FULL_NAME") or "").strip()
 SUP6_BIOTUS_PHONE_LOCAL = (os.getenv("BIOTUS_PHONE_LOCAL") or "").strip()
+SUP6_CITY_NAME = (os.getenv("BIOTUS_CITY_NAME") or "").strip()
+SUP6_CITY_AREA = (os.getenv("BIOTUS_CITY_AREA") or "").strip()
+SUP6_CITY_REGION = (os.getenv("BIOTUS_CITY_REGION") or "").strip()
+SUP6_CITY_TYPE = (os.getenv("BIOTUS_CITY_TYPE") or "").strip()
+SUP6_BRANCH_QUERY = (os.getenv("BIOTUS_BRANCH_QUERY") or "").strip()
+SUP6_BRANCH_KIND = (os.getenv("BIOTUS_BRANCH_KIND") or "").strip().lower()
+SUP6_TERMINAL_QUERY = (os.getenv("BIOTUS_TERMINAL_QUERY") or "").strip()
 SUPPLIER_RESULT_JSON_PREFIX = "SUPPLIER_RESULT_JSON="
 SUP6_MAKE_ORDER_URL = f"{SUP6_BASE_URL.rstrip('/')}/make-order.html"
 SUP6_CART_URL = f"{SUP6_BASE_URL.rstrip('/')}/cart.html"
@@ -198,6 +205,255 @@ def _split_last_first(full_name: str) -> tuple[str, str]:
     if len(parts) == 1:
         return "", parts[0]
     return parts[0], " ".join(parts[1:])
+
+
+def _normalize_spaces(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
+def _norm_text(s: str) -> str:
+    s = (s or "").lower()
+    s = s.replace("\u00a0", " ").replace("\u200b", " ")
+    s = s.replace("ё", "е")
+    s = s.replace("–", "-").replace("—", "-")
+    s = (
+        s.replace("ʼ", "'")
+        .replace("’", "'")
+        .replace("`", "'")
+        .replace("\u02bc", "'")
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+    )
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _norm_area_region(s: str) -> str:
+    s = _norm_text(s)
+    s = s.replace("область", "").replace("обл.", "").replace("обл", "")
+    s = s.replace("район", "").replace("р-н", "").replace("рн", "")
+    s = re.sub(r"[\.,;()\[\]{}]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _norm_city_name_only(s: str) -> str:
+    s = _norm_text(s)
+    s = re.sub(r"^(м\.?\s+|с\.?\s+|смт\.?\s+|с-ще\.?\s+|селище\s+)", "", s).strip()
+    return s
+
+
+def _normalize_no_markers(text: str) -> str:
+    t = text or ""
+    t = re.sub(r"(?<!\w)N\s*[º°]\s*", "№", t, flags=re.IGNORECASE)
+    t = re.sub(r"(?<!\w)N\s*[oо]\s*", "№", t, flags=re.IGNORECASE)
+    t = re.sub(r"№\s*", "№", t)
+    return t
+
+
+def _extract_number(ss: str) -> str | None:
+    s_norm = _normalize_no_markers(ss)
+    matches = list(re.finditer(r"№\s*(\d{1,6})", s_norm))
+    if matches:
+        for m in matches:
+            num = m.group(1)
+            if 4 <= len(num) <= 6:
+                return num
+        return matches[0].group(1)
+    m2 = re.search(r"\b(\d{4,6})\b", s_norm)
+    if m2:
+        return m2.group(1)
+    m3 = re.search(r"\b(\d{1,3})\b", s_norm)
+    if m3:
+        return m3.group(1)
+    return None
+
+
+def _extract_terminal_number(s: str) -> str | None:
+    s = _normalize_no_markers(s or "")
+    m = re.search(r"№\s*(\d{4,6})(?!\d)", s)
+    if m:
+        return m.group(1)
+    groups = [m.group(0) for m in re.finditer(r"(?<!\d)\d{4,6}(?!\d)", s)]
+    if not groups:
+        return None
+    max_len = max(len(g) for g in groups)
+    for g in groups:
+        if len(g) == max_len:
+            return g
+    return None
+
+
+def _get_first_delivery_block(order: dict) -> dict:
+    odd = order.get("ord_delivery_data") or []
+    if isinstance(odd, list) and odd:
+        first = odd[0]
+        return first if isinstance(first, dict) else {}
+    if isinstance(odd, dict):
+        return odd
+    return {}
+
+
+def _extract_city_values(order: dict) -> dict:
+    d = _get_first_delivery_block(order)
+    return {
+        "city_name": str(d.get("cityName") or "").strip(),
+        "area_name": str(d.get("areaName") or "").strip(),
+        "region_name": str(d.get("regionName") or "").strip(),
+        "city_type": str(d.get("cityType") or "").strip(),
+    }
+
+
+def _extract_delivery_info(order: dict) -> tuple[str, str]:
+    d = _get_first_delivery_block(order)
+    address = str(d.get("address") or "").strip()
+    bn = d.get("branchNumber")
+    bn_str = ""
+    if bn is not None:
+        try:
+            bn_str = str(int(bn))
+        except Exception:
+            bn_str = str(bn).strip()
+    return address, bn_str
+
+
+def _extract_shipping_address(order: dict) -> str:
+    return str(order.get("shipping_address") or "").strip()
+
+
+def _build_branch_query_from_shipping(shipping_address: str, fallback_address: str) -> str:
+    src = (shipping_address or "").strip() or (fallback_address or "").strip()
+    if not src:
+        return ""
+    s = _normalize_spaces(src)
+    s = re.sub(r"\(\s*до\s*\d+\s*кг\s*\)", "", s, flags=re.IGNORECASE)
+    s = _normalize_spaces(s)
+    s_lower = s.casefold()
+
+    def after_colon_tail(ss: str) -> str:
+        if ":" in ss:
+            tail = ss.split(":", 1)[1]
+            return _normalize_spaces(tail)
+        return ""
+
+    if "поштомат" in s_lower:
+        num = _extract_number(s)
+        if num:
+            return _normalize_spaces(num)
+        tail = after_colon_tail(s)
+        return tail or _normalize_spaces(s)
+
+    if "пункт приймання-видачі" in s_lower and ":" in s:
+        left, right = s.split(":", 1)
+        left = _normalize_spaces(left)
+        right = _normalize_spaces(right)
+        right = re.sub(r"\s*\(до [^)]+\)\s*", " ", right, flags=re.IGNORECASE).strip()
+        m = re.search(r"№\s*(\d+)", left)
+        if m:
+            return _normalize_spaces(f"Пункт приймання-видачі №{m.group(1)}: {right}")
+        return _normalize_spaces(f"Пункт приймання-видачі: {right}")
+
+    if "пункт" in s_lower:
+        has_pryimannya = "пункт приймання-видачі" in s_lower
+        num = _extract_number(s)
+        if has_pryimannya and num:
+            return _normalize_spaces(f"Пункт приймання-видачі №{num}")
+        if (not has_pryimannya) and num:
+            return _normalize_spaces(f"Пункт №{num}")
+        tail = after_colon_tail(s)
+        if tail:
+            return tail
+        s2 = re.sub(r"\(\s*до\s*\d+\s*кг\s*\)", "", s, flags=re.IGNORECASE)
+        if has_pryimannya:
+            s2 = re.sub(r"^\s*Пункт\s+приймання\-видачі\s*", "", s2, flags=re.IGNORECASE)
+        else:
+            s2 = re.sub(r"^\s*Пункт\s*", "", s2, flags=re.IGNORECASE)
+        return _normalize_spaces(s2) or _normalize_spaces(s)
+
+    if "відділен" in s_lower:
+        num = _extract_number(s)
+        if num:
+            return _normalize_spaces(f"Відділення №{num}")
+        tail = after_colon_tail(s)
+        return tail or _normalize_spaces("Відділення")
+
+    num = _extract_number(s)
+    if num:
+        return _normalize_spaces(num)
+    tail = after_colon_tail(s)
+    return tail or _normalize_spaces(s)
+
+
+def _detect_branch_kind(shipping_address: str, fallback_address: str) -> str:
+    src = (shipping_address or "").strip() or (fallback_address or "").strip()
+    s = (src or "").casefold()
+    if "пункт" in s:
+        return "punkt"
+    return "viddilennya"
+
+
+def _extract_delivery_values(order_payload: dict | None = None) -> dict:
+    payload = order_payload or {}
+    city_name = ""
+    area_name = ""
+    region_name = ""
+    city_type = ""
+    address = ""
+    branch_number = ""
+    shipping_address = ""
+    warehouse_query = ""
+    warehouse_mode = "branch"
+    branch_kind = ""
+
+    if payload:
+        city_data = _extract_city_values(payload)
+        city_name = city_data["city_name"]
+        area_name = city_data["area_name"]
+        region_name = city_data["region_name"]
+        city_type = city_data["city_type"]
+        address, branch_number = _extract_delivery_info(payload)
+        shipping_address = _extract_shipping_address(payload)
+
+        a_norm = (address or "").casefold()
+        if "поштомат" in a_norm:
+            warehouse_mode = "terminal"
+            warehouse_query = (branch_number or "").strip() or address
+        else:
+            warehouse_mode = "branch"
+            warehouse_query = _build_branch_query_from_shipping(shipping_address, address)
+            branch_kind = _detect_branch_kind(shipping_address, address)
+
+    if not city_name:
+        city_name = SUP6_CITY_NAME
+    if not area_name:
+        area_name = SUP6_CITY_AREA
+    if not region_name:
+        region_name = SUP6_CITY_REGION
+    if not city_type:
+        city_type = SUP6_CITY_TYPE
+    if not warehouse_query:
+        if SUP6_TERMINAL_QUERY:
+            warehouse_mode = "terminal"
+            warehouse_query = SUP6_TERMINAL_QUERY
+        elif SUP6_BRANCH_QUERY:
+            warehouse_mode = "branch"
+            warehouse_query = SUP6_BRANCH_QUERY
+            if SUP6_BRANCH_KIND in {"punkt", "viddilennya"}:
+                branch_kind = SUP6_BRANCH_KIND
+    if not branch_kind:
+        branch_kind = "punkt" if SUP6_BRANCH_KIND == "punkt" else "viddilennya"
+
+    region_for_select = area_name or region_name
+    return {
+        "region": _norm_area_region(region_for_select),
+        "city": city_name.strip(),
+        "city_type": city_type.strip(),
+        "warehouse_query": warehouse_query.strip(),
+        "warehouse_mode": warehouse_mode,
+        "branch_kind": branch_kind,
+        "address": address,
+        "shipping_address": shipping_address,
+    }
 
 
 def _extract_recipient_values(order_payload: dict | None = None) -> dict:
@@ -672,6 +928,15 @@ def _step4_fail(reason: str, *, details: dict | None = None) -> dict:
     return {
         "ok": False,
         "step": "step4_fill_recipient_info",
+        "reason": reason,
+        "details": details or {},
+    }
+
+
+def _step5_fail(reason: str, *, details: dict | None = None) -> dict:
+    return {
+        "ok": False,
+        "step": "step5_fill_delivery_np_pickup",
         "reason": reason,
         "details": details or {},
     }
@@ -1316,9 +1581,23 @@ async def _step4_fill_text_field(page, field, value: str, *, phone_mode: bool = 
         current = ""
 
     if phone_mode:
+        expected_digits_raw = _digits_only(value)
+        if expected_digits_raw.startswith("380") and len(expected_digits_raw) >= 12:
+            expected_digits_raw = expected_digits_raw[3:]
+        expected_digits_local10 = expected_digits_raw[-10:] if len(expected_digits_raw) >= 10 else expected_digits_raw
+        expected_digits_for_mask = (
+            expected_digits_local10[1:]
+            if len(expected_digits_local10) == 10 and expected_digits_local10.startswith("0")
+            else expected_digits_local10
+        )
         current_digits = _digits_only(current)
-        expected_digits = _digits_only(value)
-        if expected_digits and current_digits.endswith(expected_digits):
+        if (
+            len(current_digits) >= 9
+            and (
+                (expected_digits_for_mask and (current_digits.endswith(expected_digits_for_mask) or expected_digits_for_mask in current_digits))
+                or (expected_digits_local10 and (current_digits.endswith(expected_digits_local10) or expected_digits_local10 in current_digits))
+            )
+        ):
             return True
     else:
         if current == value:
@@ -1328,7 +1607,40 @@ async def _step4_fill_text_field(page, field, value: str, *, phone_mode: bool = 
         await field.click(timeout=min(4000, SUP6_TIMEOUT_MS))
         await page.keyboard.press(_select_all_shortcut())
         await page.keyboard.press("Backspace")
-        await field.fill(value, timeout=min(4000, SUP6_TIMEOUT_MS))
+        if phone_mode:
+            digits_local10 = expected_digits_local10 or _digits_only(value)
+            digits_local9 = digits_for_mask if (digits_for_mask := expected_digits_for_mask) else (digits_local10[1:] if len(digits_local10) == 10 else digits_local10)
+            attempts = []
+            if digits_local10:
+                attempts.append(digits_local10)
+            if digits_local9 and digits_local9 not in attempts:
+                attempts.append(digits_local9)
+            if digits_local10 and len(digits_local10) == 10:
+                full380 = f"380{digits_local10[1:]}" if digits_local10.startswith("0") else f"380{digits_local10}"
+                if full380 not in attempts:
+                    attempts.append(full380)
+
+            typed_ok = False
+            for phone_attempt in attempts:
+                try:
+                    await field.click(timeout=min(3000, SUP6_TIMEOUT_MS))
+                    await page.keyboard.press(_select_all_shortcut())
+                    await page.keyboard.press("Backspace")
+                    await page.keyboard.press(_select_all_shortcut())
+                    await page.keyboard.press("Delete")
+                    await field.type(phone_attempt, delay=25, timeout=min(6000, SUP6_TIMEOUT_MS))
+                    await page.wait_for_timeout(220)
+                    current_after = (await field.input_value() or "").strip()
+                    current_digits_after = _digits_only(current_after)
+                    if len(current_digits_after) >= 9:
+                        typed_ok = True
+                        break
+                except Exception:
+                    continue
+            if not typed_ok:
+                return False
+        else:
+            await field.fill(value, timeout=min(4000, SUP6_TIMEOUT_MS))
     except Exception:
         try:
             await page.evaluate(
@@ -1340,7 +1652,7 @@ async def _step4_fill_text_field(page, field, value: str, *, phone_mode: bool = 
                     el.dispatchEvent(new Event('change', { bubbles: true }));
                 }""",
                 await field.element_handle(),
-                value,
+                (_digits_only(value) if phone_mode else value),
             )
         except Exception:
             return False
@@ -1351,9 +1663,123 @@ async def _step4_fill_text_field(page, field, value: str, *, phone_mode: bool = 
         updated = ""
     if phone_mode:
         expected_digits = _digits_only(value)
+        if expected_digits.startswith("380") and len(expected_digits) >= 12:
+            expected_digits = expected_digits[3:]
+        expected_local10 = expected_digits[-10:] if len(expected_digits) >= 10 else expected_digits
+        expected_mask_digits = expected_local10[1:] if len(expected_local10) == 10 and expected_local10.startswith("0") else expected_local10
         updated_digits = _digits_only(updated)
-        return bool(expected_digits and updated_digits and (updated_digits.endswith(expected_digits) or expected_digits in updated_digits))
+        if len(updated_digits) < 9:
+            return False
+        return bool(
+            (expected_mask_digits and (updated_digits.endswith(expected_mask_digits) or expected_mask_digits in updated_digits))
+            or (expected_local10 and (updated_digits.endswith(expected_local10) or expected_local10 in updated_digits))
+            or (expected_digits and (updated_digits.endswith(expected_digits) or expected_digits in updated_digits))
+        )
     return updated == value
+
+
+def _format_phone_mask_ua(digits_raw: str) -> str:
+    d = _digits_only(digits_raw)
+    if d.startswith("380") and len(d) >= 12:
+        d = d[3:]
+    if len(d) == 9:
+        d = "0" + d
+    if len(d) >= 10:
+        d = d[-10:]
+    if len(d) < 10:
+        return d
+    # +38 (0XX) XXX-XX-XX
+    return f"+38 ({d[0:3]}) {d[3:6]}-{d[6:8]}-{d[8:10]}"
+
+
+async def _step4_fill_phone_field(page, value: str) -> tuple[bool, str]:
+    expected_digits = _digits_only(value)
+    if expected_digits.startswith("380") and len(expected_digits) >= 12:
+        expected_digits = expected_digits[3:]
+    if len(expected_digits) == 9:
+        expected_digits = "0" + expected_digits
+    if len(expected_digits) >= 10:
+        expected_digits = expected_digits[-10:]
+
+    # For masked input often only last 9 digits are user-entered (without leading 0).
+    expected_digits_mask = expected_digits[1:] if len(expected_digits) == 10 and expected_digits.startswith("0") else expected_digits
+    attempts = []
+    if expected_digits:
+        attempts.append(expected_digits)
+    if expected_digits_mask and expected_digits_mask not in attempts:
+        attempts.append(expected_digits_mask)
+    if expected_digits:
+        full_380 = f"380{expected_digits[1:]}" if expected_digits.startswith("0") else f"380{expected_digits}"
+        if full_380 not in attempts:
+            attempts.append(full_380)
+    masked_text = _format_phone_mask_ua(expected_digits)
+    if masked_text and masked_text not in attempts:
+        attempts.append(masked_text)
+
+    last_value = ""
+    for _ in range(3):
+        phone_field = await _step4_pick_field(page, ["#Phone", "input[name='form[Phone]']"])
+        if phone_field is None:
+            continue
+        try:
+            await phone_field.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+            await phone_field.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+        except Exception:
+            continue
+
+        for attempt_value in attempts:
+            try:
+                await phone_field.click(timeout=min(3000, SUP6_TIMEOUT_MS))
+                await page.keyboard.press(_select_all_shortcut())
+                await page.keyboard.press("Backspace")
+                await page.keyboard.press(_select_all_shortcut())
+                await page.keyboard.press("Delete")
+                if _digits_only(attempt_value) == attempt_value:
+                    await phone_field.type(attempt_value, delay=24, timeout=min(6000, SUP6_TIMEOUT_MS))
+                else:
+                    await phone_field.fill(attempt_value, timeout=min(4500, SUP6_TIMEOUT_MS))
+                await page.wait_for_timeout(240)
+                current = (await phone_field.input_value() or "").strip()
+                last_value = current
+                curr_digits = _digits_only(current)
+                if curr_digits and (
+                    (expected_digits_mask and (curr_digits.endswith(expected_digits_mask) or expected_digits_mask in curr_digits))
+                    or (expected_digits and (curr_digits.endswith(expected_digits) or expected_digits in curr_digits))
+                ):
+                    return True, current
+            except Exception:
+                continue
+
+        # JS fallback for masked controls.
+        try:
+            js_val = masked_text or expected_digits or value
+            await page.evaluate(
+                """(val) => {
+                    const el = document.querySelector('#Phone') || document.querySelector('input[name="form[Phone]"]');
+                    if (!el) return;
+                    el.focus();
+                    el.value = '';
+                    el.value = String(val || '');
+                    el.dispatchEvent(new KeyboardEvent('keydown', {bubbles:true, key:'0'}));
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    el.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:'0'}));
+                }""",
+                js_val,
+            )
+            await page.wait_for_timeout(240)
+            current = (await phone_field.input_value() or "").strip()
+            last_value = current
+            curr_digits = _digits_only(current)
+            if curr_digits and (
+                (expected_digits_mask and (curr_digits.endswith(expected_digits_mask) or expected_digits_mask in curr_digits))
+                or (expected_digits and (curr_digits.endswith(expected_digits) or expected_digits in curr_digits))
+            ):
+                return True, current
+        except Exception:
+            pass
+
+    return False, last_value
 
 
 async def step4_fill_recipient_info(page, order_payload: dict | None = None) -> dict:
@@ -1406,8 +1832,12 @@ async def step4_fill_recipient_info(page, order_payload: dict | None = None) -> 
         return _step4_fail("FIRST_NAME_FILL_FAILED", details={"value": recipient["first_name"]})
     print("[SUP6] recipient first name filled")
 
-    if not await _step4_fill_text_field(page, phone_field, recipient["phone"], phone_mode=True):
-        return _step4_fail("PHONE_FILL_FAILED", details={"value": recipient["phone"]})
+    phone_ok, phone_after = await _step4_fill_phone_field(page, recipient["phone"])
+    if not phone_ok:
+        return _step4_fail(
+            "PHONE_FILL_FAILED",
+            details={"value": recipient["phone"], "phone_after": phone_after, "masked_expected": _format_phone_mask_ua(recipient["phone"])},
+        )
     print("[SUP6] recipient phone filled")
 
     try:
@@ -1439,6 +1869,443 @@ async def step4_fill_recipient_info(page, order_payload: dict | None = None) -> 
     }
 
 
+async def _sumo_container(page, select_id: str):
+    select = page.locator(f"select#{select_id}").first
+    if await select.count() <= 0:
+        return None
+    try:
+        return select.locator("xpath=ancestor::div[contains(@class,'SumoSelect')][1]").first
+    except Exception:
+        return None
+
+
+async def _sumo_selected_text(page, select_id: str) -> str:
+    container = await _sumo_container(page, select_id)
+    if container is None:
+        return ""
+    candidates = [
+        container.locator(".CaptionCont .search").first,
+        container.locator(".CaptionCont span").first,
+        container.locator(".CaptionCont").first,
+    ]
+    for c in candidates:
+        try:
+            if await c.count() > 0:
+                txt = ((await c.inner_text()) or "").strip()
+                if txt:
+                    return txt
+        except Exception:
+            continue
+    return ""
+
+
+async def _sumo_open(page, select_id: str) -> bool:
+    container = await _sumo_container(page, select_id)
+    if container is None:
+        return False
+    opener = container.locator(".CaptionCont, p.search").first
+    for _ in range(3):
+        try:
+            if await opener.count() > 0:
+                await opener.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+                await opener.click(timeout=min(4000, SUP6_TIMEOUT_MS), force=True)
+            else:
+                await container.click(timeout=min(4000, SUP6_TIMEOUT_MS), force=True)
+            await page.wait_for_timeout(220)
+            cls = ((await container.get_attribute("class")) or "").lower()
+            if "open" in cls:
+                return True
+        except Exception:
+            await page.wait_for_timeout(220)
+    return False
+
+
+async def _sumo_wait_enabled(page, select_id: str, timeout_ms: int) -> bool:
+    container = await _sumo_container(page, select_id)
+    if container is None:
+        return False
+    deadline = asyncio.get_running_loop().time() + (timeout_ms / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            cls = ((await container.get_attribute("class")) or "").casefold()
+            if "disabled" not in cls:
+                return True
+        except Exception:
+            pass
+        await page.wait_for_timeout(220)
+    return False
+
+
+def _is_default_placeholder_text(text: str) -> bool:
+    t = _norm_text(text)
+    return ("виберіть" in t) or ("спочатку виберіть" in t)
+
+
+def _branch_number_from_query(q: str) -> str:
+    q_raw = (q or "").strip()
+    if not q_raw:
+        return ""
+    if re.fullmatch(r"\d+", q_raw):
+        return q_raw
+    m = re.search(r"(?:пункт|відділення)\s*№\s*(\d+)", q_raw, flags=re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _build_branch_option_matcher(kind: str, query: str):
+    q_raw = re.sub(r"\s*\(до [^)]+\)\s*", " ", query or "", flags=re.IGNORECASE).strip()
+    qn = _norm_text(q_raw)
+    num = _branch_number_from_query(q_raw)
+    has_num = bool(num)
+    strict_re = None
+    if kind == "viddilennya" and has_num:
+        strict_re = re.compile(rf"(?:мобільне\s+)?відділення\s*№\s*{re.escape(num)}(?!\d)", re.IGNORECASE)
+    elif kind == "punkt" and has_num:
+        strict_re = re.compile(rf"пункт\s*(?:приймання\-видачі\s*)?№\s*{re.escape(num)}(?!\d)", re.IGNORECASE)
+
+    def norm_addr(s: str) -> str:
+        s = _norm_text(s)
+        s = s.replace("пункт приймання-видачі", "")
+        s = s.replace("пункт приймання видачі", "")
+        s = s.replace("пункт", "")
+        s = s.replace("відділення", "")
+        s = s.replace("№", " ")
+        s = s.replace("вулиця", "вул")
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    addr_mode = (kind == "punkt") and (":" in q_raw) and (not has_num)
+    addr_query = norm_addr(q_raw)
+    nums = re.findall(r"\d+", addr_query)
+    house_num = nums[-1] if nums else None
+    raw_tokens = [t for t in re.split(r"\s+", addr_query) if t]
+    addr_tokens = [t for t in raw_tokens if len(t) >= 4 and t not in {"вул", "пр", "пл"}]
+
+    def matches(option_text: str) -> bool:
+        if not option_text:
+            return False
+        tn_raw = re.sub(r"\s*\(до [^)]+\)\s*", " ", option_text, flags=re.IGNORECASE)
+        tn = _norm_text(tn_raw)
+        if strict_re is not None:
+            return bool(strict_re.search(option_text))
+        if addr_mode:
+            tn_addr = norm_addr(tn_raw)
+            if addr_tokens and not all(tok in tn_addr for tok in addr_tokens):
+                return False
+            if house_num and house_num not in tn_addr:
+                return False
+            return True
+        return qn in tn
+
+    return matches
+
+
+def _build_terminal_option_matcher(query: str):
+    raw = query or ""
+    num = _extract_terminal_number(raw)
+    normalized = _norm_text(raw)
+    if num:
+        strict_re = re.compile(rf"(?:№\s*)?(?<!\d){re.escape(num)}(?!\d)", re.IGNORECASE)
+
+        def matches(option_text: str) -> bool:
+            return bool(option_text and strict_re.search(option_text))
+
+        return matches
+
+    raw_tokens = [t for t in re.split(r"[\s/,\-]+", normalized) if t]
+    strong_tokens = [t for t in raw_tokens if len(t) >= 3 and t not in {"вул", "пр", "пл", "буд"}]
+
+    def matches(option_text: str) -> bool:
+        if not option_text:
+            return False
+        tn = _norm_text(option_text)
+        if strong_tokens:
+            return all(tok in tn for tok in strong_tokens)
+        return normalized in tn
+
+    return matches
+
+
+async def _sumo_choose_option(
+    page,
+    *,
+    select_id: str,
+    query: str,
+    matcher,
+    reason_not_found: str,
+    max_attempts: int = 3,
+) -> tuple[bool, str, dict]:
+    last_options: list[str] = []
+    for _attempt in range(1, max_attempts + 1):
+        opened = await _sumo_open(page, select_id)
+        if not opened:
+            await page.wait_for_timeout(220)
+            continue
+        container = await _sumo_container(page, select_id)
+        if container is None:
+            continue
+        search_inputs = container.locator(".optWrapper input, .search-txt input, .search-txt")
+        try:
+            if await search_inputs.count() > 0:
+                search_input = search_inputs.first
+                if await search_input.is_visible():
+                    await search_input.click(timeout=min(3000, SUP6_TIMEOUT_MS), force=True)
+                    await search_input.fill("", timeout=min(3000, SUP6_TIMEOUT_MS))
+                    await search_input.type(query, delay=12, timeout=min(5000, SUP6_TIMEOUT_MS))
+        except Exception:
+            pass
+
+        await page.wait_for_timeout(260)
+        options = container.locator(".optWrapper li.opt:not(.disabled):not(.hidden):visible")
+        try:
+            count = await options.count()
+        except Exception:
+            count = 0
+        candidates: list[tuple[int, str]] = []
+        for i in range(min(count, 200)):
+            opt = options.nth(i)
+            try:
+                txt = ((await opt.inner_text()) or "").strip()
+            except Exception:
+                txt = ""
+            if txt:
+                last_options.append(txt)
+            if txt and matcher(txt):
+                candidates.append((i, txt))
+        if candidates:
+            pick_i, picked_text = candidates[0]
+            pick = options.nth(pick_i)
+            try:
+                await pick.scroll_into_view_if_needed(timeout=min(2000, SUP6_TIMEOUT_MS))
+            except Exception:
+                pass
+            try:
+                await pick.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+            except Exception:
+                try:
+                    await pick.locator("label, span, p").first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+                except Exception:
+                    await page.wait_for_timeout(220)
+                    continue
+            await page.wait_for_timeout(260)
+            selected = await _sumo_selected_text(page, select_id)
+            if selected and not _is_default_placeholder_text(selected):
+                return True, selected, {"picked": picked_text}
+        await page.wait_for_timeout(220)
+
+    uniq_opts = []
+    seen = set()
+    for o in last_options:
+        n = _norm_text(o)
+        if n in seen:
+            continue
+        seen.add(n)
+        uniq_opts.append(o)
+    return False, "", {"reason": reason_not_found, "query": query, "seen_options": uniq_opts[:25]}
+
+
+async def _step5_select_delivery_np_pickup(page) -> bool:
+    preferred = [
+        page.locator("label[for='typeOfDelivery0']").first,
+        page.get_by_text("Самовивіз з Нової пошти", exact=False).first,
+        page.locator("label:has-text('Самовивіз з Нової пошти')").first,
+        page.locator("#typeOfDelivery0").first,
+    ]
+
+    async def _is_selected() -> bool:
+        try:
+            label = page.locator("label[for='typeOfDelivery0']").first
+            if await label.count() > 0:
+                cls = ((await label.get_attribute("class")) or "").casefold()
+                if "selected" in cls:
+                    return True
+        except Exception:
+            pass
+        try:
+            radio = page.locator("#typeOfDelivery0").first
+            if await radio.count() > 0 and await radio.is_checked():
+                return True
+        except Exception:
+            pass
+        return False
+
+    if await _is_selected():
+        print("[SUP6] selected delivery type: Нова пошта самовивіз")
+        return True
+
+    for cand in preferred:
+        try:
+            if await cand.count() <= 0:
+                continue
+            if await cand.first.is_visible():
+                await cand.first.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+                await cand.first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+                await page.wait_for_timeout(260)
+                if await _is_selected():
+                    print("[SUP6] selected delivery type: Нова пошта самовивіз")
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+async def _step5_select_delivery_payer_receiver(page) -> bool:
+    async def _is_selected() -> bool:
+        try:
+            label = page.locator("label[for='typePayerDelivery1']").first
+            if await label.count() > 0:
+                cls = ((await label.get_attribute("class")) or "").casefold()
+                if "selected" in cls:
+                    return True
+        except Exception:
+            pass
+        try:
+            radio = page.locator("#typePayerDelivery1").first
+            if await radio.count() > 0 and await radio.is_checked():
+                return True
+        except Exception:
+            pass
+        return False
+
+    if await _is_selected():
+        print("[SUP6] selected delivery payer: Одержувач")
+        return True
+
+    candidates = [
+        page.locator("label[for='typePayerDelivery1']").first,
+        page.get_by_text("Одержувач", exact=False).first,
+        page.locator("#typePayerDelivery1").first,
+    ]
+    for cand in candidates:
+        try:
+            if await cand.count() <= 0:
+                continue
+            if await cand.first.is_visible():
+                await cand.first.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+                await cand.first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+                await page.wait_for_timeout(220)
+                if await _is_selected():
+                    print("[SUP6] selected delivery payer: Одержувач")
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None) -> dict:
+    try:
+        await _step4_ensure_checkout_open(page)
+    except Exception as e:
+        return _step5_fail("CHECKOUT_OPEN_FAILED", details={"error": str(e), "url": page.url or ""})
+
+    if not await _step5_select_delivery_np_pickup(page):
+        return _step5_fail("DELIVERY_TYPE_NOT_SELECTED", details={"expected": "Самовивіз з Нової пошти"})
+
+    delivery = _extract_delivery_values(order_payload)
+    if not delivery["region"]:
+        return _step5_fail("NP_REGION_MISSING", details={"delivery": delivery})
+    if not delivery["city"]:
+        return _step5_fail("NP_CITY_MISSING", details={"delivery": delivery})
+    if not delivery["warehouse_query"]:
+        return _step5_fail("NP_WAREHOUSE_QUERY_MISSING", details={"delivery": delivery})
+
+    region_query = delivery["region"]
+    region_matcher = lambda txt: region_query in _norm_area_region(txt)  # noqa: E731
+    ok_region, selected_region, region_meta = await _sumo_choose_option(
+        page,
+        select_id="selectRegion",
+        query=region_query,
+        matcher=region_matcher,
+        reason_not_found="NP_REGION_NOT_FOUND",
+    )
+    if not ok_region:
+        return _step5_fail("NP_REGION_NOT_FOUND", details=region_meta)
+    print(f"[SUP6] selected region: {selected_region}")
+
+    if not await _sumo_wait_enabled(page, "selectCity", SUP6_TIMEOUT_MS):
+        return _step5_fail("NP_CITY_FIELD_DISABLED", details={"after_region": selected_region})
+    city_norm = _norm_city_name_only(delivery["city"])
+    area_norm = _norm_area_region(delivery["region"])
+
+    def _city_matcher(txt: str) -> bool:
+        raw = (txt or "").strip()
+        if not raw:
+            return False
+        parts = [p.strip() for p in raw.split("/") if p.strip()]
+        left = parts[0] if parts else raw
+        name = _norm_city_name_only(left)
+        if name != city_norm:
+            return False
+        if area_norm and len(parts) > 1:
+            region_part = _norm_area_region(parts[1])
+            if region_part and area_norm not in region_part and region_part not in area_norm:
+                return False
+        return True
+
+    ok_city, selected_city, city_meta = await _sumo_choose_option(
+        page,
+        select_id="selectCity",
+        query=delivery["city"],
+        matcher=_city_matcher,
+        reason_not_found="NP_CITY_NOT_FOUND",
+    )
+    if not ok_city:
+        return _step5_fail("NP_CITY_NOT_FOUND", details=city_meta)
+    print(f"[SUP6] selected city: {selected_city}")
+
+    if not await _sumo_wait_enabled(page, "selectWarehouses", SUP6_TIMEOUT_MS):
+        return _step5_fail("NP_WAREHOUSE_FIELD_DISABLED", details={"after_city": selected_city})
+    if delivery["warehouse_mode"] == "terminal":
+        warehouse_matcher = _build_terminal_option_matcher(delivery["warehouse_query"])
+        warehouse_reason = "NP_TERMINAL_NOT_FOUND"
+    else:
+        warehouse_matcher = _build_branch_option_matcher(delivery["branch_kind"], delivery["warehouse_query"])
+        warehouse_reason = "NP_WAREHOUSE_NOT_FOUND"
+
+    ok_wh, selected_wh, wh_meta = await _sumo_choose_option(
+        page,
+        select_id="selectWarehouses",
+        query=delivery["warehouse_query"],
+        matcher=warehouse_matcher,
+        reason_not_found=warehouse_reason,
+    )
+    if not ok_wh:
+        return _step5_fail(warehouse_reason, details=wh_meta)
+    print(f"[SUP6] selected warehouse: {selected_wh}")
+
+    if not await _step5_select_delivery_payer_receiver(page):
+        return _step5_fail("DELIVERY_PAYER_NOT_SELECTED", details={"expected": "Одержувач"})
+
+    final_region = await _sumo_selected_text(page, "selectRegion")
+    final_city = await _sumo_selected_text(page, "selectCity")
+    final_wh = await _sumo_selected_text(page, "selectWarehouses")
+    if (not final_region) or _is_default_placeholder_text(final_region):
+        return _step5_fail("NP_REGION_EMPTY_AFTER_SELECT", details={"selected_region": final_region})
+    if (not final_city) or _is_default_placeholder_text(final_city):
+        return _step5_fail("NP_CITY_EMPTY_AFTER_SELECT", details={"selected_city": final_city})
+    if (not final_wh) or _is_default_placeholder_text(final_wh):
+        return _step5_fail("NP_WAREHOUSE_EMPTY_AFTER_SELECT", details={"selected_warehouse": final_wh})
+
+    if not await _step5_select_delivery_np_pickup(page):
+        return _step5_fail("DELIVERY_TYPE_VERIFY_FAILED")
+    if not await _step5_select_delivery_payer_receiver(page):
+        return _step5_fail("DELIVERY_PAYER_VERIFY_FAILED")
+
+    return {
+        "ok": True,
+        "step": "step5_fill_delivery_np_pickup",
+        "details": {
+            "region": final_region,
+            "city": final_city,
+            "warehouse": final_wh,
+            "payer": "Одержувач",
+            "warehouse_mode": delivery["warehouse_mode"],
+            "warehouse_query": delivery["warehouse_query"],
+        },
+    }
+
+
 async def _run_add_items_stage(*, items_override: str = "", order_json_override: str = "") -> dict:
     items = _parse_sup6_items(items_override)
     order_payload = _parse_order_payload(order_json_override)
@@ -1455,6 +2322,7 @@ async def _run_add_items_stage(*, items_override: str = "", order_json_override:
             login_info = await ensure_logged_in(page, context, state_path, force_login=SUP6_FORCE_LOGIN)
             result = await step3_add_items_to_cart(page, items)
             fill_result = None
+            delivery_result = None
             if result.get("ok"):
                 fill_result = await step4_fill_recipient_info(page, order_payload)
                 if not fill_result.get("ok"):
@@ -1467,11 +2335,32 @@ async def _run_add_items_stage(*, items_override: str = "", order_json_override:
                         "reason": fill_result.get("reason"),
                         "error": str(fill_result.get("reason") or "step4_fill_recipient_info failed"),
                     }
+                delivery_result = await step5_fill_delivery_np_pickup(page, order_payload)
+                if not delivery_result.get("ok"):
+                    return {
+                        "ok": False,
+                        "stage": "fill_delivery",
+                        "url": page.url or SUP6_CHECKOUT_URL,
+                        "storage_state": str(state_path),
+                        "details": {
+                            "login": login_info,
+                            "add_items": result,
+                            "fill_recipient": fill_result,
+                            "fill_delivery": delivery_result,
+                        },
+                        "reason": delivery_result.get("reason"),
+                        "error": str(delivery_result.get("reason") or "step5_fill_delivery_np_pickup failed"),
+                    }
             return {
                 "stage": "add_items",
                 "url": page.url or SUP6_MAKE_ORDER_URL,
                 "storage_state": str(state_path),
-                "details": {"login": login_info, "add_items": result, "fill_recipient": fill_result},
+                "details": {
+                    "login": login_info,
+                    "add_items": result,
+                    "fill_recipient": fill_result,
+                    "fill_delivery": delivery_result,
+                },
                 **result,
             }
         finally:
@@ -1555,6 +2444,43 @@ async def _run_fill_recipient_stage(*, pause_seconds: int = 18, order_json_overr
                 await browser.close()
 
 
+async def _run_fill_delivery_stage(*, pause_seconds: int = 18, order_json_override: str = "") -> dict:
+    state_path = _state_path()
+    if not _is_state_file_valid(state_path):
+        return {
+            "ok": False,
+            "stage": "fill_delivery",
+            "storage_state": str(state_path),
+            "error": f"storage_state is missing or invalid: {state_path}",
+        }
+
+    order_payload = _parse_order_payload(order_json_override)
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=SUP6_HEADLESS)
+        context = None
+        try:
+            context = await browser.new_context(storage_state=str(state_path))
+            page = await context.new_page()
+            await page.goto(SUP6_CHECKOUT_URL, wait_until="domcontentloaded", timeout=SUP6_TIMEOUT_MS)
+            result = await step5_fill_delivery_np_pickup(page, order_payload)
+            if pause_seconds > 0:
+                print(f"[SUP6] fill_delivery: keep browser open for {pause_seconds}s")
+                await page.wait_for_timeout(pause_seconds * 1000)
+            return {
+                "stage": "fill_delivery",
+                "url": page.url or SUP6_CHECKOUT_URL,
+                "storage_state": str(state_path),
+                "details": {"fill_delivery": result},
+                **result,
+            }
+        finally:
+            try:
+                if context is not None:
+                    await context.close()
+            finally:
+                await browser.close()
+
+
 async def _run_full_stage(*, items_override: str = "", order_json_override: str = "") -> dict:
     items = _parse_sup6_items(items_override)
     order_payload = _parse_order_payload(order_json_override)
@@ -1606,6 +2532,23 @@ async def _run_full_stage(*, items_override: str = "", order_json_override: str 
                     "reason": fill_result.get("reason"),
                     "error": str(fill_result.get("reason") or "step4_fill_recipient_info failed"),
                 }
+            delivery_result = await step5_fill_delivery_np_pickup(page, order_payload)
+            if not delivery_result.get("ok"):
+                return {
+                    "ok": False,
+                    "stage": "fill_delivery",
+                    "url": page.url or SUP6_CHECKOUT_URL,
+                    "storage_state": str(state_path),
+                    "details": {
+                        "login": login_info,
+                        "clear_cart": clear_result,
+                        "add_items": add_result,
+                        "fill_recipient": fill_result,
+                        "fill_delivery": delivery_result,
+                    },
+                    "reason": delivery_result.get("reason"),
+                    "error": str(delivery_result.get("reason") or "step5_fill_delivery_np_pickup failed"),
+                }
             return {
                 "ok": True,
                 "stage": "run",
@@ -1616,6 +2559,7 @@ async def _run_full_stage(*, items_override: str = "", order_json_override: str 
                     "clear_cart": clear_result,
                     "add_items": add_result,
                     "fill_recipient": fill_result,
+                    "fill_delivery": delivery_result,
                 },
             }
         finally:
@@ -1637,15 +2581,21 @@ async def _run() -> dict:
         return await _run_finish_cart_stage()
     if SUP6_STAGE in {"fill_recipient", "fill-recipient"}:
         return await _run_fill_recipient_stage()
+    if SUP6_STAGE in {"fill_delivery", "fill-delivery"}:
+        return await _run_fill_delivery_stage()
     if SUP6_STAGE == "run":
         return await _run_full_stage()
-    raise RuntimeError(f"Unsupported SUP6_STAGE={SUP6_STAGE!r}. Expected 'login', 'clear_cart', 'add_items', 'finish_cart', 'fill_recipient' or 'run'.")
+    raise RuntimeError(
+        f"Unsupported SUP6_STAGE={SUP6_STAGE!r}. Expected 'login', 'clear_cart', 'add_items', "
+        "'finish_cart', 'fill_recipient', 'fill_delivery' or 'run'."
+    )
 
 
 async def _amain(
     clear_cart_only: bool = False,
     finish_cart_only: bool = False,
     fill_recipient_only: bool = False,
+    fill_delivery_only: bool = False,
     *,
     stage_override: str = "",
     items_override: str = "",
@@ -1664,10 +2614,14 @@ async def _amain(
                 result = await _run_finish_cart_stage()
             elif stage in {"4", "fill_recipient", "fill-recipient", "step4_fill_recipient_info"}:
                 result = await _run_fill_recipient_stage(order_json_override=order_json_override)
+            elif stage in {"5", "fill_delivery", "fill-delivery", "step5_fill_delivery_np_pickup"}:
+                result = await _run_fill_delivery_stage(order_json_override=order_json_override)
             elif stage in {"run"}:
                 result = await _run_full_stage(items_override=items_override, order_json_override=order_json_override)
             else:
                 raise RuntimeError(f"Unsupported --step value: {stage_override!r}")
+        elif fill_delivery_only:
+            result = await _run_fill_delivery_stage(order_json_override=order_json_override)
         elif fill_recipient_only:
             result = await _run_fill_recipient_stage(order_json_override=order_json_override)
         elif finish_cart_only:
@@ -1681,7 +2635,9 @@ async def _amain(
         print(SUPPLIER_RESULT_JSON_PREFIX + json.dumps(result, ensure_ascii=False))
         return 0 if bool(result.get("ok")) else 1
     except PWTimeoutError as e:
-        if fill_recipient_only:
+        if fill_delivery_only:
+            stage = "fill_delivery"
+        elif fill_recipient_only:
             stage = "fill_recipient"
         elif finish_cart_only:
             stage = "finish_cart"
@@ -1693,7 +2649,9 @@ async def _amain(
         print(SUPPLIER_RESULT_JSON_PREFIX + json.dumps({"ok": False, "stage": stage, "error": f"timeout: {e}"}))
         return 1
     except Exception as e:
-        if fill_recipient_only:
+        if fill_delivery_only:
+            stage = "fill_delivery"
+        elif fill_recipient_only:
             stage = "fill_recipient"
         elif finish_cart_only:
             stage = "finish_cart"
@@ -1711,7 +2669,8 @@ def main() -> None:
     parser.add_argument("--clear-cart", action="store_true", help="Run clear cart stage and keep browser open for SUP6_CLEAR_CART_PAUSE_SECONDS")
     parser.add_argument("--finish-cart-only", action="store_true", help="Open cart.html from storage_state and finish step 3 (checkout + agreement)")
     parser.add_argument("--fill-recipient-only", action="store_true", help="Open checkout and fill recipient fields for dropshipping from order payload")
-    parser.add_argument("--step", default="", help="Stage shortcut: 1|2|3|4|login|clear_cart|add_items|finish_cart|fill_recipient|run")
+    parser.add_argument("--fill-delivery-only", action="store_true", help="Open checkout and fill NP pickup delivery fields from order payload")
+    parser.add_argument("--step", default="", help="Stage shortcut: 1|2|3|4|5|login|clear_cart|add_items|finish_cart|fill_recipient|fill_delivery|run")
     parser.add_argument("--items", default="", help="Items for add_items stage, format: SKU1:2,SKU2:1")
     parser.add_argument("--order-json", default="", help="Order payload JSON (expects primaryContact with lName/fName/phone)")
     args = parser.parse_args()
@@ -1721,6 +2680,7 @@ def main() -> None:
                 clear_cart_only=args.clear_cart,
                 finish_cart_only=args.finish_cart_only,
                 fill_recipient_only=args.fill_recipient_only,
+                fill_delivery_only=args.fill_delivery_only,
                 stage_override=args.step,
                 items_override=args.items,
                 order_json_override=args.order_json,
