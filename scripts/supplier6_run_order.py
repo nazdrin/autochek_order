@@ -293,8 +293,8 @@ def _norm_district_name(s: str) -> str:
     s = _norm_text(s)
     s = s.replace("район", " ").replace("р-н", " ").replace("рн", " ")
     s = s.replace("область", " ").replace("обл.", " ").replace("обл", " ")
-    s = re.sub(r"[()\\[\\]{}.,;:!\"“”'`’ʼ/\\\\\\-]+", " ", s)
-    s = re.sub(r"\\s+", " ", s).strip()
+    s = re.sub(r"[()\[\]{}.,;:!\"“”'`’ʼ/\\-]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
     return s
 
 
@@ -302,7 +302,7 @@ def _split_city_option_text(txt: str) -> tuple[str, str]:
     raw = _normalize_spaces(txt or "")
     if not raw:
         return "", ""
-    m = re.match(r"^(.*?)\\s*\\((.*?)\\)\\s*$", raw)
+    m = re.match(r"^(.*?)\s*\((.*?)\)\s*$", raw)
     if m:
         return _normalize_spaces(m.group(1)), _normalize_spaces(m.group(2))
     return raw, ""
@@ -2641,6 +2641,7 @@ async def _step5_select_city_with_district(
     city_query: str,
     district_raw: str,
     region_raw: str,
+    city_type_raw: str = "",
 ) -> tuple[bool, str, dict, str]:
     opened = await _sumo_open(page, "selectCity")
     if not opened:
@@ -2750,11 +2751,14 @@ async def _step5_select_city_with_district(
         )
 
     selected = None
+    city_type_norm = _norm_text(city_type_raw)
+    is_city_type = city_type_norm.startswith("м")
     district_tiebreak_used = False
+    tiebreak_mode = "city_region_only" if is_city_type else "settlement_district_then_region"
     if len(candidates) == 1:
         selected = candidates[0]
     else:
-        if order_district_norm:
+        if (not is_city_type) and order_district_norm:
             district_tiebreak_used = True
             narrowed = [c for c in candidates if _district_soft_match(order_district_norm, c.get("district_hint_norm") or "")]
             print(f"[SUP6] district tie-break applied => {json.dumps([c['text'] for c in narrowed], ensure_ascii=False)}")
@@ -2769,6 +2773,8 @@ async def _step5_select_city_with_district(
                         "query": city_query,
                         "district_raw": district_raw,
                         "district_norm": order_district_norm,
+                        "city_type": city_type_raw,
+                        "tiebreak_mode": tiebreak_mode,
                         "candidates_by_name": [c["text"] for c in candidates],
                         "candidates_after_district": [c["text"] for c in narrowed],
                         "typed_debug": typed_debug,
@@ -2789,6 +2795,8 @@ async def _step5_select_city_with_district(
                             "query": city_query,
                             "district_raw": district_raw,
                             "district_norm": order_district_norm,
+                            "city_type": city_type_raw,
+                            "tiebreak_mode": tiebreak_mode,
                             "region_raw": region_raw,
                             "region_norm": order_region_norm,
                             "candidates_by_name": [c["text"] for c in candidates],
@@ -2812,10 +2820,12 @@ async def _step5_select_city_with_district(
                     "",
                     {
                         "reason": "CITY_AMBIGUOUS",
-                    "query": city_query,
-                    "district_raw": district_raw,
-                    "district_norm": order_district_norm,
-                    "candidates_by_name": [c["text"] for c in candidates],
+                        "query": city_query,
+                        "district_raw": district_raw,
+                        "district_norm": order_district_norm,
+                        "city_type": city_type_raw,
+                        "tiebreak_mode": tiebreak_mode,
+                        "candidates_by_name": [c["text"] for c in candidates],
                         "region_raw": region_raw,
                         "region_norm": order_region_norm,
                         "candidates_after_region": [c["text"] for c in narrowed_by_region],
@@ -2849,6 +2859,8 @@ async def _step5_select_city_with_district(
             "city_raw": city_query,
             "district_raw": district_raw,
             "region_raw": region_raw,
+            "city_type": city_type_raw,
+            "tiebreak_mode": tiebreak_mode,
             "candidates_by_name": [c["text"] for c in candidates],
             "selected_candidate": selected["text"],
             "district_tiebreak_used": district_tiebreak_used,
@@ -2898,6 +2910,7 @@ async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None)
         city_query=delivery["city"],
         district_raw=delivery.get("district") or "",
         region_raw=delivery.get("region") or "",
+        city_type_raw=delivery.get("city_type") or "",
     )
     if not ok_city:
         if city_err_reason == "NP_CITY_QUERY_NOT_TYPED":
