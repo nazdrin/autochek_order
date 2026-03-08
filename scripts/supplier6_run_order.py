@@ -2704,6 +2704,7 @@ async def _step5_select_city_with_district(
     seen_options: list[str] = []
     city_norm = _norm_city_name_only(city_query)
     order_district_norm = _norm_district_name(district_raw)
+    order_region_norm = _norm_area_region(region_raw)
     for i in range(min(count, 1200)):
         opt = options.nth(i)
         try:
@@ -2774,20 +2775,54 @@ async def _step5_select_city_with_district(
                     },
                     "CITY_AMBIGUOUS",
                 )
+            elif order_region_norm:
+                narrowed_by_region = [c for c in candidates if _district_soft_match(order_region_norm, c.get("district_hint_norm") or "")]
+                print(f"[SUP6] region tie-break applied => {json.dumps([c['text'] for c in narrowed_by_region], ensure_ascii=False)}")
+                if len(narrowed_by_region) == 1:
+                    selected = narrowed_by_region[0]
+                elif len(narrowed_by_region) > 1:
+                    return (
+                        False,
+                        "",
+                        {
+                            "reason": "CITY_AMBIGUOUS",
+                            "query": city_query,
+                            "district_raw": district_raw,
+                            "district_norm": order_district_norm,
+                            "region_raw": region_raw,
+                            "region_norm": order_region_norm,
+                            "candidates_by_name": [c["text"] for c in candidates],
+                            "candidates_after_region": [c["text"] for c in narrowed_by_region],
+                            "typed_debug": typed_debug,
+                        },
+                        "CITY_AMBIGUOUS",
+                    )
         if selected is None:
-            return (
-                False,
-                "",
-                {
-                    "reason": "CITY_AMBIGUOUS",
+            narrowed_by_region = []
+            if order_region_norm:
+                narrowed_by_region = [c for c in candidates if _district_soft_match(order_region_norm, c.get("district_hint_norm") or "")]
+                print(f"[SUP6] region tie-break applied => {json.dumps([c['text'] for c in narrowed_by_region], ensure_ascii=False)}")
+                if len(narrowed_by_region) == 1:
+                    selected = narrowed_by_region[0]
+            if selected is not None:
+                pass
+            else:
+                return (
+                    False,
+                    "",
+                    {
+                        "reason": "CITY_AMBIGUOUS",
                     "query": city_query,
                     "district_raw": district_raw,
                     "district_norm": order_district_norm,
                     "candidates_by_name": [c["text"] for c in candidates],
-                    "typed_debug": typed_debug,
-                },
-                "CITY_AMBIGUOUS",
-            )
+                        "region_raw": region_raw,
+                        "region_norm": order_region_norm,
+                        "candidates_after_region": [c["text"] for c in narrowed_by_region],
+                        "typed_debug": typed_debug,
+                    },
+                    "CITY_AMBIGUOUS",
+                )
 
     pick = options.nth(int(selected["idx"]))
     try:
