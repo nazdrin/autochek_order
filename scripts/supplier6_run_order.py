@@ -284,7 +284,34 @@ def _norm_area_region(s: str) -> str:
 def _norm_city_name_only(s: str) -> str:
     s = _norm_text(s)
     s = re.sub(r"^(м\.?\s+|с\.?\s+|смт\.?\s+|с-ще\.?\s+|селище\s+)", "", s).strip()
+    s = re.sub(r"\([^)]*\)", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
     return s
+
+
+def _norm_district_name(s: str) -> str:
+    s = _norm_text(s)
+    s = s.replace("район", " ").replace("р-н", " ").replace("рн", " ")
+    s = s.replace("область", " ").replace("обл.", " ").replace("обл", " ")
+    s = re.sub(r"[()\\[\\]{}.,;:!\"“”'`’ʼ/\\\\\\-]+", " ", s)
+    s = re.sub(r"\\s+", " ", s).strip()
+    return s
+
+
+def _split_city_option_text(txt: str) -> tuple[str, str]:
+    raw = _normalize_spaces(txt or "")
+    if not raw:
+        return "", ""
+    m = re.match(r"^(.*?)\\s*\\((.*?)\\)\\s*$", raw)
+    if m:
+        return _normalize_spaces(m.group(1)), _normalize_spaces(m.group(2))
+    return raw, ""
+
+
+def _district_soft_match(order_district_norm: str, option_district_norm: str) -> bool:
+    if not order_district_norm or not option_district_norm:
+        return False
+    return (order_district_norm in option_district_norm) or (option_district_norm in order_district_norm)
 
 
 def _normalize_no_markers(text: str) -> str:
@@ -491,6 +518,7 @@ def _extract_delivery_values(order_payload: dict | None = None) -> dict:
     return {
         "region": _norm_area_region(region_for_select),
         "city": city_name.strip(),
+        "district": region_name.strip(),
         "city_type": city_type.strip(),
         "warehouse_query": warehouse_query.strip(),
         "warehouse_mode": warehouse_mode,
@@ -2607,6 +2635,194 @@ async def _step5_select_delivery_payer_receiver(page) -> bool:
     return False
 
 
+async def _step5_select_city_with_district(
+    page,
+    *,
+    city_query: str,
+    district_raw: str,
+    region_raw: str,
+) -> tuple[bool, str, dict, str]:
+    opened = await _sumo_open(page, "selectCity")
+    if not opened:
+        return False, "", {"query": city_query, "reason": "CITY_DROPDOWN_NOT_OPENED"}, "NP_CITY_NOT_FOUND"
+    container = await _sumo_container(page, "selectCity")
+    if container is None:
+        return False, "", {"query": city_query, "reason": "CITY_CONTAINER_NOT_FOUND"}, "NP_CITY_NOT_FOUND"
+
+    typed_debug = {"attempts": 0, "typed_ok": False, "last_typed_value": "", "input_found": False}
+    search_input = None
+    try:
+        search_input = container.locator(".optWrapper input:visible, .search-txt input:visible").first
+        if await search_input.count() <= 0 or (not await search_input.is_visible()):
+            search_input = page.locator(".SumoSelect.open .optWrapper input:visible, .SumoSelect.open .search-txt input:visible").first
+        if await search_input.count() > 0 and await search_input.is_visible():
+            typed_debug["input_found"] = True
+            await search_input.click(timeout=min(3000, SUP6_TIMEOUT_MS), force=True)
+            await search_input.fill("", timeout=min(3000, SUP6_TIMEOUT_MS))
+            await search_input.type(city_query, delay=12, timeout=min(5000, SUP6_TIMEOUT_MS))
+            typed_debug["attempts"] = 1
+            typed_now = (await search_input.input_value()) or ""
+            typed_debug["last_typed_value"] = typed_now
+            typed_debug["typed_ok"] = _norm_text(city_query) in _norm_text(typed_now)
+    except Exception:
+        pass
+
+    # Some layouts render city popup without a visible text input.
+    # In that case continue with direct option matching instead of hard-failing.
+    if typed_debug["input_found"] and (not typed_debug["typed_ok"]):
+        return (
+            False,
+            "",
+            {"reason": "QUERY_NOT_TYPED", "query": city_query, "typed_debug": typed_debug, "select_id": "selectCity"},
+            "NP_CITY_QUERY_NOT_TYPED",
+        )
+
+    options = container.locator(".optWrapper li.opt:not(.disabled):not(.hidden):visible")
+    if typed_debug["typed_ok"]:
+        deadline = asyncio.get_running_loop().time() + min(3.5, SUP6_TIMEOUT_MS / 1000.0)
+        query_norm = _norm_city_name_only(city_query)
+        while asyncio.get_running_loop().time() < deadline:
+            curr_texts = []
+            try:
+                cnt = await options.count()
+            except Exception:
+                cnt = 0
+            for i in range(min(cnt, 80)):
+                try:
+                    curr_texts.append(_norm_text((await options.nth(i).inner_text()) or ""))
+                except Exception:
+                    continue
+            if any(query_norm in _norm_city_name_only(t) for t in curr_texts):
+                break
+            await page.wait_for_timeout(220)
+
+    try:
+        count = await options.count()
+    except Exception:
+        count = 0
+    candidates: list[dict] = []
+    seen_options: list[str] = []
+    city_norm = _norm_city_name_only(city_query)
+    order_district_norm = _norm_district_name(district_raw)
+    for i in range(min(count, 1200)):
+        opt = options.nth(i)
+        try:
+            txt = _normalize_spaces((await opt.inner_text()) or "")
+        except Exception:
+            txt = ""
+        if not txt:
+            continue
+        seen_options.append(txt)
+        base_raw, district_hint_raw = _split_city_option_text(txt)
+        base_norm = _norm_city_name_only(base_raw)
+        district_hint_norm = _norm_district_name(district_hint_raw)
+        if base_norm != city_norm:
+            continue
+        candidates.append(
+            {
+                "idx": i,
+                "text": txt,
+                "base": base_raw,
+                "district_hint": district_hint_raw,
+                "district_hint_norm": district_hint_norm,
+            }
+        )
+
+    print(f"[SUP6] city raw from order => {city_query}")
+    print(f"[SUP6] district raw from order => {district_raw}")
+    print(f"[SUP6] city candidates by name => {json.dumps([c['text'] for c in candidates], ensure_ascii=False)}")
+
+    if not candidates:
+        return (
+            False,
+            "",
+            {
+                "reason": "NP_CITY_NOT_FOUND",
+                "query": city_query,
+                "district_raw": district_raw,
+                "region_raw": region_raw,
+                "typed_debug": typed_debug,
+                "seen_options": seen_options[:25],
+                "candidates_by_name": [],
+            },
+            "NP_CITY_NOT_FOUND",
+        )
+
+    selected = None
+    district_tiebreak_used = False
+    if len(candidates) == 1:
+        selected = candidates[0]
+    else:
+        if order_district_norm:
+            district_tiebreak_used = True
+            narrowed = [c for c in candidates if _district_soft_match(order_district_norm, c.get("district_hint_norm") or "")]
+            print(f"[SUP6] district tie-break applied => {json.dumps([c['text'] for c in narrowed], ensure_ascii=False)}")
+            if len(narrowed) == 1:
+                selected = narrowed[0]
+            elif len(narrowed) > 1:
+                return (
+                    False,
+                    "",
+                    {
+                        "reason": "CITY_AMBIGUOUS",
+                        "query": city_query,
+                        "district_raw": district_raw,
+                        "district_norm": order_district_norm,
+                        "candidates_by_name": [c["text"] for c in candidates],
+                        "candidates_after_district": [c["text"] for c in narrowed],
+                        "typed_debug": typed_debug,
+                    },
+                    "CITY_AMBIGUOUS",
+                )
+        if selected is None:
+            return (
+                False,
+                "",
+                {
+                    "reason": "CITY_AMBIGUOUS",
+                    "query": city_query,
+                    "district_raw": district_raw,
+                    "district_norm": order_district_norm,
+                    "candidates_by_name": [c["text"] for c in candidates],
+                    "typed_debug": typed_debug,
+                },
+                "CITY_AMBIGUOUS",
+            )
+
+    pick = options.nth(int(selected["idx"]))
+    try:
+        await pick.scroll_into_view_if_needed(timeout=min(2000, SUP6_TIMEOUT_MS))
+    except Exception:
+        pass
+    try:
+        await pick.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+    except Exception:
+        try:
+            await pick.locator("label, span, p").first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
+        except Exception as e:
+            return False, "", {"reason": "CITY_PICK_CLICK_FAILED", "error": str(e), "candidate": selected}, "NP_CITY_NOT_FOUND"
+
+    await page.wait_for_timeout(260)
+    selected_city = await _sumo_selected_text(page, "selectCity")
+    if not selected_city or _is_default_placeholder_text(selected_city):
+        return False, "", {"reason": "CITY_PICK_NOT_APPLIED", "candidate": selected}, "NP_CITY_NOT_FOUND"
+
+    return (
+        True,
+        selected_city,
+        {
+            "city_raw": city_query,
+            "district_raw": district_raw,
+            "region_raw": region_raw,
+            "candidates_by_name": [c["text"] for c in candidates],
+            "selected_candidate": selected["text"],
+            "district_tiebreak_used": district_tiebreak_used,
+            "typed_debug": typed_debug,
+        },
+        "",
+    )
+
+
 async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None) -> dict:
     try:
         await _step4_ensure_checkout_open(page)
@@ -2642,37 +2858,19 @@ async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None)
     if not await _sumo_wait_enabled(page, "selectCity", SUP6_TIMEOUT_MS):
         return _step5_fail("NP_CITY_FIELD_DISABLED", details={"after_region": selected_region})
     await _sumo_wait_options_reload(page, "selectCity", city_snapshot_before, min(SUP6_TIMEOUT_MS, 6000))
-    city_norm = _norm_city_name_only(delivery["city"])
-    area_norm = _norm_area_region(delivery["region"])
-
-    def _city_matcher(txt: str) -> bool:
-        raw = (txt or "").strip()
-        if not raw:
-            return False
-        parts = [p.strip() for p in raw.split("/") if p.strip()]
-        left = parts[0] if parts else raw
-        name = _norm_city_name_only(left)
-        if name != city_norm:
-            return False
-        if area_norm and len(parts) > 1:
-            region_part = _norm_area_region(parts[1])
-            if region_part and area_norm not in region_part and region_part not in area_norm:
-                return False
-        return True
-
-    ok_city, selected_city, city_meta = await _sumo_choose_option(
+    ok_city, selected_city, city_meta, city_err_reason = await _step5_select_city_with_district(
         page,
-        select_id="selectCity",
-        query=delivery["city"],
-        matcher=_city_matcher,
-        reason_not_found="NP_CITY_NOT_FOUND",
-        require_query_typed=True,
+        city_query=delivery["city"],
+        district_raw=delivery.get("district") or "",
+        region_raw=delivery.get("region") or "",
     )
     if not ok_city:
-        if str(city_meta.get("reason") or "") == "QUERY_NOT_TYPED":
+        if city_err_reason == "NP_CITY_QUERY_NOT_TYPED":
             return _step5_fail("NP_CITY_QUERY_NOT_TYPED", details=city_meta)
+        if city_err_reason == "CITY_AMBIGUOUS":
+            return _step5_fail("CITY_AMBIGUOUS", details=city_meta)
         return _step5_fail("NP_CITY_NOT_FOUND", details=city_meta)
-    print(f"[SUP6] selected city: {selected_city}")
+    print(f"[SUP6] selected city => {selected_city}")
 
     if not await _sumo_wait_enabled(page, "selectWarehouses", SUP6_TIMEOUT_MS):
         return _step5_fail("NP_WAREHOUSE_FIELD_DISABLED", details={"after_city": selected_city})
@@ -2722,6 +2920,7 @@ async def step5_fill_delivery_np_pickup(page, order_payload: dict | None = None)
             "payer": "Одержувач",
             "warehouse_mode": delivery["warehouse_mode"],
             "warehouse_query": delivery["warehouse_query"],
+            "city_selection": city_meta,
         },
     }
 

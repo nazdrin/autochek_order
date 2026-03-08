@@ -450,6 +450,15 @@
     "termin": "2026-07-30 00:00:00"
   },
   {
+    "articul": "BRR-80002",
+    "name": "Breathe Right, смужки для носа, посилення дії, коричневий, 26 смужок",
+    "brand": "Breathe Right",
+    "barcode": "810071800023",
+    "qty": 1,
+    "price": 822.0,
+    "termin": ""
+  },
+  {
     "articul": "BUP-95046",
     "name": "Bucked Up, Heat Hardcore, Miami, полуниця, манго й ананас, 228 г (8 унцій)",
     "brand": "Bucked Up",
@@ -481,7 +490,7 @@
     "name": "Гідролізовані колагенові пептиди + вітамін С тип 1 і 3 California Gold Nutrition (Hydrolyzed Collagen Peptides + Vitamin C Type I &amp; III) 6000 мг 250 таблеток",
     "brand": "California Gold",
     "barcode": "898220011780",
-    "qty": 1,
+    "qty": 2,
     "price": 935.0,
     "termin": "2027-08-03 00:00:00"
   },
@@ -1602,15 +1611,6 @@
     "termin": "2029-05-30 00:00:00"
   },
   {
-    "articul": "CAL-89160",
-    "name": "Магній гліцинат проти стресу, Stress B Mag Glycinate, KAL, 60 капсул",
-    "brand": "KAL",
-    "barcode": "021245891604",
-    "qty": 1,
-    "price": 359.0,
-    "termin": "2029-05-30 00:00:00"
-  },
-  {
     "articul": "CAL-95593",
     "name": "Метілфолат KAL (Methyl Folate) 800 мкг, 90 таблеток",
     "brand": "KAL",
@@ -2182,7 +2182,7 @@
     "name": "Магній та вітамін В6, Magnesium with Vitamin B6, My Nutri Week, 200 мг, 100 таблеток (50 мг у таблетці)",
     "brand": "My Nutri Week",
     "barcode": "4820236532627",
-    "qty": 20,
+    "qty": 10,
     "price": 119.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -2659,7 +2659,7 @@
     "name": "Хлорофіл рідкий без запаху Nature's Way (Chlorofresh) 473 мл",
     "brand": "Nature's Way",
     "barcode": "358008035020",
-    "qty": 30,
+    "qty": 20,
     "price": 459.0,
     "termin": "2027-08-31 00:00:00"
   },
@@ -2786,7 +2786,7 @@
     "brand": "Nature's Way",
     "barcode": "033674154502",
     "qty": 5,
-    "price": 317.0,
+    "price": 320.0,
     "termin": "2029-12-30 00:00:00"
   },
   {
@@ -2812,7 +2812,7 @@
     "name": "Дикий ям корінь Nature's Way (Wild Yam Root) 350 мг 100 капсул",
     "brand": "Nature's Way",
     "barcode": "033674178706",
-    "qty": 6,
+    "qty": 5,
     "price": 307.0,
     "termin": "2030-04-30 00:00:00"
   },
@@ -3019,7 +3019,7 @@
     "name": "Карнітин Now Foods (L-Carnitine) 500 мг 60 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739000729",
-    "qty": 7,
+    "qty": 6,
     "price": 663.0,
     "termin": "2027-11-30 00:00:00"
   },
@@ -3271,7 +3271,7 @@
     "name": "Глутатіон Now Foods (Glutathione) 500 мг 30 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739001757",
-    "qty": 8,
+    "qty": 9,
     "price": 543.0,
     "termin": "2029-06-30 00:00:00"
   },
@@ -3361,7 +3361,7 @@
     "name": "Вітамін B100 Now Foods (Vitamin B-100) 100 веганських капсул",
     "brand": "Now Foods",
     "barcode": "733739004369",
-    "qty": 6,
+    "qty": 7,
     "price": 682.0,
     "termin": "2027-10-30 00:00:00"
   },
@@ -3649,7 +3649,7 @@
     "name": "Магній малат Now Foods (Magnesium Malate) 180 капсул",
     "brand": "Now Foods",
     "barcode": "733739013033",
-    "qty": 8,
+    "qty": 7,
     "price": 669.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -3748,7 +3748,7 @@
     "name": "Залізо комплекс Now Foods (Iron Complex) 100 таблеток",
     "brand": "Now Foods",
     "barcode": "733739014405",
-    "qty": 6,
+    "qty": 5,
     "price": 368.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -3766,7 +3766,7 @@
     "name": "Залізо Now Foods (Iron) 18 мг 120 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739014436",
-    "qty": 9,
+    "qty": 8,
     "price": 338.0,
     "termin": "2029-04-30 00:00:00"
   },
@@ -3982,7 +3982,7 @@
     "name": "Кон'югована лінолева кислота Now Foods (CLA) 800 мг 90 желатинових капсул",
     "brand": "Now Foods",
     "barcode": "733739017277",
-    "qty": 4,
+    "qty": 3,
     "price": 499.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -4081,7 +4081,7 @@
     "name": "Креатин Now Foods (Creatine Monohydrate Sports) 750 мг 120 капсул",
     "brand": "Now Foods",
     "barcode": "733739020352",
-    "qty": 3,
+    "qty": 2,
     "price": 488.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -4162,7 +4162,7 @@
     "name": "Формула підтримки чоловічої сили Now Foods (TestoJack 300) 300 мг 60 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739022028",
-    "qty": 2,
+    "qty": 1,
     "price": 902.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -4486,7 +4486,7 @@
     "name": "Альфа-ліпоєва кислота Now Foods (Alpha Lipoic Acid) 100 мг 60 капcул",
     "brand": "Now Foods",
     "barcode": "733739030405",
-    "qty": 8,
+    "qty": 9,
     "price": 326.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -4878,15 +4878,6 @@
     "termin": "2028-09-30 00:00:00"
   },
   {
-    "articul": "NOW-03775",
-    "name": "Мультивітаміни і мінерали Now Foods (Daily Vits) 30 вегетаріанських капсул",
-    "brand": "Now Foods",
-    "barcode": "733739037756",
-    "qty": 1,
-    "price": 240.0,
-    "termin": "2026-07-30 00:00:00"
-  },
-  {
     "articul": "NOW-03776",
     "name": "Мультивітаміни і мінерали Now Foods (Daily Vits) 120 вегетаріанських капсул",
     "brand": "Now Foods",
@@ -4964,7 +4955,7 @@
     "brand": "Now Foods",
     "barcode": "733739046031",
     "qty": 30,
-    "price": 431.0,
+    "price": 432.0,
     "termin": "2028-01-30 00:00:00"
   },
   {
@@ -5170,7 +5161,7 @@
     "name": "Розторопша Now Foods (Silymarin) 300 мг 50 капсул",
     "brand": "Now Foods",
     "barcode": "733739047380",
-    "qty": 5,
+    "qty": 6,
     "price": 304.0,
     "termin": "2027-08-30 00:00:00"
   },
@@ -5800,7 +5791,7 @@
     "name": "Екстракт босвелії Nutricost (65% Boswellic Acid) 1200 мг 180 капсул",
     "brand": "Nutricost",
     "barcode": "810014677026",
-    "qty": 10,
+    "qty": 9,
     "price": 718.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -6160,7 +6151,7 @@
     "name": "Power Pro 36% Power Pro 60 g орехи",
     "brand": "Power Pro",
     "barcode": "4820231512686",
-    "qty": 2,
+    "qty": 7,
     "price": 47.0,
     "termin": "2026-10-31 00:00:00"
   },
@@ -6214,7 +6205,7 @@
     "name": "Коензим Q-10 Puritan's Pride (CoQ-10) 100 мг 120 капсул",
     "brand": "Puritan's Pride",
     "barcode": "025077000647",
-    "qty": 4,
+    "qty": 3,
     "price": 701.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -6962,7 +6953,7 @@
     "brand": "Solaray",
     "barcode": "076280352818",
     "qty": 40,
-    "price": 458.0,
+    "price": 459.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -6970,7 +6961,7 @@
     "name": "Цитрат магнію Solaray (Magnesium Citrate) 400 мг 180 капсул",
     "brand": "Solaray",
     "barcode": "076280374025",
-    "qty": 20,
+    "qty": 10,
     "price": 675.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -7025,7 +7016,7 @@
     "brand": "Solaray",
     "barcode": "076280477054",
     "qty": 10,
-    "price": 787.0,
+    "price": 788.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -7276,7 +7267,7 @@
     "name": "Вітаміни для волосся шкіри і нігтів Solgar (Skin Nails &amp; Hair) 120 таблеток",
     "brand": "Solgar",
     "barcode": "033984017368",
-    "qty": 40,
+    "qty": 30,
     "price": 931.0,
     "termin": "2027-08-31 00:00:00"
   },
@@ -7411,7 +7402,7 @@
     "name": "Вітамін В12 Solgar (Vitamin B12) 100 мкг 100 таблеток",
     "brand": "Solgar",
     "barcode": "033984031807",
-    "qty": 5,
+    "qty": 4,
     "price": 299.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -7803,15 +7794,6 @@
     "termin": "2027-03-30 00:00:00"
   },
   {
-    "articul": "SW235",
-    "name": "Селен L-селенометіонін, Selenium L-Selenomethionine, Swanson, 100 мкг, 200 капсул",
-    "brand": "Swanson",
-    "barcode": "087614012353",
-    "qty": 1,
-    "price": 237.0,
-    "termin": "2028-09-30 00:00:00"
-  },
-  {
     "articul": "SW424",
     "name": "По Дарко кора мурашиного дерева Swanson (Pau D'Arco) 500 мг 100 капсул",
     "brand": "Swanson",
@@ -8005,7 +7987,7 @@
     "name": "Бор від Albion Bororganic Glycine , Boron from Albion Bororganic Glycine, Swanson, 6 мг 60 капсул",
     "brand": "Swanson",
     "barcode": "087614210285",
-    "qty": 10,
+    "qty": 9,
     "price": 130.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -8086,7 +8068,7 @@
     "name": "Біотин Swanson (Biotin) 5000 мкг 100 капсул",
     "brand": "Swanson",
     "barcode": "087614018775",
-    "qty": 30,
+    "qty": 20,
     "price": 193.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -8133,15 +8115,6 @@
     "barcode": "087614115894",
     "qty": 20,
     "price": 293.0,
-    "termin": "2028-10-30 00:00:00"
-  },
-  {
-    "articul": "SWV-11813",
-    "name": "Піколинат цинку підвищеної сили дії Swanson (Extra Strength Zinc Picolinate) 50 мг 60 капсул",
-    "brand": "Swanson",
-    "barcode": "087614118130",
-    "qty": 1,
-    "price": 208.0,
     "termin": "2028-10-30 00:00:00"
   },
   {
@@ -8491,7 +8464,7 @@
     "name": "Коензим Q-10 (убіхінон) Thorne Research (Q-Best 100) 60 капсул",
     "brand": "Thorne Research",
     "barcode": "693749624011",
-    "qty": 8,
+    "qty": 7,
     "price": 1627.0,
     "termin": "2027-07-30 00:00:00"
   },
