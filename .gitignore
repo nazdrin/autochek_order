@@ -49,7 +49,9 @@ node_modules/
 
 # local state / outputs
 .orch_state.json
+.orchestrator.lock
 .biotus_state.json
+.state_supplier*.json
 credentials.json
 
 # generated labels / exports
@@ -65,4 +67,3 @@ exports/
 !.vscode/settings.json
 !.vscode/extensions.json
 pages
-

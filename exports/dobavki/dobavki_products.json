@@ -455,7 +455,7 @@
     "brand": "Breathe Right",
     "barcode": "810071800023",
     "qty": 1,
-    "price": 822.0,
+    "price": 868.0,
     "termin": ""
   },
   {
@@ -841,8 +841,8 @@
     "name": "Магній з високою засвоюваністю Doctor's Best (High Absorption Magnesium) 120 таблеток",
     "brand": "Doctor's Best",
     "barcode": "753950000254",
-    "qty": 20,
-    "price": 529.0,
+    "qty": 10,
+    "price": 531.0,
     "termin": "2027-10-12 00:00:00"
   },
   {
@@ -1687,7 +1687,7 @@
     "name": "Магній цитрат Life Extension (Magnesium citrate) 160 мг, 100 вегетаріанських капсул",
     "brand": "Life Extension",
     "barcode": "737870168218",
-    "qty": 2,
+    "qty": 1,
     "price": 369.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -3020,7 +3020,7 @@
     "brand": "Now Foods",
     "barcode": "733739000729",
     "qty": 6,
-    "price": 663.0,
+    "price": 662.0,
     "termin": "2027-11-30 00:00:00"
   },
   {
@@ -3272,7 +3272,7 @@
     "brand": "Now Foods",
     "barcode": "733739001757",
     "qty": 9,
-    "price": 543.0,
+    "price": 544.0,
     "termin": "2029-06-30 00:00:00"
   },
   {
@@ -3362,7 +3362,7 @@
     "brand": "Now Foods",
     "barcode": "733739004369",
     "qty": 7,
-    "price": 682.0,
+    "price": 684.0,
     "termin": "2027-10-30 00:00:00"
   },
   {
@@ -3434,7 +3434,7 @@
     "brand": "Now Foods",
     "barcode": "733739004956",
     "qty": 10,
-    "price": 305.0,
+    "price": 303.0,
     "termin": "2028-08-30 00:00:00"
   },
   {
@@ -3749,7 +3749,7 @@
     "brand": "Now Foods",
     "barcode": "733739014405",
     "qty": 5,
-    "price": 368.0,
+    "price": 369.0,
     "termin": "2028-10-30 00:00:00"
   },
   {
@@ -3767,7 +3767,7 @@
     "brand": "Now Foods",
     "barcode": "733739014436",
     "qty": 8,
-    "price": 338.0,
+    "price": 337.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -3821,7 +3821,7 @@
     "brand": "Now Foods",
     "barcode": "733739014856",
     "qty": 10,
-    "price": 252.0,
+    "price": 251.0,
     "termin": "2030-04-30 00:00:00"
   },
   {
@@ -3838,7 +3838,7 @@
     "name": "Цинк ОптіЦинк Now Foods (OptiZinc) 30 мг 100 капсул",
     "brand": "Now Foods",
     "barcode": "733739015105",
-    "qty": 8,
+    "qty": 7,
     "price": 331.0,
     "termin": "2030-05-30 00:00:00"
   },
@@ -3928,7 +3928,7 @@
     "name": "Омега 3 + вітамін Д3 Now Foods (Ultra Omega 3-D) 90 капсул",
     "brand": "Now Foods",
     "barcode": "733739016638",
-    "qty": 3,
+    "qty": 2,
     "price": 855.0,
     "termin": "2029-09-30 00:00:00"
   },
@@ -3947,7 +3947,7 @@
     "brand": "Now Foods",
     "barcode": "733739016829",
     "qty": 10,
-    "price": 685.0,
+    "price": 686.0,
     "termin": "2028-04-30 00:00:00"
   },
   {
@@ -4163,7 +4163,7 @@
     "brand": "Now Foods",
     "barcode": "733739022028",
     "qty": 1,
-    "price": 902.0,
+    "price": 904.0,
     "termin": "2027-12-30 00:00:00"
   },
   {
@@ -4208,7 +4208,7 @@
     "brand": "Now Foods",
     "barcode": "733739023902",
     "qty": 50,
-    "price": 1608.0,
+    "price": 1609.0,
     "termin": "2028-05-30 00:00:00"
   },
   {
@@ -4280,7 +4280,7 @@
     "brand": "Now Foods",
     "barcode": "733739026965",
     "qty": 20,
-    "price": 250.0,
+    "price": 251.0,
     "termin": "2027-07-30 00:00:00"
   },
   {
@@ -4945,7 +4945,7 @@
     "name": "Ашваганда Now Foods (Ashwagandha) 450 мг 180 вегетаріанських капсул",
     "brand": "Now Foods",
     "barcode": "733739045935",
-    "qty": 9,
+    "qty": 8,
     "price": 720.0,
     "termin": "2028-11-30 00:00:00"
   },
@@ -5134,7 +5134,7 @@
     "name": "Орегано Now Foods (Oregano) 450 мг 100 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739047243",
-    "qty": 4,
+    "qty": 3,
     "price": 350.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -5260,7 +5260,7 @@
     "name": "Їжовик гребінчастий, Lion's Mane, Now Foods, 500 мг, 60 рослинних капсул",
     "brand": "Now Foods",
     "barcode": "733739047892",
-    "qty": 7,
+    "qty": 6,
     "price": 720.0,
     "termin": "2026-10-30 00:00:00"
   },
@@ -5620,7 +5620,7 @@
     "name": "Аргінін і Цитрулін Nutricost (L-Arginine + L-Citrulline) 750 мг 240 капсул",
     "brand": "Nutricost",
     "barcode": "810014671253",
-    "qty": 8,
+    "qty": 7,
     "price": 880.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -6287,7 +6287,7 @@
     "brand": "Puritan's Pride",
     "barcode": "074312125706",
     "qty": 10,
-    "price": 208.0,
+    "price": 207.0,
     "termin": "2028-04-30 00:00:00"
   },
   {
@@ -6462,15 +6462,6 @@
     "termin": "2028-05-30 00:00:00"
   },
   {
-    "articul": "PTP-15535",
-    "name": "Магній Puritan's Pride (Magnesium)  500 мг, 100 таблеток",
-    "brand": "Puritan's Pride",
-    "barcode": "074312155352",
-    "qty": 1,
-    "price": 310.0,
-    "termin": "2027-10-30 00:00:00"
-  },
-  {
     "articul": "PTP-15580",
     "name": "Суперхелатний мультимінерал, Super Chelated Multi Mineral, Puritan's Pride, 100 таблеток",
     "brand": "Puritan's Pride",
@@ -6556,7 +6547,7 @@
     "name": "Жіночі полівітаміни One Daily, One Daily Women's Multivitamin, Puritan's Pride, 100 таблеток",
     "brand": "Puritan's Pride",
     "barcode": "025077190928",
-    "qty": 4,
+    "qty": 3,
     "price": 358.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -6953,7 +6944,7 @@
     "brand": "Solaray",
     "barcode": "076280352818",
     "qty": 40,
-    "price": 459.0,
+    "price": 460.0,
     "termin": "2029-04-30 00:00:00"
   },
   {
@@ -6962,7 +6953,7 @@
     "brand": "Solaray",
     "barcode": "076280374025",
     "qty": 10,
-    "price": 675.0,
+    "price": 676.0,
     "termin": "2027-09-30 00:00:00"
   },
   {
@@ -7456,7 +7447,7 @@
     "name": "Рідкий вітамін Д3 з натуральним апельсиновим смаком Solgar (Liquid Vitamin D3 Natural Orange Flavor) 125 мкг 5000 МО 59 мл",
     "brand": "Solgar",
     "barcode": "033984320482",
-    "qty": 10,
+    "qty": 9,
     "price": 445.0,
     "termin": "2027-02-20 00:00:00"
   },
@@ -7816,7 +7807,7 @@
     "name": "Мелатонін, Melatonin, Swanson, 3 мг, 120 капсул",
     "brand": "Swanson",
     "barcode": "087614015026",
-    "qty": 6,
+    "qty": 5,
     "price": 121.0,
     "termin": "2028-10-30 00:00:00"
   },
@@ -7933,7 +7924,7 @@
     "name": "Спіруліна, Spirulina, Swanson, 500 мг, 180 таблеток",
     "brand": "Swanson",
     "barcode": "087614060101",
-    "qty": 2,
+    "qty": 1,
     "price": 361.0,
     "termin": "2028-05-30 00:00:00"
   },

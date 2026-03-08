@@ -44,6 +44,8 @@ SUP6_CLEAR_CART_PAUSE_SECONDS = _to_int(os.getenv("SUP6_CLEAR_CART_PAUSE_SECONDS
 SUP6_STEP3_DEBUG_PAUSE_MS = _to_int(os.getenv("SUP6_STEP3_DEBUG_PAUSE_MS", "0"), 0)
 SUP6_ITEMS = (os.getenv("SUP6_ITEMS") or "").strip()
 SUP6_ITEMS_JSON = (os.getenv("SUP6_ITEMS_JSON") or "").strip()
+SUP6_STEP3_ARTIFACTS = _to_bool(os.getenv("SUP6_STEP3_ARTIFACTS", "0"), False)
+SUP6_STEP3_ARTIFACTS_DIR = (os.getenv("SUP6_STEP3_ARTIFACTS_DIR") or "pages").strip() or "pages"
 SUP6_ORDER_JSON = (os.getenv("SUP6_ORDER_JSON") or os.getenv("BIOTUS_ORDER_JSON") or "").strip()
 SUP6_BIOTUS_FULL_NAME = (os.getenv("BIOTUS_FULL_NAME") or "").strip()
 SUP6_BIOTUS_PHONE_LOCAL = (os.getenv("BIOTUS_PHONE_LOCAL") or "").strip()
@@ -646,6 +648,14 @@ def _norm_product_title(text: str) -> str:
     return t
 
 
+def _site_name_fingerprint(text: str) -> str:
+    # Stable fingerprint for duplicate-product guard across different SKUs.
+    t = _norm_product_title(text)
+    # Some UI notifications append trailing counter like "... 1".
+    t = re.sub(r"\s+\d+\s*$", "", t).strip()
+    return t
+
+
 def _title_tokens(text: str) -> set[str]:
     t = _norm_product_title(text)
     t = t.replace("/", " ").replace("|", " ").replace("(", " ").replace(")", " ")
@@ -1142,6 +1152,25 @@ async def _step3_debug_pause(page, label: str) -> None:
     await page.wait_for_timeout(SUP6_STEP3_DEBUG_PAUSE_MS)
 
 
+async def _step3_dump_artifact(page, *, sku: str, label: str) -> None:
+    if not SUP6_STEP3_ARTIFACTS:
+        return
+    try:
+        out_dir = Path(SUP6_STEP3_ARTIFACTS_DIR)
+        if not out_dir.is_absolute():
+            out_dir = ROOT / out_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        safe_sku = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(sku or "").strip()) or "no_sku"
+        safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(label or "").strip()) or "state"
+        base = out_dir / f"sup6_step3_{safe_sku}_{safe_label}"
+        await page.screenshot(path=str(base.with_suffix(".png")), full_page=True)
+        html = await page.content()
+        base.with_suffix(".html").write_text(html, encoding="utf-8")
+        print(f"[SUP6] step3 artifact saved => {base.with_suffix('.png')}")
+    except Exception as e:
+        print(f"[SUP6] step3 artifact save failed ({label}, sku={sku}): {e}")
+
+
 async def _step3_get_article_input(page):
     candidates = [
         page.locator("th:has-text('Артикул') input.input-filter").first,
@@ -1161,17 +1190,33 @@ async def _step3_get_article_input(page):
 
 
 async def _step3_find_row_for_sku(page, sku: str):
-    sku_norm = _norm_sku(sku)
+    sku_str = str(sku or "").strip()
+    sku_norm = _norm_sku(sku_str)
+    # Exact SKU token, disallow suffixes like "_U002120".
+    sku_exact_rx = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(sku_str)}(?![A-Za-z0-9_])", re.IGNORECASE)
     row_candidates = page.locator("tr:has(.addtocart-button), .product_item:has(.addtocart-button), li:has(.addtocart-button)")
     count = await row_candidates.count()
     first_btn = page.locator(".addtocart-button:visible").first
 
+    async def _scan_exact_row() -> object | None:
+        try:
+            current_count = await row_candidates.count()
+        except Exception:
+            current_count = 0
+        for i in range(min(current_count, 50)):
+            row = row_candidates.nth(i)
+            try:
+                if await _step3_row_has_target_sku(row, sku_str):
+                    return row
+            except Exception:
+                continue
+        return None
+
     # First, try strict "Артикул <sku>" match to disambiguate similar codes
     # like 23667-01 vs 23667-01_U002120.
-    sku_re = re.escape(str(sku or "").strip())
     strict_patterns = [
-        rf"(^|\s)артикул\s*[:\-]?\s*{sku_re}(?![_a-zA-Z0-9])",
-        rf"(^|\s){sku_re}(?![_a-zA-Z0-9])",
+        rf"артикул\s*[:\-]?\s*{re.escape(sku_str)}(?![_a-zA-Z0-9])",
+        rf"(?<![A-Za-z0-9_]){re.escape(sku_str)}(?![A-Za-z0-9_])",
     ]
     for pat in strict_patterns:
         try:
@@ -1187,16 +1232,30 @@ async def _step3_find_row_for_sku(page, sku: str):
         except Exception:
             continue
 
+    # Wait for table filter/debounce to stabilize and reveal exact SKU row.
+    settle_deadline = asyncio.get_running_loop().time() + min(5.0, SUP6_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < settle_deadline:
+        scanned = await _scan_exact_row()
+        if scanned is not None:
+            return scanned, None
+        await page.wait_for_timeout(180)
+
     matched_row = None
     for i in range(min(count, 25)):
         row = row_candidates.nth(i)
         try:
             txt = re.sub(r"\s+", " ", (await row.inner_text(timeout=900)) or "").strip()
+            if sku_exact_rx.search(txt):
+                matched_row = row
+                break
             txt_norm = _norm_sku(txt)
             if sku_norm and sku_norm in txt_norm:
                 # Avoid prefix collision for codes like XXX-01 vs XXX-01_U...
                 txt_raw = (txt or "").casefold()
-                if (str(sku).casefold() in txt_raw) and (f"{str(sku).casefold()}_" in txt_raw):
+                if (sku_str.casefold() in txt_raw) and (f"{sku_str.casefold()}_" in txt_raw):
+                    continue
+                # Soft contains fallback is allowed only if exact token exists.
+                if not sku_exact_rx.search(txt):
                     continue
                 matched_row = row
                 break
@@ -1208,21 +1267,46 @@ async def _step3_find_row_for_sku(page, sku: str):
 
     if await first_btn.count() <= 0:
         return None, _step3_fail(f"SKU_NOT_FOUND:{sku}", details={"sku": sku, "stage": "results_wait"})
-
     visible_rows = []
-    for i in range(min(count, 10)):
+    for i in range(min(count, 15)):
         row = row_candidates.nth(i)
         try:
             if await row.is_visible():
                 visible_rows.append(row)
         except Exception:
             continue
-
-    # Conservative fallback: allow single visible row only.
+    # Controlled fallback: when filter returns exactly one visible row,
+    # allow selecting it even without visible SKU token.
+    # Downstream guards (duplicate site_name across SKUs / collapsed checkout rows)
+    # prevent sending a wrong order.
     if len(visible_rows) == 1:
-        print("[SUP6] step3_add_items: sku text exact match missing, using single visible row fallback")
+        print("[SUP6] step3_add_items: exact sku text not visible, using single visible row fallback")
         return visible_rows[0], None
-    return None, _step3_fail(f"SKU_NOT_FOUND:{sku}", details={"sku": sku, "stage": "results_match", "visible_rows": len(visible_rows)})
+    return None, _step3_fail(
+        f"SKU_NOT_FOUND:{sku}",
+        details={"sku": sku, "stage": "results_match", "visible_rows": len(visible_rows), "exact_match_required": True},
+    )
+
+
+async def _step3_row_has_target_sku(row, sku: str) -> bool:
+    sku_str = str(sku or "").strip()
+    if not sku_str:
+        return False
+    rx = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(sku_str)}(?![A-Za-z0-9_])", re.IGNORECASE)
+    # First try inner_text (visible text), then fallback to inner_html to catch hidden SKU column.
+    try:
+        txt = re.sub(r"\s+", " ", (await row.inner_text(timeout=1200)) or "").strip()
+        if txt and rx.search(txt):
+            return True
+    except Exception:
+        pass
+    try:
+        html = (await row.inner_html(timeout=1500)) or ""
+        if html and rx.search(html):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 async def _step3_detect_qty_limit(page) -> bool:
@@ -1361,15 +1445,23 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
             search_input = await _step3_get_article_input(page)
             await search_input.fill(sku, timeout=min(5000, SUP6_TIMEOUT_MS))
             await _step3_debug_pause(page, f"after_fill_sku={sku}")
+            await _step3_dump_artifact(page, sku=sku, label="after_fill")
 
             results_ready = page.locator(".addtocart-button:visible").first
             await results_ready.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
             row, fail_payload = await _step3_find_row_for_sku(page, sku)
             if fail_payload is not None:
+                await _step3_dump_artifact(page, sku=sku, label="sku_not_found")
                 return fail_payload, None
 
             fallback_site_name = ""
             if row is not None:
+                if not await _step3_row_has_target_sku(row, sku):
+                    await _step3_dump_artifact(page, sku=sku, label="row_sku_mismatch")
+                    return _step3_fail(
+                        f"SKU_ROW_MISMATCH:{sku}",
+                        details={"sku": sku, "stage": "row_guard", "message": "selected row does not contain target SKU"},
+                    ), None
                 row_name_candidates = [
                     row.locator("a.product_name, .product-name, .product_name a").first,
                     row.locator("td:has(a), h3, h4").first,
@@ -1388,6 +1480,7 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
             add_btn = row.locator(".addtocart-button:visible").first if row is not None else results_ready
             await add_btn.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
             await _step3_debug_pause(page, f"after_click_add_sku={sku}")
+            await _step3_dump_artifact(page, sku=sku, label="after_click_add")
 
             qty_modal_input = page.locator(
                 "input.quantity-input.js-recalculate:visible, "
@@ -1406,8 +1499,10 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                 await _step3_set_qty_in_modal(page, qty)
                 fail_after_click = await _step3_click_add_in_modal(page, sku)
                 if fail_after_click is not None:
+                    await _step3_dump_artifact(page, sku=sku, label="modal_add_failed")
                     return fail_after_click, None
                 await _step3_debug_pause(page, f"after_modal_confirm_sku={sku}")
+                await _step3_dump_artifact(page, sku=sku, label="after_modal_confirm")
 
             showcart = page.locator("a.showcart:visible, a.showcart:has-text('Показати кошик')").first
             await showcart.wait_for(state="visible", timeout=min(8000, SUP6_TIMEOUT_MS))
@@ -1420,10 +1515,12 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                     pass
                 cart_rows = page.locator("button.vm2-remove_from_cart:visible, .cart-summary tr:has(button.vm2-remove_from_cart), .cart-view tr")
                 if await cart_rows.count() <= 0:
+                    await _step3_dump_artifact(page, sku=sku, label="cart_verify_failed")
                     return _step3_fail(f"CART_VERIFY_FAILED:{sku}", details={"sku": sku}), None
             else:
                 await _step3_close_fancybox(page)
                 await _step3_debug_pause(page, f"after_close_fancybox_sku={sku}")
+                await _step3_dump_artifact(page, sku=sku, label="after_close_fancybox")
 
             return (
                 None,
@@ -1435,6 +1532,7 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                 },
             )
         except Exception as e:
+            await _step3_dump_artifact(page, sku=sku, label=f"attempt_{attempt}_exception")
             print(f"[SUP6] step3_add_items: attempt failed sku={sku} attempt={attempt}: {e}")
             if attempt >= max_attempts:
                 return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": str(e)}), None
@@ -1744,6 +1842,27 @@ async def step3_add_items_to_cart(page, items: list[Sup6Item], order_payload: di
             map_row["site_name"] = planned.get("order_name") or ""
         mapped_items.append(map_row)
         print(f"[SUP6] step3_add_items: added sku={item.sku} qty={item.qty}")
+
+    # Protection: if different SKUs resolved to same site product title, stop.
+    # This usually means wrong row selection and would lead to wrong order submit.
+    sku_groups: dict[str, set[str]] = {}
+    for row in mapped_items:
+        sku = str(row.get("sku") or "").strip()
+        fp = _site_name_fingerprint(str(row.get("site_name") or ""))
+        if not sku or not fp:
+            continue
+        sku_groups.setdefault(fp, set()).add(sku)
+    duplicate_groups = [{"site_name_fp": fp, "skus": sorted(list(skus))} for fp, skus in sku_groups.items() if len(skus) > 1]
+    if duplicate_groups:
+        return _step3_fail(
+            "DUPLICATE_SITE_NAME_FOR_DIFFERENT_SKU",
+            details={
+                "items_added": added,
+                "items": processed,
+                "supplier6_item_map": mapped_items,
+                "duplicate_groups": duplicate_groups,
+            },
+        )
 
     # Final verification: cart can hide SKU and show only product titles, so verify by rows/name, not SKU text.
     try:
@@ -3251,6 +3370,13 @@ def _step6_match_rows_with_map(checkout_rows: list[dict], item_map: list[dict]) 
             return False, [], {"row_name": row.get("name_raw"), "row_qty": rq, "map_size": len(prepared)}
         best["used"] = True
         matches.append((row, best))
+    unused = [m for m in prepared if not m.get("used")]
+    if unused:
+        return False, [], {
+            "row_count": len(checkout_rows),
+            "map_size": len(prepared),
+            "unused_map": [{"sku": u.get("sku"), "qty": u.get("qty"), "site_name": u.get("site_name")} for u in unused],
+        }
     return True, matches, {}
 
 
@@ -3497,6 +3623,17 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
         mapping = _step6_build_fallback_map_from_order(order_payload)
     if not mapping:
         return _step6_fail("ITEM_MAP_EMPTY")
+    distinct_skus = sorted({str(m.get("sku") or "").strip() for m in mapping if str(m.get("sku") or "").strip()})
+    if len(distinct_skus) > 1 and len(checkout_rows) < len(distinct_skus):
+        return _step6_fail(
+            "CHECKOUT_ROWS_COLLAPSED",
+            details={
+                "distinct_skus": distinct_skus,
+                "checkout_rows": len(checkout_rows),
+                "map_size": len(mapping),
+                "checkout_row_names": [str(r.get("name_raw") or "") for r in checkout_rows],
+            },
+        )
 
     matched_ok, matches, match_meta = _step6_match_rows_with_map(checkout_rows, mapping)
     if not matched_ok:
