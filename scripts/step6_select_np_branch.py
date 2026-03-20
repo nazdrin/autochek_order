@@ -552,6 +552,16 @@ async def _get_selected_text(sec, ss_main=None) -> str:
         return ""
 
 
+def _selected_final_matches(selected_txt: str, kind: str, expected_num: str, expected_addr: str, must_tokens: list[str]) -> bool:
+    if not _selected_text_ok(selected_txt, kind, expected_num, must_tokens):
+        return False
+    if expected_addr:
+        return _addr_matches(selected_txt, expected_addr)
+    if expected_num:
+        return bool(re.search(rf"№\s*{re.escape(expected_num)}(?!\d)", selected_txt, re.IGNORECASE))
+    return True
+
+
 async def main():
     kind = _infer_branch_kind(BRANCH_QUERY)  # "branch" or "point"
     matcher, strict_re, branch_no = _build_matcher(kind, BRANCH_QUERY, BRANCH_MUST_CONTAIN)
@@ -978,6 +988,23 @@ async def main():
             raise RuntimeError(
                 f"Не удалось стабильно выбрать пункт/отделение после 3 попыток: {last_err}. "
                 f"Смотри {last_screen.name}"
+            )
+
+        selected_final = await _get_selected_text(sec)
+        must_tokens = _tokenize_must_contain(BRANCH_MUST_CONTAIN)
+        final_ok = _selected_final_matches(
+            selected_final,
+            kind,
+            expected_num,
+            expected_addr,
+            must_tokens,
+        )
+        if not final_ok:
+            final_screen = ART / "step6_err_selected_empty.png"
+            await page.screenshot(path=str(final_screen), full_page=True)
+            raise RuntimeError(
+                "Поле отделения/пункта осталось пустым или содержит неверное значение после step6. "
+                f"Expected query='{BRANCH_QUERY}', got='{selected_final}'. Смотри {final_screen.name}"
             )
 
 

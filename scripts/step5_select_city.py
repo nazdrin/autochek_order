@@ -155,6 +155,14 @@ def _city_type_matches(selected_text: str, city_type: str) -> bool:
     return _norm_city_type_for_compare(sel_type) == _norm_city_type_for_compare(city_type)
 
 
+def _candidate_type_matches(opt_type: str, expected_type: str, equiv_groups: List[set]) -> bool:
+    if not expected_type:
+        return True
+    if not opt_type:
+        return False
+    return _type_equiv_match(opt_type, expected_type, equiv_groups)
+
+
 def _parse_type_equiv(spec: str) -> List[set]:
     groups: List[set] = []
     for chunk in (spec or "").split(","):
@@ -313,6 +321,16 @@ async def choose_best_option(
         # Mode D: city only
         mode = "D"
         cand = matches
+
+    # Soft guard for structured settlements: if we have at least one candidate anywhere
+    # in the city-name match set with matching/equivalent type (e.g. смт ~ с-ще ~ селище),
+    # prefer that subset and only fall back to broader matches when such candidates do not exist.
+    typed_subset = []
+    if city_type:
+        typed_subset = [m for m in matches if _candidate_type_matches(m[2], city_type, equiv_groups)]
+        if typed_subset:
+            cand = typed_subset
+            mode = f"{mode}+TYPE_GLOBAL"
 
     def score_item(item):
         _i, raw, opt_type, area_norm, region_norm = item

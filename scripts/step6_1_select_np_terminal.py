@@ -813,7 +813,6 @@ async def main():
                         await asyncio.wait_for(browser.close(), timeout=2.0)
                 except Exception:
                     pass
-                return
 
             # Non-CDP: normal close
             try:

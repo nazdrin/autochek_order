@@ -618,6 +618,7 @@ def load_state() -> Dict[str, Any]:
             "processed_ids": [],
             "failed": {},
             "in_progress_orders": {},
+            "biotus_submitted_orders": {},
             "zoohub_sent": {},
             "supplier7_sent": {},
             "last_dobavki_export_ts": 0,
@@ -629,6 +630,7 @@ def load_state() -> Dict[str, Any]:
                 "processed_ids": [],
                 "failed": {},
                 "in_progress_orders": {},
+                "biotus_submitted_orders": {},
                 "zoohub_sent": {},
                 "supplier7_sent": {},
                 "last_dobavki_export_ts": 0,
@@ -652,6 +654,10 @@ def load_state() -> Dict[str, Any]:
         if not isinstance(in_progress, dict):
             in_progress = {}
         data["in_progress_orders"] = in_progress
+        biotus_submitted = data.get("biotus_submitted_orders")
+        if not isinstance(biotus_submitted, dict):
+            biotus_submitted = {}
+        data["biotus_submitted_orders"] = biotus_submitted
         zoohub_sent = data.get("zoohub_sent")
         if not isinstance(zoohub_sent, dict):
             zoohub_sent = {}
@@ -670,6 +676,7 @@ def load_state() -> Dict[str, Any]:
             "processed_ids": [],
             "failed": {},
             "in_progress_orders": {},
+            "biotus_submitted_orders": {},
             "zoohub_sent": {},
             "supplier7_sent": {},
             "last_dobavki_export_ts": 0,
@@ -813,6 +820,31 @@ def clear_in_progress(state: Dict[str, Any], order_id: int) -> None:
     in_progress = state.get("in_progress_orders")
     if isinstance(in_progress, dict):
         in_progress.pop(str(order_id), None)
+
+
+def mark_biotus_submitted(state: Dict[str, Any], order_id: int, order_number: str | None = None) -> None:
+    submitted: Dict[str, Any] = state.setdefault("biotus_submitted_orders", {})
+    submitted[str(order_id)] = {
+        "ts": _now_ts(),
+        "order_number": str(order_number or "").strip(),
+        "run": RUN_INSTANCE_ID,
+        "pid": PID,
+        "host": HOSTNAME,
+    }
+
+
+def clear_biotus_submitted(state: Dict[str, Any], order_id: int) -> None:
+    submitted = state.get("biotus_submitted_orders")
+    if isinstance(submitted, dict):
+        submitted.pop(str(order_id), None)
+
+
+def get_biotus_submitted_entry(state: Dict[str, Any], order_id: int) -> Dict[str, Any] | None:
+    submitted = state.get("biotus_submitted_orders")
+    if not isinstance(submitted, dict):
+        return None
+    entry = submitted.get(str(order_id))
+    return entry if isinstance(entry, dict) else None
 
 
 def is_in_progress_active(state: Dict[str, Any], order_id: int, ttl_sec: int = ORCH_IN_PROGRESS_TTL_SEC) -> Tuple[bool, int]:
@@ -1153,7 +1185,7 @@ def choose_np_step(address: str, branch_number: str, shipping_address: str) -> T
     return ("step6_select_np_branch", STEP6_BRANCH_SCRIPT, "BIOTUS_BRANCH_QUERY", query)
 
 
-def process_one_biotus_order(order: Dict[str, Any]) -> None:
+def process_one_biotus_order(order: Dict[str, Any], state: Dict[str, Any] | None = None) -> None:
     order_id = order.get("id")
     try:
         order_id_int = int(order_id)
@@ -1257,6 +1289,9 @@ def process_one_biotus_order(order: Dict[str, Any]) -> None:
                 payload = None
             if isinstance(payload, dict):
                 biotus_order_number = str(payload.get("order_number") or "").strip()
+                if state is not None and payload.get("ok") is True:
+                    mark_biotus_submitted(state, order_id_int, biotus_order_number)
+                    save_state(state)
                 if not biotus_order_number:
                     warning = str(payload.get("warning") or "order number not found").strip()
                     print(f"[ORCH] WARN step9_confirm_order: {warning}")
@@ -1833,7 +1868,7 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
         return True
 
     if supplierlist == 38:
-        process_one_biotus_order(order)
+        process_one_biotus_order(order, state=state)
         return True
 
     print(
@@ -2141,6 +2176,8 @@ def main() -> int:
                                 force_terminal = True
                             if is_supplier4_order(order) and step in {"submit_checkout_order"}:
                                 force_terminal = True
+                            if supplierlist == 38 and get_biotus_submitted_entry(state, int(order_id)) is not None:
+                                force_terminal = True
                             if is_supplier5_order(order) and step in {"zoohub_email_send"}:
                                 force_terminal = True
                             if is_supplier7_order(order) and step in {"supplier7_email_send"}:
@@ -2159,16 +2196,27 @@ def main() -> int:
                                 fail_mark = ORCH_FAIL_MARK
                                 if is_supplier5_order(order):
                                     fail_mark = "FAIL"
-                                red_reason = f"{fail_mark} Order {order_id} failed after {fail_count} attempt(s). Last step: {step}. Reason: {reason}"
+                                red_reason = (
+                                    f"{fail_mark} Заказ {order_id} упал после {fail_count} попытк(и). "
+                                    f"Последний шаг: {step}. Причина: {reason}"
+                                )
+                                if supplierlist == 38:
+                                    submitted_entry = get_biotus_submitted_entry(state, int(order_id))
+                                    if submitted_entry is not None:
+                                        submitted_number = str(submitted_entry.get("order_number") or "").strip()
+                                        suffix = " Отправка на Biotus уже выполнена."
+                                        if submitted_number:
+                                            suffix = f" Отправка на Biotus уже выполнена (numberSup={submitted_number})."
+                                        red_reason = f"{red_reason}\nВНИМАНИЕ:{suffix} Не перезапускайте автоматически, проверьте вручную."
                                 if force_terminal and "submitted=true" in reason:
-                                    red_reason = f"{red_reason}\nWARNING: supplier2 submit likely succeeded; check supplier site manually before retry."
+                                    red_reason = f"{red_reason}\nВНИМАНИЕ: отправка поставщику 2, вероятно, уже прошла; перед повтором проверьте сайт поставщика вручную."
                                 # Try to set SalesDrive status to FAIL status with a short red comment.
                                 try:
                                     salesdrive_update_status(int(order_id), ORCH_FAIL_STATUS_ID, comment=red_reason)
                                     print(f"[ORCH] SalesDrive status updated: order_id={order_id} -> statusId={ORCH_FAIL_STATUS_ID}")
                                 except Exception as se:
                                     # Include SalesDrive error in notify, but keep going
-                                    red_reason = f"{red_reason}\nSalesDrive update error: {se}"
+                                    red_reason = f"{red_reason}\nОшибка обновления SalesDrive: {se}"
                                 notify_stub(red_reason)
 
                             # continue with next order
@@ -2189,6 +2237,7 @@ def main() -> int:
                         state["last_processed_at"] = _now_ts()
                         clear_in_progress(state, int(order_id))
                         clear_failed(state, int(order_id))
+                        clear_biotus_submitted(state, int(order_id))
                         save_state(state)
                         print(f"[ORCH] Done pipeline for order id={order_id}.")
                     if paused_during_batch:

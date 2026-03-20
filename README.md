@@ -1,4 +1,4 @@
-
+source .venv/bin/activate
 Перед запуском скриптов нужно вручную запустить Chrome:
 
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \

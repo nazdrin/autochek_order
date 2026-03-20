@@ -257,6 +257,14 @@ def _normalize_spaces(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
 
+def _normalize_pickup_point_text(s: str) -> str:
+    txt = _normalize_spaces(s or "")
+    # Keep the semantic form stable even if the source contains a line break or extra spaces
+    # between "приймання-" and "видачі".
+    txt = re.sub(r"приймання-\s+видачі", "приймання-видачі", txt, flags=re.IGNORECASE)
+    return _normalize_spaces(txt)
+
+
 def _norm_text(s: str) -> str:
     s = (s or "").lower()
     s = s.replace("\u00a0", " ").replace("\u200b", " ")
@@ -308,6 +316,11 @@ def _split_city_option_text(txt: str) -> tuple[str, str]:
     if m:
         return _normalize_spaces(m.group(1)), _normalize_spaces(m.group(2))
     return raw, ""
+
+
+def _city_option_has_parentheses(txt: str) -> bool:
+    raw = _normalize_spaces(txt or "")
+    return bool(re.search(r"\([^)]*\)", raw))
 
 
 def _district_soft_match(order_district_norm: str, option_district_norm: str) -> bool:
@@ -398,10 +411,13 @@ def _build_branch_query_from_shipping(shipping_address: str, fallback_address: s
     src = (shipping_address or "").strip() or (fallback_address or "").strip()
     if not src:
         return ""
-    s = _normalize_spaces(src)
+    s = _normalize_pickup_point_text(src)
     s = re.sub(r"\(\s*до\s*\d+\s*кг\s*\)", "", s, flags=re.IGNORECASE)
     s = _normalize_spaces(s)
     s_lower = s.casefold()
+
+    src_full = _normalize_pickup_point_text(src)
+    src_full_lower = src_full.casefold()
 
     def after_colon_tail(ss: str) -> str:
         if ":" in ss:
@@ -416,11 +432,10 @@ def _build_branch_query_from_shipping(shipping_address: str, fallback_address: s
         tail = after_colon_tail(s)
         return tail or _normalize_spaces(s)
 
-    if "пункт приймання-видачі" in s_lower and ":" in s:
-        left, right = s.split(":", 1)
+    if "пункт приймання-видачі" in src_full_lower and ":" in src_full:
+        left, right = src_full.split(":", 1)
         left = _normalize_spaces(left)
         right = _normalize_spaces(right)
-        right = re.sub(r"\s*\(до [^)]+\)\s*", " ", right, flags=re.IGNORECASE).strip()
         m = re.search(r"№\s*(\d+)", left)
         if m:
             return _normalize_spaces(f"Пункт приймання-видачі №{m.group(1)}: {right}")
@@ -2431,7 +2446,8 @@ def _branch_number_from_query(q: str) -> str:
 
 
 def _build_branch_option_matcher(kind: str, query: str):
-    q_raw = re.sub(r"\s*\(до [^)]+\)\s*", " ", query or "", flags=re.IGNORECASE).strip()
+    q_orig = _normalize_pickup_point_text(query or "")
+    q_raw = re.sub(r"\s*\(до [^)]+\)\s*", " ", q_orig, flags=re.IGNORECASE).strip()
     qn = _norm_text(q_raw)
     num = _branch_number_from_query(q_raw)
     has_num = bool(num)
@@ -2452,20 +2468,34 @@ def _build_branch_option_matcher(kind: str, query: str):
         s = re.sub(r"\s+", " ", s).strip()
         return s
 
+    has_pickup_label = "пункт приймання-видачі" in _norm_text(q_orig)
     addr_mode = (kind == "punkt") and (":" in q_raw) and (not has_num)
     addr_query = norm_addr(q_raw)
     nums = re.findall(r"\d+", addr_query)
     house_num = nums[-1] if nums else None
     raw_tokens = [t for t in re.split(r"\s+", addr_query) if t]
     addr_tokens = [t for t in raw_tokens if len(t) >= 4 and t not in {"вул", "пр", "пл"}]
+    full_pickup_query = _norm_text(q_orig)
+    plain_pickup_query = _norm_text(re.sub(r"\s*\(до [^)]+\)\s*", " ", q_orig, flags=re.IGNORECASE).strip())
 
     def matches(option_text: str) -> bool:
         if not option_text:
             return False
+        option_clean = _normalize_pickup_point_text(option_text)
         tn_raw = re.sub(r"\s*\(до [^)]+\)\s*", " ", option_text, flags=re.IGNORECASE)
         tn = _norm_text(tn_raw)
+        tn_full = _norm_text(option_clean)
         if strict_re is not None:
             return bool(strict_re.search(option_text))
+        if has_pickup_label:
+            if full_pickup_query and full_pickup_query in tn_full:
+                return True
+            if plain_pickup_query and plain_pickup_query in tn:
+                return True
+            if house_num:
+                num_re = re.compile(rf"(?<!\d){re.escape(house_num)}(?!\d)")
+                if num_re.search(option_text):
+                    return True
         if addr_mode:
             tn_addr = norm_addr(tn_raw)
             if addr_tokens and not all(tok in tn_addr for tok in addr_tokens):
@@ -2877,6 +2907,13 @@ async def _step5_select_city_with_district(
     if len(candidates) == 1:
         selected = candidates[0]
     else:
+        if is_city_type:
+            plain_name_candidates = [c for c in candidates if not _city_option_has_parentheses(c.get("text") or "")]
+            print(f"[SUP6] city plain-name priority => {json.dumps([c['text'] for c in plain_name_candidates], ensure_ascii=False)}")
+            if len(plain_name_candidates) == 1:
+                selected = plain_name_candidates[0]
+            elif len(plain_name_candidates) > 1:
+                candidates = plain_name_candidates
         if (not is_city_type) and order_district_norm:
             district_tiebreak_used = True
             narrowed = [c for c in candidates if _district_soft_match(order_district_norm, c.get("district_hint_norm") or "")]
