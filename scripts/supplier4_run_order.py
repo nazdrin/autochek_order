@@ -1080,47 +1080,6 @@ async def _attach_label_file(page, ttn: str) -> dict:
     return {"file": str(fpath), "file_name": fpath.name, "files_len": int(files_len)}
 
 
-async def _collect_checkout_validation_text(page) -> str:
-    error_text = ""
-    try:
-        candidates = page.locator(".field-error, .error, .form-error, .checkout-error, .invalid-feedback")
-        count = await candidates.count()
-        msgs = []
-        for i in range(min(count, 5)):
-            t = re.sub(r"\s+", " ", (await candidates.nth(i).inner_text(timeout=700)) or "").strip()
-            if t:
-                msgs.append(t)
-        if msgs:
-            error_text = "; ".join(msgs)
-    except Exception:
-        pass
-    return error_text
-
-
-async def _extract_complete_order_number(page) -> str:
-    body_text = ""
-    try:
-        body_text = re.sub(r"\s+", " ", await page.inner_text("body")).strip()
-    except Exception:
-        body_text = ""
-
-    # IMPORTANT: parse supplier number from text only, never from URL.
-    m = re.search(r"Замовлення\s*[№Nº]\s*(\d{3,})", body_text, flags=re.IGNORECASE)
-    if not m:
-        try:
-            txt = await page.locator("text=/Замовлення\\s*[№Nº]\\s*\\d+/i").first.inner_text(timeout=2500)
-            m = re.search(r"(\d{3,})", txt or "")
-        except Exception:
-            m = None
-    if not m:
-        try:
-            html = await page.content()
-        except Exception:
-            html = ""
-        m = re.search(r"Замовлення\s*[№Nº]\s*(\d{3,})", html or "", flags=re.IGNORECASE)
-    return m.group(1) if m else ""
-
-
 async def _submit_checkout(page) -> None:
     stage = "submit_checkout_order"
     async def _ensure_agreement_checked() -> None:
@@ -1200,7 +1159,6 @@ async def _submit_checkout(page) -> None:
                 pass
             for mode in ("normal", "force", "js"):
                 try:
-                    start_url = page.url or ""
                     await _ensure_agreement_checked()
                     if mode == "js":
                         await btn.evaluate("(el) => el.click()")
@@ -1208,14 +1166,11 @@ async def _submit_checkout(page) -> None:
                         await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS), force=True)
                     else:
                         await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS))
-                    # Wait materially longer than before, but require an actual post-submit signal.
-                    signal_deadline = asyncio.get_running_loop().time() + min(20.0, (SUP4_TIMEOUT_MS + 10000) / 1000.0)
+                    # Treat click as successful only if completion signals appear shortly.
+                    signal_deadline = asyncio.get_running_loop().time() + 4.8
                     while asyncio.get_running_loop().time() < signal_deadline:
                         url = page.url or ""
                         if "/checkout/complete/" in url:
-                            print(f"[SUP4] submitted via {sel}/{mode}")
-                            return
-                        if url and start_url and (url != start_url) and ("/checkout/" not in url):
                             print(f"[SUP4] submitted via {sel}/{mode}")
                             return
                         try:
@@ -1230,9 +1185,6 @@ async def _submit_checkout(page) -> None:
                                 return
                         except Exception:
                             pass
-                        validation_text = await _collect_checkout_validation_text(page)
-                        if validation_text:
-                            break
                         await page.wait_for_timeout(150)
                 except Exception:
                     continue
@@ -1240,7 +1192,19 @@ async def _submit_checkout(page) -> None:
             continue
 
     # Collect validation hints if submit stayed on checkout.
-    error_text = await _collect_checkout_validation_text(page)
+    error_text = ""
+    try:
+        candidates = page.locator(".field-error, .error, .form-error, .checkout-error, .invalid-feedback")
+        count = await candidates.count()
+        msgs = []
+        for i in range(min(count, 5)):
+            t = re.sub(r"\s+", " ", (await candidates.nth(i).inner_text(timeout=700)) or "").strip()
+            if t:
+                msgs.append(t)
+        if msgs:
+            error_text = "; ".join(msgs)
+    except Exception:
+        pass
     raise StageError(
         stage,
         "Submit click did not lead to checkout complete",
@@ -1257,27 +1221,52 @@ async def _wait_complete_and_parse_number(page) -> str:
         url = page.url or ""
         if "/checkout/complete/" in url:
             complete_ready = True
+            break
         try:
             if await page.locator("text=/Ваше\\s+замовлення\\s+отримано/i").count() > 0:
                 complete_ready = True
+                break
         except Exception:
             pass
         try:
             if await page.locator("text=/Замовлення\\s*[№Nº]\\s*\\d+/i").count() > 0:
                 complete_ready = True
+                break
         except Exception:
             pass
-        if complete_ready:
-            number = await _extract_complete_order_number(page)
-            if number:
-                print(f"[SUP4] complete page parsed with order number: {number}")
-                return number
         await page.wait_for_timeout(180)
-    raise StageError(
-        stage,
-        "Could not parse supplier order number on complete page",
-        {"url": page.url, "complete_ready": complete_ready},
-    )
+
+    body_text = ""
+    try:
+        body_text = re.sub(r"\s+", " ", await page.inner_text("body")).strip()
+    except Exception:
+        body_text = ""
+
+    # IMPORTANT: parse supplier number from text only, never from URL.
+    m = re.search(r"Замовлення\s*[№Nº]\s*(\d{3,})", body_text, flags=re.IGNORECASE)
+    if not m:
+        try:
+            txt = await page.locator("text=/Замовлення\\s*[№Nº]\\s*\\d+/i").first.inner_text(timeout=2500)
+            m = re.search(r"(\d{3,})", txt or "")
+        except Exception:
+            m = None
+    if not m:
+        try:
+            html = await page.content()
+        except Exception:
+            html = ""
+        m = re.search(r"Замовлення\s*[№Nº]\s*(\d{3,})", html or "", flags=re.IGNORECASE)
+
+    if not m:
+        raise StageError(
+            stage,
+            "Could not parse supplier order number on complete page",
+            {"url": page.url, "complete_ready": complete_ready},
+        )
+
+    number = m.group(1)
+    print(f"[SUP4] complete page parsed with order number: {number}")
+    return number
 
 
 async def _checkout_and_submit(page, ttn: str) -> dict:
