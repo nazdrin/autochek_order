@@ -11,6 +11,7 @@ git push origin main
   --remote-debugging-port=9222 \
   --user-data-dir="$PWD/.chrome-rpa-profile"
 
+
 BIOTUS_BASE_URL=https://opt.biotus.ua
 BIOTUS_LOGIN=ibezdrabko@icloud.com
 BIOTUS_PASSWORD=397Aa397$
