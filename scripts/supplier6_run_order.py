@@ -1441,7 +1441,117 @@ async def _step3_extract_added_site_name(page, fallback_name: str = "") -> str:
     return _strip_added_message_to_site_name(fallback_name or "")
 
 
-async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned_client_price: object = None) -> tuple[dict | None, dict | None]:
+async def _step3_collect_cart_rows(page) -> list[dict]:
+    rows = page.locator(".cart-view tr, .cart-summary tr")
+    out: list[dict] = []
+    try:
+        count = await rows.count()
+    except Exception:
+        count = 0
+    for i in range(count):
+        row = rows.nth(i)
+        try:
+            if not await row.is_visible():
+                continue
+        except Exception:
+            continue
+        remove_btn = row.locator("button.vm2-remove_from_cart").first
+        qty_input = row.locator("input[name^='quantity'], input.quantity-input, input[type='number']").first
+        try:
+            has_remove = await remove_btn.count() > 0
+        except Exception:
+            has_remove = False
+        try:
+            has_qty_input = await qty_input.count() > 0
+        except Exception:
+            has_qty_input = False
+        if not has_remove and not has_qty_input:
+            continue
+
+        raw_name = ""
+        for cand in (
+            row.locator("a.product_name, .product-name, .product_name a").first,
+            row.locator("td:has(a), h3, h4").first,
+            row,
+        ):
+            try:
+                if await cand.count() <= 0:
+                    continue
+                raw_name = _normalize_spaces((await cand.inner_text(timeout=min(1200, SUP6_TIMEOUT_MS))) or "")
+                if raw_name:
+                    break
+            except Exception:
+                continue
+
+        qty = None
+        if has_qty_input:
+            try:
+                raw_value = (await qty_input.input_value(timeout=min(1200, SUP6_TIMEOUT_MS))) or ""
+                m = re.search(r"\d+", raw_value)
+                if m:
+                    q = int(m.group(0))
+                    qty = q if q > 0 else None
+            except Exception:
+                qty = None
+        if qty is None:
+            qty = _extract_qty_prefix(raw_name)
+
+        out.append(
+            {
+                "name_raw": raw_name,
+                "name_norm": _norm_product_title(raw_name),
+                "qty": qty,
+            }
+        )
+    return out
+
+
+async def _step3_verify_cart_quantity(page, item: Sup6Item, site_name: str) -> dict | None:
+    cart_rows = await _step3_collect_cart_rows(page)
+    if not cart_rows:
+        return _step3_fail(f"CART_QTY_NOT_READABLE:{item.sku}", details={"sku": item.sku, "expected_qty": item.qty})
+
+    expected_qty = int(item.qty)
+    best_row = None
+    best_score = -1
+    expected_name_norm = _norm_product_title(site_name or "")
+    for row in cart_rows:
+        score = 0
+        row_name_norm = str(row.get("name_norm") or "")
+        if expected_name_norm and row_name_norm:
+            if expected_name_norm == row_name_norm:
+                score = 100
+            elif (expected_name_norm in row_name_norm) or (row_name_norm in expected_name_norm):
+                score = 80
+        elif len(cart_rows) == 1:
+            score = 10
+        if score > best_score:
+            best_score = score
+            best_row = row
+
+    if best_row is None and len(cart_rows) == 1:
+        best_row = cart_rows[0]
+    if best_row is None:
+        return _step3_fail(
+            f"CART_QTY_ROW_NOT_MATCHED:{item.sku}",
+            details={"sku": item.sku, "expected_qty": expected_qty, "site_name": site_name, "cart_rows": cart_rows},
+        )
+
+    actual_qty = best_row.get("qty")
+    if actual_qty is None:
+        return _step3_fail(
+            f"CART_QTY_NOT_READABLE:{item.sku}",
+            details={"sku": item.sku, "expected_qty": expected_qty, "site_name": site_name, "row": best_row},
+        )
+    if int(actual_qty) != expected_qty:
+        return _step3_fail(
+            f"CART_QTY_MISMATCH:{item.sku}",
+            details={"sku": item.sku, "expected_qty": expected_qty, "actual_qty": int(actual_qty), "site_name": site_name, "row": best_row},
+        )
+    return None
+
+
+async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned_client_price: object = None, verify_cart_qty: bool = False) -> tuple[dict | None, dict | None]:
     sku = item.sku
     qty = item.qty
     max_attempts = 2
@@ -1532,6 +1642,11 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                 if await cart_rows.count() <= 0:
                     await _step3_dump_artifact(page, sku=sku, label="cart_verify_failed")
                     return _step3_fail(f"CART_VERIFY_FAILED:{sku}", details={"sku": sku}), None
+                if verify_cart_qty:
+                    qty_fail = await _step3_verify_cart_quantity(page, item, site_name)
+                    if qty_fail is not None:
+                        await _step3_dump_artifact(page, sku=sku, label="cart_qty_mismatch")
+                        return qty_fail, None
             else:
                 await _step3_close_fancybox(page)
                 await _step3_debug_pause(page, f"after_close_fancybox_sku={sku}")
@@ -1841,6 +1956,7 @@ async def step3_add_items_to_cart(page, items: list[Sup6Item], order_payload: di
             item,
             is_last=is_last,
             planned_client_price=planned.get("client_price"),
+            verify_cart_qty=(len(items) == 1 and is_last),
         )
         if fail is not None:
             fail_details = dict(fail.get("details") or {})
@@ -3675,6 +3791,25 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
     matched_ok, matches, match_meta = _step6_match_rows_with_map(checkout_rows, mapping)
     if not matched_ok:
         return _step6_fail("PRICE_ROW_MATCH_FAILED", details=match_meta)
+
+    qty_mismatches: list[dict] = []
+    for row_info, map_info in matches:
+        row_qty = row_info.get("qty")
+        if row_qty is None:
+            continue
+        expected_qty = int(map_info.get("qty") or 1)
+        if int(row_qty) != expected_qty:
+            qty_mismatches.append(
+                {
+                    "sku": map_info.get("sku"),
+                    "site_name": map_info.get("site_name"),
+                    "expected_qty": expected_qty,
+                    "actual_qty": int(row_qty),
+                    "checkout_row_name": row_info.get("name_raw"),
+                }
+            )
+    if qty_mismatches:
+        return _step6_fail("CHECKOUT_QTY_MISMATCH", details={"mismatches": qty_mismatches})
 
     calc_rows: list[dict] = []
     for row_info, map_info in matches:

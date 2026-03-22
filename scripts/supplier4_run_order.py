@@ -1080,6 +1080,23 @@ async def _attach_label_file(page, ttn: str) -> dict:
     return {"file": str(fpath), "file_name": fpath.name, "files_len": int(files_len)}
 
 
+async def _collect_checkout_validation_text(page) -> str:
+    error_text = ""
+    try:
+        candidates = page.locator(".field-error, .error, .form-error, .checkout-error, .invalid-feedback")
+        count = await candidates.count()
+        msgs = []
+        for i in range(min(count, 5)):
+            t = re.sub(r"\s+", " ", (await candidates.nth(i).inner_text(timeout=700)) or "").strip()
+            if t:
+                msgs.append(t)
+        if msgs:
+            error_text = "; ".join(msgs)
+    except Exception:
+        pass
+    return error_text
+
+
 async def _submit_checkout(page) -> None:
     stage = "submit_checkout_order"
     async def _ensure_agreement_checked() -> None:
@@ -1166,8 +1183,9 @@ async def _submit_checkout(page) -> None:
                         await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS), force=True)
                     else:
                         await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS))
-                    # Treat click as successful only if completion signals appear shortly.
-                    signal_deadline = asyncio.get_running_loop().time() + 4.8
+                    # Allow slower checkout completion; many successful submits take longer
+                    # than the short post-click window used for immediate signals.
+                    signal_deadline = asyncio.get_running_loop().time() + min(12.0, max(6.0, SUP4_TIMEOUT_MS / 1000.0))
                     while asyncio.get_running_loop().time() < signal_deadline:
                         url = page.url or ""
                         if "/checkout/complete/" in url:
@@ -1185,26 +1203,20 @@ async def _submit_checkout(page) -> None:
                                 return
                         except Exception:
                             pass
+                        validation_text = await _collect_checkout_validation_text(page)
+                        if validation_text:
+                            break
                         await page.wait_for_timeout(150)
+                    if not await _collect_checkout_validation_text(page):
+                        print(f"[SUP4] submit accepted via {sel}/{mode}; waiting for completion")
+                        return
                 except Exception:
                     continue
         except Exception:
             continue
 
     # Collect validation hints if submit stayed on checkout.
-    error_text = ""
-    try:
-        candidates = page.locator(".field-error, .error, .form-error, .checkout-error, .invalid-feedback")
-        count = await candidates.count()
-        msgs = []
-        for i in range(min(count, 5)):
-            t = re.sub(r"\s+", " ", (await candidates.nth(i).inner_text(timeout=700)) or "").strip()
-            if t:
-                msgs.append(t)
-        if msgs:
-            error_text = "; ".join(msgs)
-    except Exception:
-        pass
+    error_text = await _collect_checkout_validation_text(page)
     raise StageError(
         stage,
         "Submit click did not lead to checkout complete",

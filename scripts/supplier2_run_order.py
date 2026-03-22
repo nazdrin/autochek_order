@@ -49,6 +49,7 @@ def _to_bool(value: str, default: bool) -> bool:
 
 
 TIMEOUT_MS = _to_int(os.getenv("SUP2_TIMEOUT_MS", "20000"), 20000)
+NAV_TIMEOUT_MS = max(TIMEOUT_MS, _to_int(os.getenv("SUP2_NAV_TIMEOUT_MS", "45000"), 45000))
 HEADLESS = _to_bool(os.getenv("SUP2_HEADLESS", "1"), True)
 CLEAR_BASKET = _to_bool(os.getenv("SUP2_CLEAR_BASKET", "1"), True)
 DEBUG_PAUSE_SECONDS = _to_int(os.getenv("SUP2_DEBUG_PAUSE_SECONDS", "0"), 0)
@@ -199,8 +200,38 @@ async def _collect_delete_ids(page) -> list[int]:
     return [int(x) for x in ids if isinstance(x, (int, float))]
 
 
+async def _goto_retry(page, url: str, *, wait_until: str = "domcontentloaded", timeout: int = NAV_TIMEOUT_MS, attempts: int = 2) -> None:
+    last_error = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            await page.goto(url, wait_until=wait_until, timeout=timeout)
+            return
+        except PWTimeoutError as e:
+            last_error = e
+            if attempt >= attempts:
+                raise
+            await page.wait_for_timeout(700)
+    if last_error is not None:
+        raise last_error
+
+
+async def _reload_retry(page, *, wait_until: str = "domcontentloaded", timeout: int = NAV_TIMEOUT_MS, attempts: int = 2) -> None:
+    last_error = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            await page.reload(wait_until=wait_until, timeout=timeout)
+            return
+        except PWTimeoutError as e:
+            last_error = e
+            if attempt >= attempts:
+                raise
+            await page.wait_for_timeout(700)
+    if last_error is not None:
+        raise last_error
+
+
 async def _clear_basket(page) -> dict:
-    await page.goto(BASKET_URL, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+    await _goto_retry(page, BASKET_URL)
     if _is_login_url(page.url or ""):
         raise StageError("clear_basket", "Not logged in", {})
 
@@ -221,7 +252,7 @@ async def _clear_basket(page) -> dict:
             await page.evaluate("([id]) => delete_from_basket(id, 0)", [basket_id])
             removed += 1
             await page.wait_for_timeout(250)
-        await page.reload(wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+        await _reload_retry(page)
 
     final_ids = await _collect_delete_ids(page)
     if final_ids:
@@ -429,7 +460,7 @@ async def _raise_availability_error(
 
 
 async def _add_items(page, items: list[Item]) -> list[dict]:
-    await page.goto(PRODUCTS_URL, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+    await _goto_retry(page, PRODUCTS_URL)
     if _is_login_url(page.url or ""):
         raise StageError("add_items", "Not authorized: redirected to login page.", {})
 
@@ -526,7 +557,7 @@ async def _wait_dropdown_visible(page) -> dict[str, int]:
 
 
 async def _select_city_kyiv(page) -> None:
-    await page.goto(BASKET_URL, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+    await _goto_retry(page, BASKET_URL)
     if _is_login_url(page.url or ""):
         raise StageError("select_city", "Not logged in", {})
 
