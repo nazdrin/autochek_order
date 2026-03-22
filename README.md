@@ -1,5 +1,8 @@
 source .venv/bin/activate
+git add .
+git commit -m "фикс протеина монстра и добавок"
 
+git push origin main
 
 
 Перед запуском скриптов нужно вручную запустить Chrome:
