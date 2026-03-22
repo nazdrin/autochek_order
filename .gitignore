@@ -52,12 +52,14 @@ node_modules/
 .orchestrator.lock
 .biotus_state.json
 .state_supplier*.json
+.supplier2_submit_checkpoint.json
 credentials.json
 
 # generated labels / exports
 supplier2_labels/
 supplier3_labels/
 supplier4_labels/
+supplier7_labels/
 zoohub_labels/
 маркировки/
 exports/
@@ -66,4 +68,4 @@ exports/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
-pages
+pages/

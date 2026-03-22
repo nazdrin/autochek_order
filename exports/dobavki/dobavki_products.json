@@ -783,15 +783,6 @@
     "termin": "2026-06-30 00:00:00"
   },
   {
-    "articul": "CRO-81050",
-    "name": "Натуральне снодійне Christopher's Original Formulas (Slumber) 425 мг 100 капсул",
-    "brand": "Christopher's Original Formulas",
-    "barcode": "084783810506",
-    "qty": 1,
-    "price": 820.0,
-    "termin": "2029-10-30 00:00:00"
-  },
-  {
     "articul": "CLG-56092",
     "name": "Cliganic, Браслет від комарів, універсальний розмір, 10 браслетів",
     "brand": "Cliganic",
@@ -880,15 +871,6 @@
     "qty": 10,
     "price": 328.0,
     "termin": "2028-07-30 00:00:00"
-  },
-  {
-    "articul": "DFH-00393",
-    "name": "Designs For Health, Berberine Synergy™, 60 Vegetarian Capsules",
-    "brand": "Designs For Health",
-    "barcode": "879452003934",
-    "qty": 1,
-    "price": 3067.0,
-    "termin": ""
   },
   {
     "articul": "CRT-00001",
@@ -1285,15 +1267,6 @@
     "qty": 1,
     "price": 538.0,
     "termin": "2026-06-06 00:00:00"
-  },
-  {
-    "articul": "GLD-04125",
-    "name": "Gold Bond, Medicated, крем від багатьох симптомів псоріазу, максимальна ефективність, 113 г (4 унції)",
-    "brand": "Gold Bond",
-    "barcode": "041167041253",
-    "qty": 1,
-    "price": 716.0,
-    "termin": "2027-05-30 00:00:00"
   },
   {
     "articul": "GGR-00735_P",
@@ -1777,7 +1750,7 @@
     "name": "ТМГ триметилгліцин Life Extension (TMG) 500 мг 60 вегетаріанських капсул",
     "brand": "Life Extension",
     "barcode": "737870185963",
-    "qty": 9,
+    "qty": 8,
     "price": 382.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -1930,7 +1903,7 @@
     "name": "Бенфотиамин, Mega Benfotiamine, Life Extension, 250 мг, 120 капсул на рослинній основі",
     "brand": "Life Extension",
     "barcode": "737870925125",
-    "qty": 2,
+    "qty": 1,
     "price": 915.0,
     "termin": "2027-11-30 00:00:00"
   },
@@ -2227,7 +2200,7 @@
     "name": "Рутин, Natural Factors, 250 мг, 90 капсул",
     "brand": "Natural Factors",
     "barcode": "068958013916",
-    "qty": 8,
+    "qty": 7,
     "price": 421.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -2245,7 +2218,7 @@
     "name": "Журавлина концентрат Natural Factors (Super Strength Cranberry Concentrate) 500 мг 90 капсул",
     "brand": "Natural Factors",
     "barcode": "068958045122",
-    "qty": 8,
+    "qty": 7,
     "price": 416.0,
     "termin": "2028-09-30 00:00:00"
   },
@@ -2659,7 +2632,7 @@
     "name": "За д'арко, Pau d'Arco, Nature's Way, внутрішня кора, 545 мг, 100 вегетаріанських капсул",
     "brand": "Nature's Way",
     "barcode": "033674154502",
-    "qty": 5,
+    "qty": 4,
     "price": 319.0,
     "termin": "2029-12-30 00:00:00"
   },
@@ -3199,7 +3172,7 @@
     "name": "Вітамін Д3 Now Foods (Vitamin D-3) 2000 МО 120 м'яких таблеток",
     "brand": "Now Foods",
     "barcode": "733739003676",
-    "qty": 2,
+    "qty": 1,
     "price": 211.0,
     "termin": "2029-10-30 00:00:00"
   },
@@ -3208,18 +3181,9 @@
     "name": "Рідкий вітамін Д3 Now Foods (Liquid Vitamin D-3) 60 мл",
     "brand": "Now Foods",
     "barcode": "733739003706",
-    "qty": 2,
+    "qty": 1,
     "price": 247.0,
     "termin": "2029-02-20 00:00:00"
-  },
-  {
-    "articul": "NOW-00372",
-    "name": "Вітамін Д3 високоактивний Now Foods (Vitamin D-3 5000 МО 120 желатинових капсул",
-    "brand": "Now Foods",
-    "barcode": "733739003720",
-    "qty": 1,
-    "price": 299.0,
-    "termin": "2029-06-30 00:00:00"
   },
   {
     "articul": "NOW-00373",
@@ -3667,7 +3631,7 @@
     "name": "Жувальна ДГК для дітей фруктовий смак Now Foods (DHA For Children) 60 м'яких желатинових капсул",
     "brand": "Now Foods",
     "barcode": "733739016072",
-    "qty": 2,
+    "qty": 1,
     "price": 459.0,
     "termin": "2028-02-20 00:00:00"
   },
@@ -4072,7 +4036,7 @@
     "name": "Cертифікована органічна спіруліна Now Foods (Сertified Organic Spirulina) 1000 мг 240 таблеток",
     "brand": "Now Foods",
     "barcode": "733739027177",
-    "qty": 5,
+    "qty": 4,
     "price": 911.0,
     "termin": "2029-11-30 00:00:00"
   },
@@ -4261,7 +4225,7 @@
     "name": "Лютеїн і Зеаксантин Now Foods (Lutein &amp; Zeaxanthin) 60 м'яких желатинових капсул",
     "brand": "Now Foods",
     "barcode": "733739030641",
-    "qty": 8,
+    "qty": 7,
     "price": 720.0,
     "termin": "2028-07-30 00:00:00"
   },
@@ -5548,7 +5512,7 @@
     "name": "Вітамінний комплекс для жінок Optimum Nutrition (Opti-Women) 120 капсул",
     "brand": "Optimum Nutrition",
     "barcode": "748927024524",
-    "qty": 4,
+    "qty": 3,
     "price": 1184.0,
     "termin": "2027-06-30 00:00:00"
   },
@@ -5587,15 +5551,6 @@
     "qty": 10,
     "price": 132.0,
     "termin": "2028-07-17 00:00:00"
-  },
-  {
-    "articul": "OST-01165",
-    "name": "Колаген морський з гіалуроновою кислотою OstroVit (COLLAGEN MARINE with Hyaluronic Acid and Vitamin C)  120 капсул",
-    "brand": "OstroVit",
-    "barcode": "5903246227666",
-    "qty": 1,
-    "price": 419.0,
-    "termin": "2027-06-07 00:00:00"
   },
   {
     "articul": "OST-01184",
@@ -6772,7 +6727,7 @@
     "name": "Цитрат магнію Solaray (Magnesium Citrate) 400 мг 90 вегетаріанських капсул",
     "brand": "Solaray",
     "barcode": "076280463019",
-    "qty": 2,
+    "qty": 1,
     "price": 395.0,
     "termin": "2029-03-30 00:00:00"
   },
@@ -7285,7 +7240,7 @@
     "name": "Вітамін Д3 Solgar (Vitamin D3) 55 мкг 2200 МО 100 рослинних капсул",
     "brand": "Solgar",
     "barcode": "033984033177",
-    "qty": 10,
+    "qty": 9,
     "price": 578.0,
     "termin": "2027-12-30 00:00:00"
   },
@@ -7699,7 +7654,7 @@
     "name": "Хром Піколинат Swanson (Chromium Picolinate) 200 мкг 100 капсул",
     "brand": "Swanson",
     "barcode": "087614019222",
-    "qty": 8,
+    "qty": 7,
     "price": 154.0,
     "termin": "2028-08-30 00:00:00"
   },
@@ -7771,7 +7726,7 @@
     "name": "Екстракт ашваганди, Ashwagandha Extract, Swanson, 450 мг, 60 капсул",
     "brand": "Swanson",
     "barcode": "087614142876",
-    "qty": 4,
+    "qty": 3,
     "price": 266.0,
     "termin": "2027-09-30 00:00:00"
   },
@@ -7834,7 +7789,7 @@
     "name": "Селениум Комплекс, Selenium Complex, Swanson, 200 мкг 90 капсул",
     "brand": "Swanson",
     "barcode": "087614020679",
-    "qty": 3,
+    "qty": 2,
     "price": 122.0,
     "termin": "2028-06-30 00:00:00"
   },
@@ -8248,7 +8203,7 @@
     "name": "Магній Цитрамат Thorne Research (Magnesium Citramate) 90 капсул",
     "brand": "Thorne Research",
     "barcode": "693749272021",
-    "qty": 2,
+    "qty": 1,
     "price": 668.0,
     "termin": "2028-05-30 00:00:00"
   },
