@@ -4,7 +4,8 @@ git commit -m "фикс протеина монстра и добавок"
 
 git push origin main
 
-
+ План с приоритетами сохранён в память: /Users/dmitrijnazdrin/.codex/memories/supplier4_monsterlab_search_stability_plan_2026-03-23.md.
+ Текущее состояние и внесённые стабилизационные правки по Monsterlab: `/Users/dmitrijnazdrin/Projects/rpa_biotus/docs/supplier4_monsterlab_status_2026-04-06.md`.
 Перед запуском скриптов нужно вручную запустить Chrome:
 
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
@@ -63,4 +64,33 @@ SUP6_ITEMS="ART1:2,ART2:1" python -u scripts/supplier6_run_order.py --step=3
 
 ```bash
 SUP6_ITEMS="ART1:2,ART2:1" SUP6_STAGE=run python -u scripts/supplier6_run_order.py
+
+Если хочешь делать по шагам:
+
+  1. Убить все процессы Chrome:
+
+  pkill -f "Google Chrome"
+
+  2. Удалить профиль CDP:
+
+  rm -rf /tmp/chrome-cdp
+
+  3. Сбросить состояние оркестратора:
+
+  rm -f .orch_state.json
+
+  4. Поднять Chrome с debug-портом:
+
+  /Applications/Google\ Chrome.app/Contents/MacOS/Google\Chrome \--remote-debugging-port=9222 \
+
+  5. В другом терминале запустить оркестратор:
+
+  source .venv/bin/activate
+  Если хочешь без шумных логов Chrome:
+
+  /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+    --remote-debugging-port=9222 \
+    --user-data-dir=/tmp/chrome-cdp \
+    --window-size=1600,1000 \
+    >/tmp/biotus-chrome.log 2>&1 &
 ```

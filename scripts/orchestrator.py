@@ -1561,6 +1561,35 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
         msg = str(payload.get("error") or "supplier4_run_order returned ok=false")
         raise StepError(stage, msg)
 
+    cart_qty_checks = payload.get("cart_qty_checks")
+    if not isinstance(cart_qty_checks, list):
+        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        add_items_info = details.get("add_items") if isinstance(details.get("add_items"), dict) else {}
+        checkout_info = details.get("checkout_ttn") if isinstance(details.get("checkout_ttn"), dict) else {}
+        if isinstance(checkout_info.get("cart_qty_checks"), list):
+            cart_qty_checks = checkout_info.get("cart_qty_checks")
+        elif isinstance(add_items_info.get("cart_qty_checks"), list):
+            cart_qty_checks = add_items_info.get("cart_qty_checks")
+
+    if isinstance(cart_qty_checks, list) and cart_qty_checks:
+        bad_checks = []
+        for check in cart_qty_checks:
+            if not isinstance(check, dict):
+                continue
+            expected_qty = check.get("expected_qty")
+            actual_qty = check.get("actual_qty")
+            verified = bool(check.get("verified"))
+            try:
+                if int(expected_qty) != int(actual_qty) or not verified:
+                    bad_checks.append(check)
+            except Exception:
+                bad_checks.append(check)
+        if bad_checks:
+            raise StepError(step_name, f"Supplier4 qty verification failed: {bad_checks}")
+        print(f"[ORCH] Supplier4 qty verification ok: {len(cart_qty_checks)} item(s)")
+    else:
+        print("[ORCH] WARNING: Supplier4 response has no structured qty verification")
+
     supplier_order_number = str(payload.get("numberSup") or "").strip()
     if not supplier_order_number:
         supplier_order_number = str(payload.get("supplier_order_number") or "").strip()

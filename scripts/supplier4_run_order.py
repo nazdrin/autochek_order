@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -78,6 +79,15 @@ def _select_all_shortcut() -> str:
     return "Meta+A" if sys.platform == "darwin" else "Control+A"
 
 
+def _norm_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+
+
+def _sku_regex(sku: str) -> re.Pattern[str]:
+    escaped = re.escape(str(sku or "").strip())
+    return re.compile(rf"(?<![0-9a-zа-яёіїєґ]){escaped}(?![0-9a-zа-яёіїєґ])", re.I)
+
+
 def _state_path() -> Path:
     p = Path(SUP4_STORAGE_STATE_FILE)
     if not p.is_absolute():
@@ -92,6 +102,40 @@ def _attach_dir_path() -> Path:
         p = ROOT / p
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _debug_dir_path() -> Path:
+    p = ROOT / "tmp" / "supplier4_debug"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+async def _capture_debug_artifacts(page, stage: str, label: str, *, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    details: dict[str, Any] = {"url": page.url if page is not None else SUP4_BASE_URL}
+    if extra:
+        details.update(extra)
+    if page is None:
+        return details
+
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    safe_stage = re.sub(r"[^a-zA-Z0-9._-]+", "_", stage or "stage").strip("_") or "stage"
+    safe_label = re.sub(r"[^a-zA-Z0-9._-]+", "_", label or "artifact").strip("_") or "artifact"
+    base = _debug_dir_path() / f"{stamp}_{safe_stage}_{safe_label}"
+    screenshot_path = base.with_suffix(".png")
+    html_path = base.with_suffix(".html")
+
+    try:
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        details["screenshot"] = str(screenshot_path)
+    except Exception:
+        pass
+    try:
+        html = await page.content()
+        html_path.write_text(html, encoding="utf-8")
+        details["html"] = str(html_path)
+    except Exception:
+        pass
+    return details
 
 
 def _parse_qty(raw: str) -> int:
@@ -150,6 +194,283 @@ async def _best_effort_close_popups(page) -> None:
                     await page.wait_for_timeout(120)
             except Exception:
                 continue
+
+
+async def _get_active_element_info(page) -> dict[str, str]:
+    try:
+        data = await page.evaluate(
+            """() => {
+                const el = document.activeElement;
+                if (!el) return {};
+                return {
+                    tag: (el.tagName || '').toLowerCase(),
+                    id: el.id || '',
+                    name: el.getAttribute('name') || '',
+                    class: el.className || '',
+                    type: el.getAttribute('type') || '',
+                    value: 'value' in el ? String(el.value || '') : '',
+                };
+            }"""
+        )
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _search_input_state(page, target, selector_name: str) -> dict[str, Any]:
+    state: dict[str, Any] = {"selector": selector_name}
+    try:
+        state["visible"] = await target.is_visible()
+    except Exception:
+        state["visible"] = False
+    try:
+        state["enabled"] = await target.is_enabled()
+    except Exception:
+        state["enabled"] = False
+    try:
+        state["editable"] = await target.is_editable()
+    except Exception:
+        state["editable"] = False
+    try:
+        state["value"] = await target.input_value(timeout=min(1200, SUP4_TIMEOUT_MS))
+    except Exception:
+        state["value"] = ""
+    state["active"] = await _get_active_element_info(page)
+    state["uses_overlay_q"] = selector_name == "overlay_q"
+    return state
+
+
+async def _resolve_search_target(page):
+    stage = "add_items"
+    target_specs = [
+        ("overlay_q", page.locator("input#q.multi-input[name='q']").first),
+        ("multi_input", page.locator("input.multi-input").first),
+        ("multi_search_text", page.locator(".multi-search input[type='text']").first),
+        ("head_search", page.locator("input[placeholder*='пошук' i], .header input[type='search']").first),
+    ]
+    deadline = asyncio.get_running_loop().time() + min(3.0, SUP4_TIMEOUT_MS / 1000.0)
+    last_seen: dict[str, Any] = {}
+
+    while asyncio.get_running_loop().time() < deadline:
+        for selector_name, loc in target_specs:
+            try:
+                count = await loc.count()
+                last_seen[f"{selector_name}_count"] = count
+                if count <= 0 or not await loc.is_visible():
+                    continue
+                if selector_name != "head_search":
+                    try:
+                        if not await loc.is_editable():
+                            continue
+                    except Exception:
+                        continue
+                print(f"[SUP4] search target resolved: {selector_name}")
+                return loc, selector_name
+            except Exception:
+                continue
+        await page.wait_for_timeout(120)
+
+    raise StageError(stage, "SEARCH_WIDGET_NOT_READY", last_seen)
+
+
+async def _wait_search_widget_ready(page) -> tuple[Any, str]:
+    stage = "add_items"
+    target, target_name = await _resolve_search_target(page)
+    try:
+        await target.wait_for(state="visible", timeout=min(2500, SUP4_TIMEOUT_MS))
+        await target.click(timeout=min(2000, SUP4_TIMEOUT_MS), force=True)
+    except Exception:
+        details = await _capture_debug_artifacts(page, stage, "search_widget_not_ready", extra={"target": target_name})
+        raise StageError(stage, "SEARCH_WIDGET_NOT_READY", details)
+
+    overlay_q = page.locator("input#q.multi-input[name='q']").first
+    if target_name == "head_search":
+        deadline = asyncio.get_running_loop().time() + min(2.0, SUP4_TIMEOUT_MS / 1000.0)
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                if await overlay_q.count() > 0 and await overlay_q.is_visible() and await overlay_q.is_editable():
+                    print("[SUP4] search widget upgraded to overlay_q")
+                    return overlay_q, "overlay_q"
+            except Exception:
+                pass
+            await page.wait_for_timeout(100)
+
+    refreshed_target, refreshed_name = await _resolve_search_target(page)
+    print(f"[SUP4] search widget ready: selected={refreshed_name}")
+    return refreshed_target, refreshed_name
+
+
+async def _focus_search_input(page, *, attempts: int = 3) -> tuple[Any, str]:
+    stage = "add_items"
+    last_state: dict[str, Any] = {}
+    for attempt in range(1, attempts + 1):
+        target, selector_name = await _resolve_search_target(page)
+        try:
+            await target.scroll_into_view_if_needed(timeout=min(1200, SUP4_TIMEOUT_MS))
+        except Exception:
+            pass
+        try:
+            await target.click(timeout=min(2200, SUP4_TIMEOUT_MS), force=True)
+        except Exception:
+            pass
+        try:
+            await target.focus()
+        except Exception:
+            pass
+        await page.wait_for_timeout(100)
+        state = await _search_input_state(page, target, selector_name)
+        active = state.get("active") if isinstance(state.get("active"), dict) else {}
+        is_active = (
+            str(active.get("tag") or "").lower() == "input"
+            and str(active.get("name") or "").strip().lower() == "q"
+            and (
+                str(active.get("id") or "").strip().lower() == "q"
+                or "multi-input" in str(active.get("class") or "").casefold()
+            )
+        )
+        state["is_active_target"] = is_active
+        state["attempt"] = attempt
+        print(f"[SUP4] search focus state: {state}")
+        if state.get("visible") and state.get("enabled") and state.get("editable") and is_active:
+            return target, selector_name
+        last_state = state
+    details = await _capture_debug_artifacts(page, stage, "search_input_focus_failed", extra=last_state)
+    raise StageError(stage, "SEARCH_INPUT_FOCUS_FAILED", details)
+
+
+async def _clear_search_input(page, target, selector_name: str) -> None:
+    stage = "add_items"
+    state_before = await _search_input_state(page, target, selector_name)
+    print(f"[SUP4] search clear before: {state_before}")
+
+    cleared = False
+    try:
+        await target.fill("", timeout=min(1800, SUP4_TIMEOUT_MS))
+        await page.wait_for_timeout(80)
+        current = (await target.input_value(timeout=min(1200, SUP4_TIMEOUT_MS)) or "").strip()
+        cleared = current == ""
+    except Exception:
+        cleared = False
+
+    if not cleared:
+        try:
+            await target.evaluate(
+                """(el) => {
+                    el.value = '';
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }"""
+            )
+            await page.wait_for_timeout(80)
+            current = (await target.input_value(timeout=min(1200, SUP4_TIMEOUT_MS)) or "").strip()
+            cleared = current == ""
+        except Exception:
+            cleared = False
+
+    if not cleared:
+        focus_target, _ = await _focus_search_input(page, attempts=2)
+        try:
+            await page.keyboard.press(_select_all_shortcut())
+            await page.keyboard.press("Backspace")
+            await page.wait_for_timeout(80)
+            current = (await focus_target.input_value(timeout=min(1200, SUP4_TIMEOUT_MS)) or "").strip()
+            cleared = current == ""
+        except Exception:
+            cleared = False
+
+    state_after = await _search_input_state(page, target, selector_name)
+    print(f"[SUP4] search clear after: {state_after}")
+    if not cleared:
+        details = await _capture_debug_artifacts(page, stage, "search_input_clear_failed", extra={"before": state_before, "after": state_after})
+        raise StageError(stage, "SEARCH_INPUT_VALUE_MISMATCH", details)
+
+
+async def _type_search_value(page, target, sku: str, *, attempts: int = 3) -> str:
+    stage = "add_items"
+    last_value = ""
+    expected = _norm_text(sku)
+    for attempt in range(1, attempts + 1):
+        target, selector_name = await _focus_search_input(page, attempts=3)
+        await _clear_search_input(page, target, selector_name)
+        state_before_fill = await _search_input_state(page, target, selector_name)
+        print(f"[SUP4] search fill before: {state_before_fill}")
+        try:
+            await target.fill(sku, timeout=min(2200, SUP4_TIMEOUT_MS))
+        except Exception:
+            pass
+        try:
+            last_value = (await target.input_value(timeout=min(1500, SUP4_TIMEOUT_MS)) or "").strip()
+        except Exception:
+            last_value = ""
+        print(f"[SUP4] search input after fill: attempt={attempt} sku={sku} selector={selector_name} value={last_value!r}")
+        if _norm_text(last_value) != expected:
+            try:
+                await target.type(sku, delay=45, timeout=min(6000, SUP4_TIMEOUT_MS))
+            except Exception:
+                try:
+                    await target.press_sequentially(sku, timeout=min(6000, SUP4_TIMEOUT_MS))
+                except Exception as e:
+                    if attempt == attempts:
+                        raise StageError(stage, f"Search fill failed for sku={sku}: {e}") from e
+            await page.wait_for_timeout(180)
+            try:
+                last_value = (await target.input_value(timeout=min(1500, SUP4_TIMEOUT_MS)) or "").strip()
+            except Exception:
+                last_value = ""
+        state_after_fill = await _search_input_state(page, target, selector_name)
+        print(f"[SUP4] search input after type: attempt={attempt} sku={sku} state={state_after_fill}")
+        if _norm_text(last_value) == expected:
+            return last_value
+
+    details = await _capture_debug_artifacts(
+        page,
+        stage,
+        "search_input_value_mismatch",
+        extra={"sku": sku, "input_value": last_value},
+    )
+    raise StageError(stage, "SEARCH_INPUT_VALUE_MISMATCH", details)
+
+
+async def _wait_dropdown_candidates(page, sku: str):
+    stage = "add_items"
+    results = page.locator(".multi-results .multi-item, .multi-grid .multi-item")
+    containers = page.locator(".multi-results, .multi-grid")
+    deadline = asyncio.get_running_loop().time() + min(4.0, SUP4_TIMEOUT_MS / 1000.0)
+    last_count = 0
+    empty_visible = False
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            last_count = await results.count()
+            if last_count > 0:
+                first = results.first
+                if await first.is_visible():
+                    print(f"[SUP4] dropdown ready: sku={sku} candidates={last_count}")
+                    return results, last_count
+        except Exception:
+            pass
+        try:
+            if await containers.count() > 0 and await containers.first.is_visible():
+                empty_visible = True
+        except Exception:
+            pass
+        await page.wait_for_timeout(120)
+
+    if empty_visible and last_count == 0:
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "search_dropdown_empty",
+            extra={"sku": sku, "dropdown_count": last_count},
+        )
+        raise StageError(stage, "SEARCH_DROPDOWN_EMPTY", details)
+
+    details = await _capture_debug_artifacts(
+        page,
+        stage,
+        "search_dropdown_timeout",
+        extra={"sku": sku, "dropdown_count": last_count},
+    )
+    raise StageError(stage, "SEARCH_DROPDOWN_TIMEOUT", details)
 
 
 async def _is_logged_in(page) -> bool:
@@ -560,52 +881,97 @@ async def _clear_cart(page) -> int:
 
 async def _open_search_and_fill(page, sku: str) -> None:
     stage = "add_items"
-    head_search = page.locator("input[placeholder*='пошук' i], input[name='q'], .header input[type='search']").first
-    multi = page.locator("input.multi-input, .multi-search input[type='text']").first
-
     try:
-        if await multi.count() > 0 and await multi.is_visible():
-            target = multi
-        else:
-            await head_search.wait_for(state="visible", timeout=min(5000, SUP4_TIMEOUT_MS))
-            await head_search.click(timeout=min(2500, SUP4_TIMEOUT_MS), force=True)
-            await page.wait_for_timeout(120)
-            if await multi.count() > 0 and await multi.is_visible():
-                target = multi
-            else:
-                target = head_search
-
-        await target.click(timeout=min(2500, SUP4_TIMEOUT_MS), force=True)
-        await page.keyboard.press(_select_all_shortcut())
-        await page.keyboard.press("Backspace")
-        # Important for Windows: Monsterlab autocomplete listens to key events.
-        await target.type(sku, delay=45, timeout=min(6000, SUP4_TIMEOUT_MS))
+        target, target_name = await _wait_search_widget_ready(page)
+        typed_value = await _type_search_value(page, target, sku, attempts=3)
+        print(f"[SUP4] search input used: {target_name}, typed_value={typed_value!r}")
+    except StageError:
+        raise
     except Exception as e:
         raise StageError(stage, f"Search fill failed for sku={sku}: {e}") from e
 
 
-async def _open_product_from_dropdown(page, sku: str) -> None:
+async def _open_product_from_dropdown(page, sku: str) -> dict[str, str]:
     stage = "add_items"
-    results = page.locator(".multi-results .multi-item a[href], .multi-results .multi-item, .multi-grid .multi-item a[href]")
-    try:
-        await results.first.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
-    except Exception as e:
-        raise StageError(stage, f"Search dropdown did not appear for sku={sku}: {e}") from e
+    results, count = await _wait_dropdown_candidates(page, sku)
+    if count <= 0:
+        details = await _capture_debug_artifacts(page, stage, "search_dropdown_empty", extra={"sku": sku, "dropdown_count": count})
+        raise StageError(stage, "SEARCH_DROPDOWN_EMPTY", details)
 
-    count = await results.count()
-    chosen = None
-    for i in range(min(count, 15)):
+    exact_matches: list[tuple[Any, dict[str, str]]] = []
+    safe_contains_matches: list[tuple[Any, dict[str, str]]] = []
+    visible_product_links: list[tuple[Any, dict[str, str]]] = []
+    seen_keys: set[str] = set()
+    sku_re = _sku_regex(sku)
+    for i in range(min(count, 20)):
         row = results.nth(i)
         try:
-            txt = re.sub(r"\s+", " ", (await row.inner_text(timeout=900)) or "").strip().casefold()
+            if not await row.is_visible():
+                continue
+            link = row.locator("a[href]").first
+            click_target = row
             href = (await row.get_attribute("href") or "").strip()
-            if sku.casefold() in txt or (href and "/" in href and "monsterlab.com.ua" in href):
-                chosen = row
-                break
+            if await link.count() > 0 and await link.is_visible():
+                link_href = (await link.get_attribute("href") or "").strip()
+                if link_href:
+                    click_target = link
+                    href = link_href
+            txt_raw = re.sub(r"\s+", " ", (await row.inner_text(timeout=900)) or "").strip()
+            txt_norm = _norm_text(txt_raw)
+            info = {"text": txt_raw, "href": href}
+            dedupe_key = f"{href}|{txt_norm}"
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            if href.startswith("http") and "monsterlab.com.ua" in href and "/search" not in href:
+                visible_product_links.append((click_target, info))
+            if sku_re.search(txt_raw):
+                exact_matches.append((click_target, info))
+                continue
+            if _norm_text(sku) in txt_norm:
+                safe_contains_matches.append((click_target, info))
         except Exception:
             continue
-    if chosen is None:
-        chosen = results.first
+
+    chosen = None
+    chosen_info: dict[str, str] = {}
+    print(
+        f"[SUP4] dropdown classify: sku={sku} exact={len(exact_matches)} "
+        f"contains={len(safe_contains_matches)} visible_links={len(visible_product_links)}"
+    )
+    if len(exact_matches) == 1:
+        chosen, chosen_info = exact_matches[0]
+    elif len(exact_matches) > 1:
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "search_no_exact_match_ambiguous",
+            extra={"sku": sku, "matches": [m[1] for m in exact_matches[:5]], "dropdown_count": count},
+        )
+        raise StageError(stage, "SEARCH_NO_EXACT_MATCH", details)
+    elif len(safe_contains_matches) == 1:
+        chosen, chosen_info = safe_contains_matches[0]
+    elif len(visible_product_links) == 1:
+        chosen, chosen_info = visible_product_links[0]
+        print(f"[SUP4] dropdown fallback: single visible product link used for sku={sku}")
+    elif len(visible_product_links) > 1:
+        exact_href_matches = [m for m in visible_product_links if sku.casefold().replace("-", "") in m[1].get("href", "").casefold().replace("-", "")]
+        if len(exact_href_matches) == 1:
+            chosen, chosen_info = exact_href_matches[0]
+            print(f"[SUP4] dropdown fallback: href matched sku for sku={sku}")
+    else:
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "search_no_exact_match",
+            extra={
+                "sku": sku,
+                "dropdown_count": count,
+                "candidates": [m[1] for m in safe_contains_matches[:5]],
+                "visible_product_links": [m[1] for m in visible_product_links[:5]],
+            },
+        )
+        raise StageError(stage, "SEARCH_NO_EXACT_MATCH", details)
 
     try:
         await chosen.click(timeout=min(3500, SUP4_TIMEOUT_MS), force=True)
@@ -617,8 +983,9 @@ async def _open_product_from_dropdown(page, sku: str) -> None:
     except Exception:
         pass
 
-    print(f"[SUP4] sku found in dropdown: {sku}")
+    print(f"[SUP4] sku found in dropdown: {sku}, chosen={chosen_info}")
     print(f"[SUP4] product page opened: {page.url}")
+    return {"sku": sku, "dropdown_text": chosen_info.get("text", ""), "dropdown_href": chosen_info.get("href", "")}
 
 
 async def _click_buy_on_product(page, sku: str) -> None:
@@ -633,13 +1000,27 @@ async def _click_buy_on_product(page, sku: str) -> None:
         btn = page.locator(sel).first
         try:
             if await btn.count() > 0 and await btn.is_visible():
+                try:
+                    disabled_attr = (await btn.get_attribute("disabled")) or ""
+                    aria_disabled = (await btn.get_attribute("aria-disabled")) or ""
+                    classes = (await btn.get_attribute("class")) or ""
+                    if disabled_attr or aria_disabled.lower() == "true" or "disabled" in classes.casefold():
+                        details = await _capture_debug_artifacts(page, stage, "buy_disabled", extra={"sku": sku, "selector": sel})
+                        raise StageError(stage, f"BUY_DISABLED: sku={sku}", details)
+                except StageError:
+                    raise
+                except Exception:
+                    pass
                 await btn.click(timeout=min(3500, SUP4_TIMEOUT_MS), force=True)
                 await page.wait_for_timeout(250)
                 print(f"[SUP4] buy clicked: sku={sku}")
                 return
+        except StageError:
+            raise
         except Exception:
             continue
-    raise StageError(stage, f"Buy button not found for sku={sku}")
+    details = await _capture_debug_artifacts(page, stage, "buy_button_not_found", extra={"sku": sku})
+    raise StageError(stage, f"Buy button not found for sku={sku}", details)
 
 
 async def _wait_cart_modal(page) -> None:
@@ -652,8 +1033,147 @@ async def _wait_cart_modal(page) -> None:
         raise StageError(stage, f"Cart modal did not open: {e}") from e
 
 
-async def _read_modal_qty(page) -> tuple[Any, int | None]:
-    inp = page.locator("section#cart input.counter-field.j-quantity-p, section#cart input.counter-field, section#cart input[data-step]").first
+async def _wait_cart_modal_content_ready(page) -> None:
+    deadline = asyncio.get_running_loop().time() + min(3.0, SUP4_TIMEOUT_MS / 1000.0)
+    loader = page.locator("section#cart .j-cart-loader, section#cart .loader-container").first
+    qty_inputs = page.locator("section#cart input.counter-field, section#cart input.j-quantity-p, section#cart input[data-step]")
+    item_rows = page.locator("section#cart tr.cart-item, section#cart tr[id^='product_'], section#cart .cart-title")
+
+    while asyncio.get_running_loop().time() < deadline:
+        loader_visible = False
+        try:
+            if await loader.count() > 0:
+                loader_visible = await loader.is_visible()
+        except Exception:
+            loader_visible = False
+        qty_count = 0
+        row_count = 0
+        try:
+            qty_count = await qty_inputs.count()
+        except Exception:
+            qty_count = 0
+        try:
+            row_count = await item_rows.count()
+        except Exception:
+            row_count = 0
+        if not loader_visible and (qty_count > 0 or row_count > 0):
+            print(f"[SUP4] cart content ready: row_count={row_count} qty_inputs={qty_count}")
+            return
+        await page.wait_for_timeout(120)
+
+    print("[SUP4] cart content ready: timeout fallback")
+
+
+async def _get_product_page_title(page) -> str:
+    sels = [
+        "h1.product-title",
+        "h1.product-card__title",
+        ".product-title",
+        "h1",
+    ]
+    for sel in sels:
+        loc = page.locator(sel).first
+        try:
+            if await loc.count() > 0 and await loc.is_visible():
+                txt = re.sub(r"\s+", " ", (await loc.inner_text(timeout=1000)) or "").strip()
+                if txt:
+                    return txt
+        except Exception:
+            continue
+    return ""
+
+
+async def _verify_product_page_identity(page, sku: str, *, dropdown_text: str = "") -> str:
+    stage = "add_items"
+    title = await _get_product_page_title(page)
+    body_text = ""
+    try:
+        body_text = await page.inner_text("body")
+    except Exception:
+        body_text = ""
+    title_norm = _norm_text(title)
+    dropdown_norm = _norm_text(dropdown_text)
+    sku_ok = bool(_sku_regex(sku).search(body_text or "")) or bool(_sku_regex(sku).search(title or "")) or sku.casefold() in (page.url or "").casefold()
+    title_ok = bool(title_norm and dropdown_norm and (title_norm in dropdown_norm or dropdown_norm in title_norm))
+    print(f"[SUP4] product page identity: sku={sku} title={title!r} sku_ok={sku_ok} title_ok={title_ok}")
+    if not sku_ok and not title_ok:
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "product_page_sku_mismatch",
+            extra={"sku": sku, "title": title, "dropdown_text": dropdown_text, "url": page.url},
+        )
+        raise StageError(stage, f"PRODUCT_PAGE_SKU_MISMATCH: sku={sku}", details)
+    return title
+
+
+async def _cart_rows(page):
+    selectors = (
+        "section#cart tr.cart-item, "
+        "section#cart tr[id^='product_'], "
+        "section#cart tr:has(td[id^='product_']), "
+        "section#cart tr:has(td.cart-cell__remove), "
+        "section#cart tr:has(.cart-title), "
+        "section#cart tr:has(input.counter-field), "
+        "section#cart table tr"
+    )
+    return page.locator(selectors)
+
+
+async def _find_cart_row_for_item(page, sku: str, *, product_title: str = ""):
+    rows = await _cart_rows(page)
+    count = await rows.count()
+    if count <= 0:
+        return None
+
+    sku_re = _sku_regex(sku)
+    title_norm = _norm_text(product_title)
+    exact_matches = []
+    title_matches = []
+    qty_rows = []
+    single_candidate = None
+    for i in range(min(count, 20)):
+        row = rows.nth(i)
+        try:
+            if single_candidate is None:
+                single_candidate = row
+            qty_input = row.locator("input.counter-field.j-quantity-p, input.counter-field, input.j-quantity-p, input[data-step]").first
+            has_qty = False
+            try:
+                has_qty = await qty_input.count() > 0
+            except Exception:
+                has_qty = False
+            if has_qty:
+                qty_rows.append(row)
+            title_link = row.locator(".cart-title a, a[href*='monsterlab.com.ua'], a[href^='/']").first
+            title_text = ""
+            try:
+                if await title_link.count() > 0:
+                    title_text = re.sub(r"\s+", " ", (await title_link.inner_text(timeout=900)) or "").strip()
+            except Exception:
+                title_text = ""
+            text = re.sub(r"\s+", " ", (await row.inner_text(timeout=1000)) or "").strip()
+            text_norm = _norm_text(f"{title_text} {text}")
+            if sku_re.search(text):
+                exact_matches.append(row)
+                continue
+            if title_norm and title_norm in text_norm:
+                title_matches.append(row)
+        except Exception:
+            continue
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(title_matches) == 1:
+        return title_matches[0]
+    if len(qty_rows) == 1:
+        return qty_rows[0]
+    if count == 1 and single_candidate is not None:
+        return single_candidate
+    return None
+
+
+async def _read_row_qty(row) -> tuple[Any, int | None]:
+    inp = row.locator("input.counter-field.j-quantity-p, input.counter-field, input.j-quantity-p, input[data-step], input[name*='quantity' i]").first
     try:
         await inp.wait_for(state="visible", timeout=min(4000, SUP4_TIMEOUT_MS))
         raw = await inp.input_value(timeout=min(1500, SUP4_TIMEOUT_MS))
@@ -663,12 +1183,58 @@ async def _read_modal_qty(page) -> tuple[Any, int | None]:
         return inp, None
 
 
-async def _set_modal_qty(page, target_qty: int) -> None:
+async def _detect_qty_issue_text(page, *, scope=None) -> tuple[str | None, str]:
+    loc = scope if scope is not None else page.locator("body").first
+    try:
+        text = re.sub(r"\s+", " ", (await loc.inner_text(timeout=min(1200, SUP4_TIMEOUT_MS))) or "").strip()
+    except Exception:
+        text = ""
+    if not text:
+        return None, ""
+    lowered = text.casefold()
+    patterns = [
+        ("OUT_OF_STOCK", r"немає в наявності|відсутн|закінчив"),
+        ("QTY_LIMIT_REACHED", r"доступно лише|доступно тільки|максимальн|обмежен|недостатньо"),
+    ]
+    for code, pattern in patterns:
+        if re.search(pattern, lowered, re.I):
+            return code, text[:400]
+    return None, text[:400]
+
+
+async def _set_modal_qty(page, sku: str, target_qty: int, *, product_title: str = "") -> dict[str, Any]:
     stage = "add_items"
-    inp, current = await _read_modal_qty(page)
+    await _wait_cart_modal_content_ready(page)
+    row = None
+    deadline = asyncio.get_running_loop().time() + min(3.0, SUP4_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        row = await _find_cart_row_for_item(page, sku, product_title=product_title)
+        if row is not None:
+            break
+        await page.wait_for_timeout(120)
+    if row is None:
+        row_count = 0
+        qty_inputs = 0
+        try:
+            row_count = await (await _cart_rows(page)).count()
+        except Exception:
+            pass
+        try:
+            qty_inputs = await page.locator("section#cart input.counter-field, section#cart input.j-quantity-p, section#cart input[data-step]").count()
+        except Exception:
+            pass
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "cart_row_not_found",
+            extra={"sku": sku, "product_title": product_title, "row_count": row_count, "qty_inputs": qty_inputs},
+        )
+        raise StageError(stage, f"CART_QTY_VERIFY_FAILED: cart row not found for sku={sku}", details)
+
+    inp, current = await _read_row_qty(row)
     if current == target_qty:
-        print(f"[SUP4] qty set: {target_qty}")
-        return
+        print(f"[SUP4] qty set: sku={sku} qty={target_qty}")
+        return {"sku": sku, "expected_qty": target_qty, "actual_qty": current, "verified": True, "verified_stage": "cart_modal", "product_title": product_title}
 
     if target_qty < 1:
         raise StageError(stage, f"Invalid target qty={target_qty}")
@@ -687,12 +1253,12 @@ async def _set_modal_qty(page, target_qty: int) -> None:
     except Exception:
         pass
 
-    _, current = await _read_modal_qty(page)
+    _, current = await _read_row_qty(row)
     if current != target_qty:
-        plus = page.locator("section#cart .counter-btn__plus, section#cart .j-increase-p, section#cart .counter-btn_plus").first
-        minus = page.locator("section#cart .counter-btn__minus, section#cart .j-decrease-p, section#cart .counter-btn_minus").first
+        plus = row.locator(".counter-btn__plus, .j-increase-p, .counter-btn_plus").first
+        minus = row.locator(".counter-btn__minus, .j-decrease-p, .counter-btn_minus").first
         for _ in range(25):
-            _, cur = await _read_modal_qty(page)
+            _, cur = await _read_row_qty(row)
             if cur == target_qty:
                 break
             try:
@@ -708,10 +1274,27 @@ async def _set_modal_qty(page, target_qty: int) -> None:
             except Exception:
                 break
 
-    _, final_qty = await _read_modal_qty(page)
+    _, final_qty = await _read_row_qty(row)
+    issue_code, issue_text = await _detect_qty_issue_text(page, scope=row)
     if final_qty != target_qty:
-        raise StageError(stage, f"CART_QTY_VERIFY_FAILED: expected={target_qty} actual={final_qty}")
-    print(f"[SUP4] qty set: {target_qty}")
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "qty_mismatch",
+            extra={
+                "sku": sku,
+                "product_title": product_title,
+                "expected_qty": target_qty,
+                "actual_qty": final_qty,
+                "issue_code": issue_code,
+                "issue_text": issue_text,
+            },
+        )
+        if issue_code:
+            raise StageError(stage, f"{issue_code}: sku={sku} expected={target_qty} actual={final_qty}", details)
+        raise StageError(stage, f"QTY_MISMATCH: expected={target_qty} actual={final_qty} sku={sku}", details)
+    print(f"[SUP4] qty set: sku={sku} requested={target_qty} actual={final_qty}")
+    return {"sku": sku, "expected_qty": target_qty, "actual_qty": final_qty, "verified": True, "verified_stage": "cart_modal", "product_title": product_title}
 
 
 async def _continue_or_checkout(page, *, last_item: bool) -> None:
@@ -815,16 +1398,66 @@ async def _continue_or_checkout(page, *, last_item: bool) -> None:
     raise StageError(stage, "Could not click return-to-shopping button")
 
 
-async def _add_items(page, items: list[Sup4Item]) -> None:
+async def _search_open_verify_product(page, sku: str) -> dict[str, str]:
+    stage = "add_items"
+    attempts = (
+        {"reload": False, "label": "initial"},
+        {"reload": False, "label": "local_retry"},
+        {"reload": True, "label": "reload_retry"},
+    )
+    last_error: Exception | None = None
+    for idx, attempt in enumerate(attempts, start=1):
+        try:
+            if attempt["reload"]:
+                await page.goto(SUP4_BASE_URL, wait_until="domcontentloaded")
+                await _best_effort_close_popups(page)
+            await _open_search_and_fill(page, sku)
+            dropdown_info = await _open_product_from_dropdown(page, sku)
+            product_title = await _verify_product_page_identity(page, sku, dropdown_text=dropdown_info.get("dropdown_text", ""))
+            dropdown_info["product_title"] = product_title
+            return dropdown_info
+        except StageError as e:
+            last_error = e
+            print(f"[SUP4] search retry: sku={sku} attempt={idx}/{len(attempts)} label={attempt['label']} error={e}")
+            if idx >= len(attempts):
+                raise
+            await page.goto(SUP4_BASE_URL, wait_until="domcontentloaded")
+            await _best_effort_close_popups(page)
+            try:
+                target, _ = await _wait_search_widget_ready(page)
+                await _clear_search_input(page, target)
+            except Exception:
+                pass
+            await page.wait_for_timeout(180)
+    raise StageError(stage, f"Search flow failed for sku={sku}: {last_error}")
+
+
+async def _add_items(page, items: list[Sup4Item]) -> dict[str, Any]:
+    cart_qty_checks: list[dict[str, Any]] = []
+    item_contexts: list[dict[str, Any]] = []
     for idx, item in enumerate(items):
         await page.goto(SUP4_BASE_URL, wait_until="domcontentloaded")
         await _best_effort_close_popups(page)
-        await _open_search_and_fill(page, item.sku)
-        await _open_product_from_dropdown(page, item.sku)
+        product_info = await _search_open_verify_product(page, item.sku)
         await _click_buy_on_product(page, item.sku)
         await _wait_cart_modal(page)
-        await _set_modal_qty(page, item.qty)
+        qty_check = await _set_modal_qty(page, item.sku, item.qty, product_title=product_info.get("product_title", ""))
+        cart_qty_checks.append(qty_check)
+        item_contexts.append(
+            {
+                "sku": item.sku,
+                "qty": item.qty,
+                "product_title": product_info.get("product_title", ""),
+                "dropdown_text": product_info.get("dropdown_text", ""),
+                "product_url": page.url or "",
+            }
+        )
         await _continue_or_checkout(page, last_item=(idx == len(items) - 1))
+    return {
+        "items": [{"sku": i.sku, "qty": i.qty} for i in items],
+        "item_contexts": item_contexts,
+        "cart_qty_checks": cart_qty_checks,
+    }
 
 
 async def _ensure_checkout(page) -> None:
@@ -957,6 +1590,157 @@ async def _fill_ttn(page, ttn: str) -> None:
     if _digits_only(ttn) not in _digits_only(current):
         raise StageError(stage, "TTN value was not saved in input", {"current_value": str(current), "selectors_tried": selectors_tried})
     print(f"[SUP4] ttn filled: {ttn}")
+
+
+async def _checkout_rows(page):
+    selectors = (
+        "section#cart.order li.order-i, "
+        "section#cart.order .order-i, "
+        "form#checkout-form tr, "
+        "form#checkout-container tr, "
+        ".checkout tr, "
+        ".checkout-main tr, "
+        ".checkout-aside li, "
+        ".cart-table tr, "
+        ".basket-table tr, "
+        ".checkout-item, "
+        ".cart-item"
+    )
+    return page.locator(selectors)
+
+
+async def _wait_checkout_cart_ready(page) -> None:
+    deadline = asyncio.get_running_loop().time() + min(3.0, SUP4_TIMEOUT_MS / 1000.0)
+    rows = page.locator("section#cart.order li.order-i, section#cart.order .order-i, .checkout-aside li")
+    qty_inputs = page.locator("section#cart.order input.counter-field, section#cart.order input.j-quantity-p, .checkout-aside input.counter-field, .checkout-aside input.j-quantity-p")
+    while asyncio.get_running_loop().time() < deadline:
+        row_count = 0
+        qty_count = 0
+        try:
+            row_count = await rows.count()
+        except Exception:
+            row_count = 0
+        try:
+            qty_count = await qty_inputs.count()
+        except Exception:
+            qty_count = 0
+        if row_count > 0 or qty_count > 0:
+            print(f"[SUP4] checkout cart ready: row_count={row_count} qty_inputs={qty_count}")
+            return
+        await page.wait_for_timeout(120)
+    print("[SUP4] checkout cart ready: timeout fallback")
+
+
+async def _find_checkout_row_for_item(page, sku: str, *, product_title: str = ""):
+    rows = await _checkout_rows(page)
+    count = await rows.count()
+    sku_re = _sku_regex(sku)
+    title_norm = _norm_text(product_title)
+    exact_matches = []
+    title_matches = []
+    qty_rows = []
+    for i in range(min(count, 40)):
+        row = rows.nth(i)
+        try:
+            text = re.sub(r"\s+", " ", (await row.inner_text(timeout=900)) or "").strip()
+            if not text:
+                continue
+            qty_input = row.locator("input.counter-field.j-quantity-p, input.counter-field, input.j-quantity-p, input[data-step]").first
+            try:
+                if await qty_input.count() > 0:
+                    qty_rows.append(row)
+            except Exception:
+                pass
+            title_link = row.locator(".order-i-title a, .cart-title a, a[href*='monsterlab.com.ua'], a[href^='/']").first
+            title_text = ""
+            try:
+                if await title_link.count() > 0:
+                    title_text = re.sub(r"\s+", " ", (await title_link.inner_text(timeout=900)) or "").strip()
+            except Exception:
+                title_text = ""
+            text_norm = _norm_text(f"{title_text} {text}")
+            if sku_re.search(text):
+                exact_matches.append(row)
+                continue
+            if title_norm and title_norm in text_norm:
+                title_matches.append(row)
+        except Exception:
+            continue
+    print(
+        f"[SUP4] checkout row classify: sku={sku} rows={count} "
+        f"exact={len(exact_matches)} title={len(title_matches)} qty_rows={len(qty_rows)}"
+    )
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(title_matches) == 1:
+        return title_matches[0]
+    if len(qty_rows) == 1:
+        return qty_rows[0]
+    cart_scope = page.locator("section#cart.order").first
+    qty_inputs = cart_scope.locator(
+        "input.counter-field.j-quantity-p, input.counter-field, input.j-quantity-p, input[data-step]"
+    )
+    try:
+        qty_count = await qty_inputs.count()
+    except Exception:
+        qty_count = 0
+    if qty_count == 1:
+        qty_input = qty_inputs.first
+        for ancestor_sel in (
+            "xpath=ancestor::li[contains(@class, 'order-i')][1]",
+            "xpath=ancestor::tr[1]",
+            "xpath=ancestor::*[contains(@class, 'order-i')][1]",
+        ):
+            try:
+                ancestor = qty_input.locator(ancestor_sel)
+                if await ancestor.count() > 0:
+                    print(f"[SUP4] checkout row fallback: unique qty input ancestor used for sku={sku}")
+                    return ancestor.first
+            except Exception:
+                continue
+    return None
+
+
+async def _verify_checkout_items(page, items: list[Sup4Item], *, item_contexts: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    stage = "checkout_ttn"
+    await _wait_checkout_cart_ready(page)
+    contexts_by_sku = {str(c.get("sku") or ""): c for c in (item_contexts or [])}
+    checks: list[dict[str, Any]] = []
+    for item in items:
+        ctx = contexts_by_sku.get(item.sku) or {}
+        title = str(ctx.get("product_title") or "")
+        row = await _find_checkout_row_for_item(page, item.sku, product_title=title)
+        if row is None:
+            details = await _capture_debug_artifacts(
+                page,
+                stage,
+                "checkout_qty_row_not_found",
+                extra={"sku": item.sku, "product_title": title, "expected_qty": item.qty},
+            )
+            raise StageError(stage, f"CHECKOUT_QTY_VERIFY_FAILED: row not found for sku={item.sku}", details)
+        _, actual_qty = await _read_row_qty(row)
+        check = {
+            "sku": item.sku,
+            "product_title": title,
+            "expected_qty": item.qty,
+            "actual_qty": actual_qty,
+            "verified": actual_qty == item.qty,
+            "verified_stage": "checkout",
+        }
+        checks.append(check)
+        if actual_qty != item.qty:
+            issue_code, issue_text = await _detect_qty_issue_text(page, scope=row)
+            details = await _capture_debug_artifacts(
+                page,
+                stage,
+                "checkout_qty_mismatch",
+                extra={**check, "issue_code": issue_code, "issue_text": issue_text},
+            )
+            if issue_code:
+                raise StageError(stage, f"{issue_code}: sku={item.sku} expected={item.qty} actual={actual_qty}", details)
+            raise StageError(stage, f"QTY_MISMATCH: expected={item.qty} actual={actual_qty} sku={item.sku}", details)
+    print(f"[SUP4] final cart verification summary: {checks}")
+    return checks
 
 
 def _pick_label_file(ttn: str) -> Path:
@@ -1269,8 +2053,9 @@ async def _wait_complete_and_parse_number(page) -> str:
     return number
 
 
-async def _checkout_and_submit(page, ttn: str) -> dict:
+async def _checkout_and_submit(page, ttn: str, *, items: list[Sup4Item], item_contexts: list[dict[str, Any]] | None = None) -> dict:
     await _ensure_checkout(page)
+    final_cart_checks = await _verify_checkout_items(page, items, item_contexts=item_contexts)
     own_selected = await _ensure_own_ttn_selected(page)
     await _fill_ttn(page, ttn)
     attach_info = await _attach_label_file(page, ttn)
@@ -1287,6 +2072,7 @@ async def _checkout_and_submit(page, ttn: str) -> dict:
             "attach_invoice_label": attach_info,
             "submitted": False,
             "supplier_order_number": "",
+            "cart_qty_checks": final_cart_checks,
         }
     await _submit_checkout(page)
     supplier_number = await _wait_complete_and_parse_number(page)
@@ -1303,6 +2089,7 @@ async def _checkout_and_submit(page, ttn: str) -> dict:
         "attach_invoice_label": attach_info,
         "submitted": True,
         "supplier_order_number": supplier_number,
+        "cart_qty_checks": final_cart_checks,
     }
 
 
@@ -1320,6 +2107,7 @@ async def _run() -> tuple[bool, dict[str, Any]]:
     page = None
     stage = "login"
     result: dict[str, Any] = {"ok": False, "stage": stage, "url": SUP4_BASE_URL}
+    add_items_info: dict[str, Any] | None = None
 
     try:
         async with async_playwright() as pw:
@@ -1351,26 +2139,35 @@ async def _run() -> tuple[bool, dict[str, Any]]:
 
             if SUP4_STAGE in {"run", "add_items"}:
                 stage = "add_items"
-                await _add_items(page, items)
+                add_items_info = await _add_items(page, items)
                 if SUP4_STAGE == "add_items":
                     result = {
                         "ok": True,
                         "stage": "add_items",
                         "url": page.url,
+                        "items": add_items_info.get("items"),
+                        "cart_qty_checks": add_items_info.get("cart_qty_checks"),
+                        "details": {"add_items": add_items_info},
                         "debug": {"items": [{"sku": i.sku, "qty": i.qty} for i in items]},
                     }
                     return True, result
 
             if SUP4_STAGE in {"run", "checkout_ttn"}:
                 stage = "checkout_ttn"
-                checkout_info = await _checkout_and_submit(page, SUP4_TTN)
+                checkout_info = await _checkout_and_submit(
+                    page,
+                    SUP4_TTN,
+                    items=items,
+                    item_contexts=(add_items_info or {}).get("item_contexts") if isinstance(add_items_info, dict) else None,
+                )
                 result = {
                     "ok": True,
                     "stage": "run" if SUP4_STAGE == "run" else "checkout_ttn",
                     "url": page.url,
                     "numberSup": checkout_info.get("supplier_order_number"),
                     "supplier_order_number": checkout_info.get("supplier_order_number"),
-                    "details": {"checkout_ttn": checkout_info},
+                    "cart_qty_checks": checkout_info.get("cart_qty_checks") or ((add_items_info or {}).get("cart_qty_checks") if isinstance(add_items_info, dict) else []),
+                    "details": {"add_items": add_items_info or {}, "checkout_ttn": checkout_info},
                     "debug": {
                         "login_ok": True,
                         "cart_cleared": bool(SUP4_CLEAR_BASKET),
