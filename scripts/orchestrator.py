@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import math
+from contextlib import contextmanager
 from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -224,6 +225,13 @@ RUN_INSTANCE_ID = uuid.uuid4().hex[:12]
 HOSTNAME = socket.gethostname()
 PID = os.getpid()
 SUPPLIER_RESULT_JSON_PREFIX = "SUPPLIER_RESULT_JSON="
+NP_API_KEY_ENV_KEYS = (
+    "BIOTUS_NP_API_KEY",
+    "NP_API_KEY",
+    "SUP2_NP_API_KEY",
+    "SUP3_NP_API_KEY",
+    "SUP4_NP_API_KEY",
+)
 
 # Orders are filtered/routed by numeric order["supplierlist"] (via ALLOWED_SUPPLIERS),
 # not by order["supplier"] text. Keep supplier text only for diagnostics/logs.
@@ -1009,6 +1017,60 @@ def extract_tracking_number(order: Dict[str, Any]) -> str:
     return (d.get("trackingNumber") or "").strip()
 
 
+def extract_organization_id(order: Dict[str, Any]) -> int | None:
+    raw = order.get("organizationId")
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+def resolve_np_api_key_for_order(order: Dict[str, Any]) -> tuple[str, str]:
+    """Return (api_key, source_env_name) for the NP cabinet that owns the TTN."""
+    organization_id = extract_organization_id(order)
+    if organization_id == 2:
+        key = (os.getenv("BIOTUS_NP_API_KEY_ORG_2") or os.getenv("NP_API_KEY_ORG_2") or "").strip()
+        if not key:
+            raise RuntimeError("organizationId=2 requires BIOTUS_NP_API_KEY_ORG_2 (or NP_API_KEY_ORG_2).")
+        return key, "BIOTUS_NP_API_KEY_ORG_2"
+
+    key = (os.getenv("BIOTUS_NP_API_KEY") or os.getenv("NP_API_KEY") or "").strip()
+    if not key:
+        label = f"organizationId={organization_id}" if organization_id is not None else "organizationId is missing"
+        raise RuntimeError(f"{label} requires BIOTUS_NP_API_KEY (or NP_API_KEY).")
+    return key, "BIOTUS_NP_API_KEY"
+
+
+def inject_np_api_key_env(env: Dict[str, str], order: Dict[str, Any]) -> None:
+    api_key, source = resolve_np_api_key_for_order(order)
+    for key_name in NP_API_KEY_ENV_KEYS:
+        env[key_name] = api_key
+    organization_id = extract_organization_id(order)
+    org_label = organization_id if organization_id is not None else "default"
+    print(f"[ORCH] NP API key source => organizationId={org_label}, env={source}", flush=True)
+
+
+@contextmanager
+def np_api_key_env_for_order(order: Dict[str, Any]):
+    api_key, source = resolve_np_api_key_for_order(order)
+    old_values = {key_name: os.environ.get(key_name) for key_name in NP_API_KEY_ENV_KEYS}
+    try:
+        for key_name in NP_API_KEY_ENV_KEYS:
+            os.environ[key_name] = api_key
+        organization_id = extract_organization_id(order)
+        org_label = organization_id if organization_id is not None else "default"
+        print(f"[ORCH] NP API key source => organizationId={org_label}, env={source}", flush=True)
+        yield
+    finally:
+        for key_name, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key_name, None)
+            else:
+                os.environ[key_name] = old_value
+
+
 # Extract shipping_address from order
 def extract_shipping_address(order: Dict[str, Any]) -> str:
     return (order.get("shipping_address") or "").strip()
@@ -1201,6 +1263,7 @@ def process_one_biotus_order(order: Dict[str, Any], state: Dict[str, Any] | None
     env = os.environ.copy()
     env.setdefault("BIOTUS_USE_CDP", DEFAULT_BIOTUS_USE_CDP)
     env["BIOTUS_ITEMS"] = biotus_items
+    inject_np_api_key_env(env, order)
 
     if full_name:
         env["BIOTUS_FULL_NAME"] = full_name
@@ -1331,6 +1394,7 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
     env["SUP2_ITEMS"] = sup2_items
     env["SUP2_TTN"] = tracking_number
     env["SUP2_CLEAR_BASKET"] = ORCH_SUP2_CLEAR_BASKET
+    inject_np_api_key_env(env, order)
     if "SUP2_DEBUG_PAUSE_SECONDS" in os.environ:
         env["SUP2_DEBUG_PAUSE_SECONDS"] = os.environ["SUP2_DEBUG_PAUSE_SECONDS"]
 
@@ -1423,6 +1487,7 @@ def process_one_supplier3_order(order: Dict[str, Any]) -> None:
     env["SUP3_ITEMS"] = sup3_items
     env["SUP3_TTN"] = tracking_number
     env["SUP3_CLEAR_BASKET"] = ORCH_SUP3_CLEAR_BASKET
+    inject_np_api_key_env(env, order)
     if "SUP3_DEBUG_PAUSE_SECONDS" in os.environ:
         env["SUP3_DEBUG_PAUSE_SECONDS"] = os.environ["SUP3_DEBUG_PAUSE_SECONDS"]
     if "SUP3_DEBUG_PAUSE" in os.environ and "SUP3_DEBUG_PAUSE_SECONDS" not in env:
@@ -1522,6 +1587,7 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
     env["SUP4_CLEAR_BASKET"] = ORCH_SUP4_CLEAR_BASKET
     env["SUP4_ATTACH_DIR"] = ORCH_SUP4_ATTACH_DIR
     env["SUP4_PAUSE_SEC"] = ORCH_SUP4_PAUSE_SEC
+    inject_np_api_key_env(env, order)
 
     print(f"[ORCH] Monsterlab SUP4_ITEMS => {sup4_items}")
     print(f"[ORCH] Monsterlab TTN => {tracking_number}")
@@ -1740,7 +1806,8 @@ def process_one_zoohub_order(order: Dict[str, Any], state: Dict[str, Any]) -> No
         return
 
     try:
-        pdf_path = download_label_pdf(tracking_number)
+        with np_api_key_env_for_order(order):
+            pdf_path = download_label_pdf(tracking_number)
     except Exception as e:
         raise StepError("zoohub_label_download", f"Label download failed: {e}") from e
 
@@ -1831,7 +1898,8 @@ def process_one_supplier7_order(order: Dict[str, Any], state: Dict[str, Any]) ->
         return
 
     try:
-        result = run_supplier7_email_flow(order, tracking_number)
+        with np_api_key_env_for_order(order):
+            result = run_supplier7_email_flow(order, tracking_number)
     except Exception as e:
         raise StepError("supplier7_email_send", str(e)) from e
 
