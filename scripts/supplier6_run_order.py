@@ -1167,8 +1167,8 @@ async def _step3_debug_pause(page, label: str) -> None:
     await page.wait_for_timeout(SUP6_STEP3_DEBUG_PAUSE_MS)
 
 
-async def _step3_dump_artifact(page, *, sku: str, label: str) -> None:
-    if not SUP6_STEP3_ARTIFACTS:
+async def _step3_dump_artifact(page, *, sku: str, label: str, force: bool = False) -> None:
+    if not force and not SUP6_STEP3_ARTIFACTS:
         return
     try:
         out_dir = Path(SUP6_STEP3_ARTIFACTS_DIR)
@@ -1188,11 +1188,12 @@ async def _step3_dump_artifact(page, *, sku: str, label: str) -> None:
 
 async def _step3_get_article_input(page):
     candidates = [
+        page.locator("#global-search input.input-filter:visible").first,
+        page.locator("input.input-filter:visible").first,
+        page.locator("input.input-filter[placeholder*='Артикул' i]").first,
         page.locator("th:has-text('Артикул') input.input-filter").first,
         page.locator("td:has-text('Артикул') input.input-filter").first,
         page.locator("input.input-filter[name*='articul' i]").first,
-        page.locator("input.input-filter[placeholder*='Артикул' i]").first,
-        page.locator("input.input-filter").first,
     ]
     for loc in candidates:
         try:
@@ -1201,7 +1202,28 @@ async def _step3_get_article_input(page):
         except Exception:
             continue
     # Return last fallback so caller gets a meaningful timeout exception.
-    return page.locator("input.input-filter").first
+    return page.locator("#global-search input.input-filter, input.input-filter").first
+
+
+async def _step3_wait_for_filtered_sku_row(page, sku: str) -> None:
+    sku_str = str(sku or "").strip()
+    if not sku_str:
+        return
+
+    deadline = asyncio.get_running_loop().time() + min(8.0, SUP6_TIMEOUT_MS / 1000.0)
+    while asyncio.get_running_loop().time() < deadline:
+        row, fail_payload = await _step3_find_row_for_sku(page, sku_str)
+        if row is not None and fail_payload is None:
+            return
+        try:
+            info = _normalize_spaces((await page.locator(".dataTables_info").first.inner_text(timeout=700)) or "")
+            if re.search(r"\b1\s*-\s*1\s+з\s+1\b", info):
+                row2, fail_payload2 = await _step3_find_row_for_sku(page, sku_str)
+                if row2 is not None and fail_payload2 is None:
+                    return
+        except Exception:
+            pass
+        await page.wait_for_timeout(180)
 
 
 async def _step3_find_row_for_sku(page, sku: str):
@@ -1572,17 +1594,16 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
             await _step3_debug_pause(page, f"after_fill_sku={sku}")
             await _step3_dump_artifact(page, sku=sku, label="after_fill")
 
-            results_ready = page.locator(".addtocart-button:visible").first
-            await results_ready.wait_for(state="visible", timeout=SUP6_TIMEOUT_MS)
+            await _step3_wait_for_filtered_sku_row(page, sku)
             row, fail_payload = await _step3_find_row_for_sku(page, sku)
             if fail_payload is not None:
-                await _step3_dump_artifact(page, sku=sku, label="sku_not_found")
+                await _step3_dump_artifact(page, sku=sku, label="sku_not_found", force=True)
                 return fail_payload, None
 
             fallback_site_name = ""
             if row is not None:
                 if not await _step3_row_has_target_sku(row, sku):
-                    await _step3_dump_artifact(page, sku=sku, label="row_sku_mismatch")
+                    await _step3_dump_artifact(page, sku=sku, label="row_sku_mismatch", force=True)
                     return _step3_fail(
                         f"SKU_ROW_MISMATCH:{sku}",
                         details={"sku": sku, "stage": "row_guard", "message": "selected row does not contain target SKU"},
@@ -1602,7 +1623,11 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                     except Exception:
                         continue
 
-            add_btn = row.locator(".addtocart-button:visible").first if row is not None else results_ready
+            if row is None:
+                await _step3_dump_artifact(page, sku=sku, label="row_missing_before_add", force=True)
+                return _step3_fail(f"SKU_NOT_FOUND:{sku}", details={"sku": sku, "stage": "row_missing_before_add"}), None
+            add_btn = row.locator("a.addtocart-button:visible, button.addtocart-button:visible, span.addtocart-button:visible").first
+            await add_btn.wait_for(state="visible", timeout=min(5000, SUP6_TIMEOUT_MS))
             await add_btn.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
             await _step3_debug_pause(page, f"after_click_add_sku={sku}")
             await _step3_dump_artifact(page, sku=sku, label="after_click_add")
@@ -1624,7 +1649,7 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                 await _step3_set_qty_in_modal(page, qty)
                 fail_after_click = await _step3_click_add_in_modal(page, sku)
                 if fail_after_click is not None:
-                    await _step3_dump_artifact(page, sku=sku, label="modal_add_failed")
+                    await _step3_dump_artifact(page, sku=sku, label="modal_add_failed", force=True)
                     return fail_after_click, None
                 await _step3_debug_pause(page, f"after_modal_confirm_sku={sku}")
                 await _step3_dump_artifact(page, sku=sku, label="after_modal_confirm")
@@ -1640,12 +1665,12 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                     pass
                 cart_rows = page.locator("button.vm2-remove_from_cart:visible, .cart-summary tr:has(button.vm2-remove_from_cart), .cart-view tr")
                 if await cart_rows.count() <= 0:
-                    await _step3_dump_artifact(page, sku=sku, label="cart_verify_failed")
+                    await _step3_dump_artifact(page, sku=sku, label="cart_verify_failed", force=True)
                     return _step3_fail(f"CART_VERIFY_FAILED:{sku}", details={"sku": sku}), None
                 if verify_cart_qty:
                     qty_fail = await _step3_verify_cart_quantity(page, item, site_name)
                     if qty_fail is not None:
-                        await _step3_dump_artifact(page, sku=sku, label="cart_qty_mismatch")
+                        await _step3_dump_artifact(page, sku=sku, label="cart_qty_mismatch", force=True)
                         return qty_fail, None
             else:
                 await _step3_close_fancybox(page)
@@ -1662,7 +1687,7 @@ async def _step3_add_single_item(page, item: Sup6Item, *, is_last: bool, planned
                 },
             )
         except Exception as e:
-            await _step3_dump_artifact(page, sku=sku, label=f"attempt_{attempt}_exception")
+            await _step3_dump_artifact(page, sku=sku, label=f"attempt_{attempt}_exception", force=True)
             print(f"[SUP6] step3_add_items: attempt failed sku={sku} attempt={attempt}: {e}")
             if attempt >= max_attempts:
                 return _step3_fail(f"STEP3_ADD_FAILED:{sku}", details={"sku": sku, "error": str(e)}), None
