@@ -40,7 +40,17 @@ SUP3_PASSWORD = (os.getenv("SUP3_PASSWORD") or "").strip()
 SUP3_LOGIN_EMAIL = (os.getenv("SUP3_LOGIN_EMAIL") or SUP3_EMAIL or "").strip()
 SUP3_LOGIN_PASSWORD = (os.getenv("SUP3_LOGIN_PASSWORD") or SUP3_PASSWORD or "").strip()
 SUP3_STORAGE_STATE_FILE = (os.getenv("SUP3_STORAGE_STATE_FILE") or ".state_supplier3.json").strip()
-SUP3_HEADLESS = _to_bool(os.getenv("SUP3_HEADLESS", "1"), True)
+# DSN rejects login CSRF tokens in Chromium headless while the same flow works
+# in headed Chromium and manual browsers. Keep an env override for server setups.
+SUP3_HEADLESS = _to_bool(os.getenv("SUP3_HEADLESS", "0"), False)
+SUP3_USER_AGENT = (
+    os.getenv("SUP3_USER_AGENT")
+    or "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+).strip()
+SUP3_LOCALE = (os.getenv("SUP3_LOCALE") or "uk-UA").strip()
+SUP3_TIMEZONE_ID = (os.getenv("SUP3_TIMEZONE_ID") or "Europe/Kiev").strip()
 SUP3_TIMEOUT_MS = _to_int(os.getenv("SUP3_TIMEOUT_MS", "20000"), 20000)
 SUP3_DEBUG_PAUSE_SECONDS = _to_int(os.getenv("SUP3_DEBUG_PAUSE_SECONDS", os.getenv("SUP3_DEBUG_PAUSE", "0")), 0)
 SUP3_STAGE = (os.getenv("SUP3_STAGE") or "run").strip().lower() or "run"
@@ -112,6 +122,18 @@ def _failure_screenshot_path() -> Path:
 
 def _add_items_failure_screenshot_path() -> Path:
     return ROOT / "supplier3_add_items_failed.png"
+
+
+def _browser_context_options(storage_state: str | None = None) -> dict:
+    opts: dict[str, Any] = {
+        "user_agent": SUP3_USER_AGENT,
+        "locale": SUP3_LOCALE,
+        "timezone_id": SUP3_TIMEZONE_ID,
+        "extra_http_headers": {"Accept-Language": f"{SUP3_LOCALE},uk;q=0.9,ru;q=0.8,en;q=0.7"},
+    }
+    if storage_state:
+        opts["storage_state"] = storage_state
+    return opts
 
 
 def _normalize_qty(value) -> int:
@@ -689,6 +711,28 @@ async def _find_product_card_buy_button(page):
         except Exception:
             continue
     raise RuntimeError("BUY_BUTTON_NOT_FOUND")
+
+
+async def _prepare_product_buy_click(page, buy_btn) -> None:
+    try:
+        await page.keyboard.press("Escape")
+    except Exception:
+        pass
+    try:
+        await buy_btn.scroll_into_view_if_needed(timeout=min(3000, SUP3_TIMEOUT_MS))
+    except Exception:
+        pass
+    try:
+        box = await buy_btn.bounding_box()
+        if box:
+            await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            await page.wait_for_timeout(250)
+    except Exception:
+        pass
+    try:
+        await page.keyboard.press("Escape")
+    except Exception:
+        pass
 
 
 async def _get_product_card_title(page) -> str:
@@ -1653,7 +1697,11 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
             if product_title:
                 print(f"[SUP3] add_items: product title for cart match => {product_title}")
             print(f"[SUP3] add_items: click buy sku={sku} via {buy_sel}")
-            await buy_btn.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
+            await _prepare_product_buy_click(page, buy_btn)
+            try:
+                await buy_btn.click(timeout=min(4000, SUP3_TIMEOUT_MS))
+            except Exception:
+                await buy_btn.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
             await detect_and_fail_unavailable_modal(page, f"add_items.sku={sku}.after_buy_click")
             expected_cart_qty = int(expected_cart_qty_by_sku.get(sku) or 0) + int(qty)
             cart_qty_check = await _verify_and_fix_cart_modal_qty(
@@ -2431,6 +2479,8 @@ async def _login_trigger(page):
     # Prefer clickable ancestor with text "Вхід", not nested span only.
     selectors = [
         "a.userbar__button:has-text('Вхід')",
+        "a:has-text('Вхід до кабінету')",
+        "button:has-text('Вхід до кабінету')",
         "button:has-text('Вхід')",
         "a:has-text('Вхід')",
         "[role='button']:has-text('Вхід')",
@@ -2445,6 +2495,120 @@ async def _login_trigger(page):
     return page.get_by_text("Вхід", exact=True).first
 
 
+LOGIN_EMAIL_SELECTOR = (
+    'input[type="email"], '
+    'input[name*="email" i], '
+    'input[name*="login" i], '
+    'input[autocomplete="email"], '
+    'input[placeholder*="Е-пошта" i], '
+    'input[placeholder*="E-mail" i], '
+    'input[placeholder*="Email" i]'
+)
+LOGIN_PASSWORD_SELECTOR = (
+    'input[type="password"], '
+    'input[name*="pass" i], '
+    'input[autocomplete="current-password"], '
+    'input[placeholder*="Пароль" i], '
+    'input[placeholder*="Password" i]'
+)
+LOGIN_SUBMIT_SELECTOR = (
+    'input[type="submit"][value*="Увійти" i], '
+    'button:has-text("Увійти"), '
+    'button:has-text("Вхід"), '
+    'button[type="submit"], '
+    'input[type="submit"]'
+)
+
+
+async def _first_usable(locator):
+    try:
+        count = min(await locator.count(), 20)
+    except Exception:
+        return None
+    first_attached = None
+    for idx in range(count):
+        item = locator.nth(idx)
+        if first_attached is None:
+            first_attached = item
+        try:
+            if await item.is_visible():
+                return item
+        except Exception:
+            continue
+    return first_attached
+
+
+async def _resolve_login_form(page) -> dict:
+    old_form = page.locator("form#login_form_id").first
+    old_email = old_form.locator('input[name="user[email]"]').first
+    old_pass = old_form.locator('input[name="user[pass]"]').first
+    old_submit = old_form.locator('input[type="submit"][value="Увійти"]').first
+    try:
+        if await old_email.count() > 0 and await old_pass.count() > 0:
+            return {
+                "label": "old_login_form_id",
+                "modal": page.locator("section#sign-in, div#modal-overlay, section.popup__login").filter(has=old_form).first,
+                "form": old_form,
+                "email": old_email,
+                "password": old_pass,
+                "submit": old_submit if await old_submit.count() > 0 else old_form.locator(LOGIN_SUBMIT_SELECTOR).first,
+            }
+    except Exception:
+        pass
+
+    forms = page.locator("form")
+    try:
+        form_count = min(await forms.count(), 25)
+    except Exception:
+        form_count = 0
+    for idx in range(form_count):
+        form = forms.nth(idx)
+        email = form.locator(LOGIN_EMAIL_SELECTOR).first
+        password = form.locator(LOGIN_PASSWORD_SELECTOR).first
+        try:
+            if await email.count() == 0 or await password.count() == 0:
+                continue
+            email_visible = await email.is_visible()
+            pass_visible = await password.is_visible()
+            if not email_visible or not pass_visible:
+                continue
+        except Exception:
+            continue
+        submit = await _first_usable(form.locator(LOGIN_SUBMIT_SELECTOR))
+        if submit is None:
+            submit = form.locator(LOGIN_SUBMIT_SELECTOR).first
+        return {
+            "label": f"generic_form_{idx}",
+            "modal": page.locator("div#modal-overlay, section.popup__login, section#sign-in, .popup, .modal").filter(has=form).first,
+            "form": form,
+            "email": email,
+            "password": password,
+            "submit": submit,
+        }
+
+    email = await _first_usable(page.locator(LOGIN_EMAIL_SELECTOR))
+    password = await _first_usable(page.locator(LOGIN_PASSWORD_SELECTOR))
+    submit = await _first_usable(page.locator(LOGIN_SUBMIT_SELECTOR))
+    if email is not None and password is not None and submit is not None:
+        return {
+            "label": "page_level_generic",
+            "modal": page.locator("div#modal-overlay, section.popup__login, section#sign-in, .popup, .modal").filter(has=email).first,
+            "form": page.locator("body").first,
+            "email": email,
+            "password": password,
+            "submit": submit,
+        }
+
+    return {
+        "label": "unresolved",
+        "modal": page.locator("div#modal-overlay, section.popup__login, section#sign-in, .popup, .modal").first,
+        "form": page.locator("form#login_form_id, form").first,
+        "email": page.locator(LOGIN_EMAIL_SELECTOR).first,
+        "password": page.locator(LOGIN_PASSWORD_SELECTOR).first,
+        "submit": page.locator(LOGIN_SUBMIT_SELECTOR).first,
+    }
+
+
 async def _is_logged_in(page, *, navigate: bool = True) -> tuple[bool, dict]:
     if navigate:
         await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
@@ -2456,9 +2620,11 @@ async def _is_logged_in(page, *, navigate: bool = True) -> tuple[bool, dict]:
 
     login_candidates = [
         page.locator("a:has-text('Вхід'), button:has-text('Вхід'), [role='button']:has-text('Вхід')"),
+        page.locator("a:has-text('Вхід до кабінету'), button:has-text('Вхід до кабінету')"),
     ]
     logout_candidates = [
         page.locator("a:has-text('Вихід'), button:has-text('Вихід'), [role='button']:has-text('Вихід')"),
+        page.locator("a:has-text('Вийти'), button:has-text('Вийти'), [role='button']:has-text('Вийти')"),
     ]
 
     # DSN header can render/update with a delay; do a short polling pass instead of one snapshot.
@@ -2521,12 +2687,6 @@ async def _open_login_modal(page) -> None:
     except PWTimeoutError:
         pass
 
-    overlay = page.locator("div#modal-overlay.overlay").first
-    modal = page.locator("section#sign-in, section.popup__login").filter(has=page.locator("form#login_form_id")).first
-    form = modal.locator("form#login_form_id").first
-    email_input = form.locator('input[name="user[email]"]').first
-    pass_input = form.locator('input[name="user[pass]"]').first
-
     # Support both modal login and dedicated login page.
     deadline = asyncio.get_running_loop().time() + (SUP3_TIMEOUT_MS / 1000.0)
     saw_overlay = False
@@ -2535,6 +2695,12 @@ async def _open_login_modal(page) -> None:
     saw_fields = False
     form_visible = False
     while asyncio.get_running_loop().time() < deadline:
+        resolved = await _resolve_login_form(page)
+        overlay = page.locator("div#modal-overlay.overlay, div#modal-overlay").first
+        modal = resolved["modal"]
+        form = resolved["form"]
+        email_input = resolved["email"]
+        pass_input = resolved["password"]
         try:
             saw_overlay = await overlay.is_visible()
         except Exception:
@@ -2559,7 +2725,7 @@ async def _open_login_modal(page) -> None:
             saw_fields = False
 
         # Accept earlier once overlay + form are there; _submit_login_form will do strict visibility checks.
-        if (saw_overlay and (saw_form or bool(form_visible))) or saw_fields or (saw_modal and saw_form):
+        if saw_fields or (saw_overlay and (saw_form or bool(form_visible))) or (saw_modal and saw_form):
             return
         await page.wait_for_timeout(120)
 
@@ -2577,20 +2743,23 @@ async def _open_login_modal(page) -> None:
 
 
 async def _submit_login_form(page) -> None:
-    modal_selector = "section#sign-in, div#modal-overlay, section.popup__login"
-    form_selector = "form#login_form_id"
-    email_selector = 'input[name="user[email]"]'
-    pass_selector = 'input[name="user[pass]"]'
-    submit_selector = 'input[type="submit"][value="Увійти"]'
+    resolved = await _resolve_login_form(page)
+    modal_selector = "section#sign-in, div#modal-overlay, section.popup__login, .popup, .modal"
+    form_selector = "form#login_form_id or generic visible form"
+    email_selector = LOGIN_EMAIL_SELECTOR
+    pass_selector = LOGIN_PASSWORD_SELECTOR
+    submit_selector = LOGIN_SUBMIT_SELECTOR
     overlay_selector = "div#modal-overlay.overlay"
-    modal = page.locator(modal_selector).filter(has=page.locator(form_selector)).first
-    form = modal.locator(form_selector).first
-    email_input = form.locator(email_selector).first
-    pass_input = form.locator(pass_selector).first
-    submit_btn = form.locator(submit_selector).first
+    modal = resolved["modal"]
+    form = resolved["form"]
+    email_input = resolved["email"]
+    pass_input = resolved["password"]
+    submit_btn = resolved["submit"]
+    csrf_input = form.locator('input[name="CSRFToken"]').first
 
     print(f"[SUP3] login selectors: modal={modal_selector!r} form={form_selector!r}")
     print(f"[SUP3] login selectors: email={email_selector!r} pass={pass_selector!r} submit={submit_selector!r}")
+    print(f"[SUP3] login resolved form: {resolved.get('label')!r}")
 
     async def _build_login_diag(extra: dict | None = None) -> dict:
         overlay = page.locator(overlay_selector).first
@@ -2603,12 +2772,19 @@ async def _submit_login_form(page) -> None:
                 "password": pass_selector,
                 "submit": submit_selector,
                 "overlay": overlay_selector,
+                "resolved_label": str(resolved.get("label") or ""),
             },
             "diagnostics": {
                 "section_signin_form": await _locator_diag(section_form),
+                "old_email": await _locator_diag(page.locator('input[name="user[email]"]')),
+                "old_password": await _locator_diag(page.locator('input[name="user[pass]"]')),
+                "generic_email": await _locator_diag(page.locator(LOGIN_EMAIL_SELECTOR)),
+                "generic_password": await _locator_diag(page.locator(LOGIN_PASSWORD_SELECTOR)),
+                "generic_submit": await _locator_diag(page.locator(LOGIN_SUBMIT_SELECTOR)),
                 "email": await _locator_diag(email_input),
                 "password": await _locator_diag(pass_input),
                 "submit": await _locator_diag(submit_btn),
+                "csrf": await _locator_diag(csrf_input),
             },
             "overlay_visible": await _safe_is_visible(overlay),
             "modal_visible": await _safe_is_visible(modal),
@@ -2644,11 +2820,25 @@ async def _submit_login_form(page) -> None:
         raise StageError("login", message, details)
 
     try:
-        await modal.wait_for(state="visible", timeout=SUP3_TIMEOUT_MS)
-        await form.wait_for(state="visible", timeout=SUP3_TIMEOUT_MS)
+        try:
+            await modal.wait_for(state="visible", timeout=min(3000, SUP3_TIMEOUT_MS))
+        except Exception:
+            pass
+        await form.wait_for(state="attached", timeout=SUP3_TIMEOUT_MS)
         await email_input.wait_for(state="visible", timeout=SUP3_TIMEOUT_MS)
         await pass_input.wait_for(state="visible", timeout=SUP3_TIMEOUT_MS)
         await submit_btn.wait_for(state="visible", timeout=SUP3_TIMEOUT_MS)
+        try:
+            await csrf_input.wait_for(state="attached", timeout=min(6000, SUP3_TIMEOUT_MS))
+            await page.wait_for_function(
+                "(form) => Boolean(form && form.querySelector('input[name=\"CSRFToken\"]')?.value)",
+                arg=await form.element_handle(timeout=min(3000, SUP3_TIMEOUT_MS)),
+                timeout=min(6000, SUP3_TIMEOUT_MS),
+            )
+        except Exception:
+            await _raise_login_stage_error("Login CSRF token not ready before submit")
+    except StageError:
+        raise
     except Exception as e:
         await _raise_login_stage_error("Login form fields not visible")
         raise StageError("login", "Login form fields not visible", {}) from e
@@ -2697,7 +2887,7 @@ async def _submit_login_form(page) -> None:
     await _fill_and_verify(pass_input, SUP3_LOGIN_PASSWORD, field_name="password", expect_contains_at=False)
 
     try:
-        print("[SUP3] login submit: click input[type=submit][value='Увійти']")
+        print(f"[SUP3] login submit: click via {resolved.get('label')!r}")
         await submit_btn.click(timeout=SUP3_TIMEOUT_MS)
     except Exception as e:
         extra = {"email_value_after_type": email_val}
@@ -2708,9 +2898,15 @@ async def _submit_login_form(page) -> None:
 
 
 async def _wait_login_success(page) -> None:
-    overlay = page.locator("div#modal-overlay.overlay").first
-    login_text = page.locator("a:has-text('Вхід'), button:has-text('Вхід'), [role='button']:has-text('Вхід')").first
-    logout_text = page.locator("a:has-text('Вихід'), button:has-text('Вихід'), [role='button']:has-text('Вихід')").first
+    overlay = page.locator("div#modal-overlay.overlay, div#modal-overlay, section.popup__login, section#sign-in").first
+    login_text = page.locator(
+        "a:has-text('Вхід'), button:has-text('Вхід'), [role='button']:has-text('Вхід'), "
+        "a:has-text('Вхід до кабінету'), button:has-text('Вхід до кабінету')"
+    ).first
+    logout_text = page.locator(
+        "a:has-text('Вихід'), button:has-text('Вихід'), [role='button']:has-text('Вихід'), "
+        "a:has-text('Вийти'), button:has-text('Вийти'), [role='button']:has-text('Вийти')"
+    ).first
 
     deadline = asyncio.get_running_loop().time() + (SUP3_TIMEOUT_MS / 1000.0)
     last_overlay_visible = None
@@ -2737,6 +2933,24 @@ async def _wait_login_success(page) -> None:
 
         await page.wait_for_timeout(150)
 
+    body_text = ""
+    try:
+        body_text = re.sub(r"\s+", " ", await page.locator("body").inner_text(timeout=2000)).strip()[:1200]
+    except Exception:
+        body_text = ""
+    modal_text = ""
+    try:
+        modal_text = re.sub(r"\s+", " ", await overlay.inner_text(timeout=2000)).strip()[:1200]
+    except Exception:
+        modal_text = ""
+    screenshot_path = ""
+    try:
+        shot = _failure_screenshot_path()
+        await page.screenshot(path=str(shot), full_page=True)
+        screenshot_path = str(shot)
+    except Exception:
+        pass
+
     raise StageError(
         "login",
         "Login success criteria not met (overlay/login header state).",
@@ -2744,6 +2958,9 @@ async def _wait_login_success(page) -> None:
             "overlay_visible": last_overlay_visible,
             "login_visible": last_login_visible,
             "logout_visible": last_logout_visible,
+            "modal_text": modal_text,
+            "body_text": body_text,
+            "screenshot": screenshot_path,
         },
     )
 
@@ -2768,12 +2985,32 @@ async def _ensure_logged_in(page) -> dict:
             {"checks": checks, "force_login": SUP3_FORCE_LOGIN},
         )
 
-    await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
-    await page.wait_for_timeout(150)
-    await _best_effort_close_popups(page)
-    await _open_login_modal(page)
-    await _submit_login_form(page)
-    await _wait_login_success(page)
+    last_login_error: StageError | None = None
+    for attempt in (1, 2):
+        await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
+        await page.wait_for_timeout(350 if attempt == 2 else 150)
+        await _best_effort_close_popups(page)
+        try:
+            await _open_login_modal(page)
+            await _submit_login_form(page)
+            await _wait_login_success(page)
+            last_login_error = None
+            break
+        except StageError as e:
+            last_login_error = e
+            failure_text = ""
+            if isinstance(e.details, dict):
+                failure_text = " ".join(
+                    str(e.details.get(key) or "")
+                    for key in ("modal_text", "body_text")
+                )
+            csrf_failed = bool(re.search(r"csrf|токен|token|обнов", failure_text, flags=re.I))
+            if attempt == 1 and csrf_failed:
+                print("[SUP3] login: CSRF/token error after submit, refreshing page and retrying once")
+                continue
+            raise
+    if last_login_error is not None:
+        raise last_login_error
     return {"reused_session": False, "checks": checks}
 
 
@@ -2821,13 +3058,13 @@ async def _run() -> tuple[bool, dict]:
                     context = browser.contexts[0]
                     context_owner = False
                 else:
-                    context = await browser.new_context()
+                    context = await browser.new_context(**_browser_context_options())
             else:
                 browser = await p.chromium.launch(headless=SUP3_HEADLESS)
                 if state_path.exists() and not SUP3_FORCE_LOGIN:
-                    context = await browser.new_context(storage_state=str(state_path))
+                    context = await browser.new_context(**_browser_context_options(storage_state=str(state_path)))
                 else:
-                    context = await browser.new_context()
+                    context = await browser.new_context(**_browser_context_options())
 
             page = await context.new_page()
             if SUP3_STAGE == "add_items":

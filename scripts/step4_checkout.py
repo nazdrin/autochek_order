@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from playwright.async_api import TimeoutError as PWTimeout
 from playwright.async_api import async_playwright
 
-from step2_3_add_items_to_cart import parse_expected_items, verify_cart_or_raise
+from step2_3_add_items_to_cart import load_valid_cart_checkpoint, parse_expected_items, verify_cart_or_raise
 
 ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT / "artifacts"
@@ -58,15 +58,22 @@ async def main():
         if CART_VERIFY_ENABLED and ITEMS_RAW:
             expected = parse_expected_items(ITEMS_RAW)
             if expected:
-                await verify_cart_or_raise(
-                    page,
-                    expected,
-                    strict=CART_VERIFY_STRICT,
-                    screenshot_on_fail=CART_VERIFY_SCREENSHOT,
-                    save_ok_html=CART_VERIFY_SAVE_OK_HTML,
-                    fail_prefix="step4_cart_verify_failed",
-                    ok_html_name="step4_cart_verify_ok.html",
-                )
+                checkpoint = load_valid_cart_checkpoint(expected)
+                if checkpoint is not None:
+                    print(
+                        "CART VERIFY SKIPPED: trusted step2_3 checkpoint "
+                        f"source={checkpoint.get('source')} url={checkpoint.get('url')}"
+                    )
+                else:
+                    await verify_cart_or_raise(
+                        page,
+                        expected,
+                        strict=CART_VERIFY_STRICT,
+                        screenshot_on_fail=CART_VERIFY_SCREENSHOT,
+                        save_ok_html=CART_VERIFY_SAVE_OK_HTML,
+                        fail_prefix="step4_cart_verify_failed",
+                        ok_html_name="step4_cart_verify_ok.html",
+                    )
 
         # После проверки мы можем оказаться на /checkout/cart; пробуем прямой переход на /checkout.
         if "/checkout" not in page.url and "/checkout/cart" in page.url:

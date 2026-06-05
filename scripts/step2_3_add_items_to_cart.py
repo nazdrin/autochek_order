@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from playwright.async_api import TimeoutError as PWTimeout
@@ -15,6 +18,8 @@ from playwright.async_api import async_playwright
 ROOT = Path(__file__).resolve().parents[1]
 ART = ROOT / "artifacts"
 ART.mkdir(exist_ok=True)
+CHECKPOINT_DIR = ART / "cart_checkpoints"
+CHECKPOINT_DIR.mkdir(exist_ok=True)
 
 load_dotenv(ROOT / ".env")
 
@@ -41,6 +46,8 @@ CART_VERIFY_ENABLED = os.getenv("BIOTUS_CART_VERIFY", "1") == "1"
 CART_VERIFY_STRICT = os.getenv("BIOTUS_CART_VERIFY_STRICT", "1") == "1"
 CART_VERIFY_SCREENSHOT = os.getenv("BIOTUS_CART_VERIFY_SCREENSHOT", "1") == "1"
 CART_VERIFY_SAVE_OK_HTML = os.getenv("BIOTUS_CART_VERIFY_SAVE_OK_HTML", "0") == "1"
+ORDER_ID = (os.getenv("BIOTUS_ORDER_ID") or "").strip()
+CART_CHECKPOINT_MAX_AGE_SEC = int(os.getenv("BIOTUS_CART_CHECKPOINT_MAX_AGE_SEC", "21600"))
 
 SKU_TOKEN_RE = re.compile(r"(?<![A-Z0-9-])([A-Z0-9]+(?:-[A-Z0-9]+)+)(?![A-Z0-9-])", re.I)
 
@@ -49,6 +56,13 @@ SKU_TOKEN_RE = re.compile(r"(?<![A-Z0-9-])([A-Z0-9]+(?:-[A-Z0-9]+)+)(?![A-Z0-9-]
 class Item:
     sku: str
     qty: int
+
+
+@dataclass
+class CartReadResult:
+    found: Dict[str, int]
+    source: str
+    details: Dict[str, Any]
 
 
 def _normalize_sku(sku: str) -> str:
@@ -238,9 +252,256 @@ def parse_cart_html(html: str) -> Dict[str, int]:
     return found
 
 
+def _expected_key(expected: Dict[str, int]) -> str:
+    return ";".join(f"{sku}={qty}" for sku, qty in sorted(expected.items()))
+
+
+def _checkpoint_path(expected: Dict[str, int]) -> Path:
+    ident = ORDER_ID or hashlib.sha1(_expected_key(expected).encode("utf-8")).hexdigest()[:16]
+    safe_ident = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(ident)).strip("_") or "cart"
+    return CHECKPOINT_DIR / f"biotus_cart_{safe_ident}.json"
+
+
+def save_cart_checkpoint(expected: Dict[str, int], found: Dict[str, int], *, source: str, url: str) -> Path:
+    payload = {
+        "ok": True,
+        "ts": int(time.time()),
+        "order_id": ORDER_ID,
+        "expected_key": _expected_key(expected),
+        "expected": expected,
+        "found": found,
+        "source": source,
+        "url": url,
+    }
+    path = _checkpoint_path(expected)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def load_valid_cart_checkpoint(expected: Dict[str, int]) -> dict | None:
+    path = _checkpoint_path(expected)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        return None
+    if str(payload.get("expected_key") or "") != _expected_key(expected):
+        return None
+    try:
+        age = int(time.time()) - int(payload.get("ts") or 0)
+    except Exception:
+        return None
+    if CART_CHECKPOINT_MAX_AGE_SEC > 0 and age > CART_CHECKPOINT_MAX_AGE_SEC:
+        return None
+    return payload
+
+
+def _qty_from_any(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            qty = int(value)
+        else:
+            digits = re.sub(r"[^\d]", "", str(value))
+            if not digits:
+                return None
+            qty = int(digits)
+    except Exception:
+        return None
+    return qty if qty > 0 else None
+
+
+def _json_item_text(item: dict) -> str:
+    parts: List[str] = []
+    for key in (
+        "sku",
+        "product_sku",
+        "productSku",
+        "product_code",
+        "productCode",
+        "name",
+        "product_name",
+        "productName",
+        "title",
+    ):
+        val = item.get(key)
+        if val:
+            parts.append(str(val))
+    for key in ("options", "product_options"):
+        opts = item.get(key)
+        if isinstance(opts, list):
+            for opt in opts:
+                if isinstance(opt, dict):
+                    parts.extend(str(v) for v in opt.values() if v)
+                elif opt:
+                    parts.append(str(opt))
+        elif isinstance(opts, dict):
+            parts.extend(str(v) for v in opts.values() if v)
+    return " ".join(parts)
+
+
+def parse_cart_json_blob(data: Any) -> Dict[str, int]:
+    found: Dict[str, int] = {}
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            items = node.get("items")
+            if isinstance(items, list):
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    skus = _extract_sku_tokens(_json_item_text(item))
+                    if not skus:
+                        continue
+                    qty = None
+                    for key in ("qty", "quantity", "product_qty", "productQty", "item_qty"):
+                        qty = _qty_from_any(item.get(key))
+                        if qty is not None:
+                            break
+                    if qty is None:
+                        qty = 1
+                    for sku in skus:
+                        found[sku] = found.get(sku, 0) + qty
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(data)
+    return found
+
+
+async def _read_cart_storage_items(page) -> CartReadResult:
+    script = """
+    () => {
+      const out = {};
+      for (const areaName of ['localStorage', 'sessionStorage']) {
+        try {
+          const area = window[areaName];
+          if (!area) continue;
+          for (const key of ['mage-cache-storage', 'hyva-checkout-storage', 'checkout-data']) {
+            const raw = area.getItem(key);
+            if (!raw) continue;
+            try { out[`${areaName}:${key}`] = JSON.parse(raw); }
+            catch (e) { out[`${areaName}:${key}`] = raw; }
+          }
+        } catch (e) {}
+      }
+      try {
+        if (window.checkoutConfig) out.window_checkoutConfig = window.checkoutConfig;
+      } catch (e) {}
+      return out;
+    }
+    """
+    try:
+        blobs = await page.evaluate(script)
+    except Exception as e:
+        return CartReadResult({}, "storage", {"error": str(e)})
+    if not isinstance(blobs, dict):
+        return CartReadResult({}, "storage", {"error": "payload is not dict"})
+
+    found: Dict[str, int] = {}
+    matched_keys: List[str] = []
+    for key, value in blobs.items():
+        parsed = parse_cart_json_blob(value)
+        if not parsed:
+            continue
+        matched_keys.append(str(key))
+        for sku, qty in parsed.items():
+            found[sku] = found.get(sku, 0) + qty
+    return CartReadResult(
+        found,
+        "storage:" + ",".join(matched_keys) if matched_keys else "storage",
+        {"storage_keys": list(blobs.keys()), "matched_storage_keys": matched_keys},
+    )
+
+
+async def _read_cart_dom_items(page) -> CartReadResult:
+    selectors = [
+        "#confirmOverlay",
+        ".amcart-confirmation-popup-content",
+        "#amcart-qty-form-container",
+        ".cart.table-wrapper",
+        ".cart-container",
+        ".opc-block-summary",
+        ".checkout_contacts_s.cart_items",
+        "table.cart.items",
+        "[class*='cart-item']",
+        "[class*='minicart-item']",
+    ]
+    chunks: List[str] = []
+    matched: List[str] = []
+    for sel in selectors:
+        loc = page.locator(sel)
+        try:
+            count = min(await loc.count(), 10)
+        except Exception:
+            continue
+        for idx in range(count):
+            item = loc.nth(idx)
+            try:
+                visible = await item.is_visible()
+            except Exception:
+                visible = True
+            if not visible:
+                continue
+            try:
+                html = await item.evaluate("(el) => el.outerHTML || ''")
+            except Exception:
+                continue
+            if html:
+                chunks.append(str(html))
+                matched.append(sel)
+    found = parse_cart_html("\n".join(chunks))
+    return CartReadResult(
+        found,
+        "dom:" + ",".join(sorted(set(matched))) if matched else "dom",
+        {"selectors": matched},
+    )
+
+
+async def read_cart_items_detailed(
+    page,
+    expected: Dict[str, int] | None = None,
+    timeout_ms: int | None = None,
+) -> CartReadResult:
+    expected = expected or {}
+    deadline = time.monotonic() + ((timeout_ms if timeout_ms is not None else min(5000, TIMEOUT_MS)) / 1000.0)
+    best = CartReadResult({}, "none", {})
+
+    while True:
+        storage = await _read_cart_storage_items(page)
+        dom = await _read_cart_dom_items(page)
+        try:
+            html_found = parse_cart_html(await page.content())
+            html = CartReadResult(html_found, "html", {})
+        except Exception as e:
+            html = CartReadResult({}, "html", {"error": str(e)})
+
+        for result in (storage, dom, html):
+            if result.found:
+                best = result
+                if not expected or not _validate_cart(expected, result.found, strict=False):
+                    return result
+
+        if time.monotonic() >= deadline:
+            if best.found:
+                return best
+            return CartReadResult(
+                {},
+                "none",
+                {"url": getattr(page, "url", ""), "storage": storage.details, "dom": dom.details, "html": html.details},
+            )
+        await page.wait_for_timeout(250)
+
+
 async def read_cart_items(page) -> Dict[str, int]:
-    html = await page.content()
-    return parse_cart_html(html)
+    return (await read_cart_items_detailed(page)).found
 
 
 def _validate_cart(expected: Dict[str, int], found: Dict[str, int], *, strict: bool) -> List[str]:
@@ -474,7 +735,8 @@ async def verify_cart_or_raise(
     ok_html_name: str,
 ):
     await _goto_cart_page(page)
-    found = await read_cart_items(page)
+    read_result = await read_cart_items_detailed(page, expected=expected)
+    found = read_result.found
     mismatches = _validate_cart(expected, found, strict=strict)
 
     if mismatches:
@@ -486,16 +748,25 @@ async def verify_cart_or_raise(
                 pass
 
         print("CART VERIFY FAILED")
+        print(f"URL: {page.url}")
+        print(f"Source: {read_result.source}")
         print(f"Expected: {_fmt_items(expected)}")
         print(f"Found: {_fmt_items(found)}")
+        if read_result.details:
+            print(f"Details: {json.dumps(read_result.details, ensure_ascii=False)[:1000]}")
         for line in mismatches:
             print(f" - {line}")
-        raise RuntimeError("Cart verification failed: " + " | ".join(mismatches))
+        raise RuntimeError(
+            "Cart verification failed: "
+            + " | ".join(mismatches)
+            + f" | source={read_result.source} url={page.url} expected={_fmt_items(expected)} found={_fmt_items(found)}"
+        )
 
     if save_ok_html:
         await _save_cart_html(page, ok_html_name)
 
-    print(f"CART VERIFY OK: {_fmt_items(expected)}")
+    checkpoint = save_cart_checkpoint(expected, found, source=read_result.source, url=page.url)
+    print(f"CART VERIFY OK: {_fmt_items(expected)} source={read_result.source} checkpoint={checkpoint}")
 
 
 # --- Helper: clear cart if any items present ---

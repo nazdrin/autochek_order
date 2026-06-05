@@ -202,7 +202,8 @@ ORCH_HEADLESS = (os.getenv("ORCH_HEADLESS") or "").strip()
 ORCH_SUP2_HEADLESS = (os.getenv("ORCH_SUP2_HEADLESS") or ORCH_HEADLESS or "1").strip()
 ORCH_SUP2_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP2_STORAGE_STATE_FILE") or ".state_supplier2.json").strip()
 ORCH_SUP2_CLEAR_BASKET = (os.getenv("ORCH_SUP2_CLEAR_BASKET") or "1").strip()
-ORCH_SUP3_HEADLESS = (os.getenv("ORCH_SUP3_HEADLESS") or ORCH_HEADLESS or "1").strip()
+# DSN rejects login CSRF tokens in Chromium headless. Match supplier3 default.
+ORCH_SUP3_HEADLESS = (os.getenv("ORCH_SUP3_HEADLESS") or ORCH_HEADLESS or "0").strip()
 ORCH_SUP3_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP3_STORAGE_STATE_FILE") or ".state_supplier3.json").strip()
 ORCH_SUP3_CLEAR_BASKET = (os.getenv("ORCH_SUP3_CLEAR_BASKET") or "1").strip()
 ORCH_SUP4_SUPPLIERLIST = int(os.getenv("ORCH_SUP4_SUPPLIERLIST", "42"))
@@ -1263,6 +1264,7 @@ def process_one_biotus_order(order: Dict[str, Any], state: Dict[str, Any] | None
     env = os.environ.copy()
     env.setdefault("BIOTUS_USE_CDP", DEFAULT_BIOTUS_USE_CDP)
     env["BIOTUS_ITEMS"] = biotus_items
+    env["BIOTUS_ORDER_ID"] = str(order_id_int)
     inject_np_api_key_env(env, order)
 
     if full_name:
