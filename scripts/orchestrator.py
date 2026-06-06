@@ -206,6 +206,12 @@ ORCH_SUP2_CLEAR_BASKET = (os.getenv("ORCH_SUP2_CLEAR_BASKET") or "1").strip()
 ORCH_SUP3_HEADLESS = (os.getenv("ORCH_SUP3_HEADLESS") or ORCH_HEADLESS or "0").strip()
 ORCH_SUP3_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP3_STORAGE_STATE_FILE") or ".state_supplier3.json").strip()
 ORCH_SUP3_CLEAR_BASKET = (os.getenv("ORCH_SUP3_CLEAR_BASKET") or "1").strip()
+ORCH_SUP3_USE_CDP = (os.getenv("ORCH_SUP3_USE_CDP") or "0").strip()
+ORCH_SUP3_ORG2_LOGIN_EMAIL = (os.getenv("ORCH_SUP3_ORG2_LOGIN_EMAIL") or "olegtsimko123@gmail.com").strip()
+ORCH_SUP3_ORG2_LOGIN_PASSWORD = (os.getenv("ORCH_SUP3_ORG2_LOGIN_PASSWORD") or "").strip()
+ORCH_SUP3_ORG2_STORAGE_STATE_FILE = (
+    os.getenv("ORCH_SUP3_ORG2_STORAGE_STATE_FILE") or ".state_supplier3_org2.json"
+).strip()
 ORCH_SUP4_SUPPLIERLIST = int(os.getenv("ORCH_SUP4_SUPPLIERLIST", "42"))
 ORCH_SUP4_HEADLESS = (os.getenv("ORCH_SUP4_HEADLESS") or ORCH_HEADLESS or "1").strip()
 ORCH_SUP4_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP4_STORAGE_STATE_FILE") or ".state_supplier4.json").strip()
@@ -1028,6 +1034,45 @@ def extract_organization_id(order: Dict[str, Any]) -> int | None:
         return None
 
 
+def resolve_sup3_account_config(order: Dict[str, Any]) -> Dict[str, str]:
+    """Return DSN/SUP3 account env config for the order organization."""
+    raw_organization_id = order.get("organizationId")
+    organization_id = extract_organization_id(order)
+    if raw_organization_id not in (None, "") and organization_id is None:
+        raise RuntimeError(f"Invalid SUP3 organizationId={raw_organization_id!r}. Expected 1, 2, or missing.")
+    if organization_id in (None, 1):
+        if not ORCH_SUP3_STORAGE_STATE_FILE:
+            raise RuntimeError("ORCH_SUP3_STORAGE_STATE_FILE is empty.")
+        return {
+            "organization_id": "1" if organization_id == 1 else "default",
+            "storage_state_file": ORCH_SUP3_STORAGE_STATE_FILE,
+            "use_cdp": ORCH_SUP3_USE_CDP,
+            "login_email": "",
+            "login_password": "",
+        }
+
+    if organization_id == 2:
+        if ORCH_SUP3_USE_CDP.strip().lower() in {"1", "true", "yes", "y", "on"}:
+            raise RuntimeError(
+                "organizationId=2 for SUP3 requires ORCH_SUP3_USE_CDP=0 because CDP reuses a shared Chrome context."
+            )
+        if not ORCH_SUP3_ORG2_STORAGE_STATE_FILE:
+            raise RuntimeError("ORCH_SUP3_ORG2_STORAGE_STATE_FILE is empty.")
+        if not ORCH_SUP3_ORG2_LOGIN_EMAIL:
+            raise RuntimeError("organizationId=2 requires ORCH_SUP3_ORG2_LOGIN_EMAIL.")
+        if not ORCH_SUP3_ORG2_LOGIN_PASSWORD:
+            raise RuntimeError("organizationId=2 requires ORCH_SUP3_ORG2_LOGIN_PASSWORD.")
+        return {
+            "organization_id": "2",
+            "storage_state_file": ORCH_SUP3_ORG2_STORAGE_STATE_FILE,
+            "use_cdp": "0",
+            "login_email": ORCH_SUP3_ORG2_LOGIN_EMAIL,
+            "login_password": ORCH_SUP3_ORG2_LOGIN_PASSWORD,
+        }
+
+    raise RuntimeError(f"Unsupported SUP3 organizationId={organization_id!r}. Expected 1, 2, or missing.")
+
+
 def resolve_np_api_key_for_order(order: Dict[str, Any]) -> tuple[str, str]:
     """Return (api_key, source_env_name) for the NP cabinet that owns the TTN."""
     organization_id = extract_organization_id(order)
@@ -1479,13 +1524,17 @@ def process_one_supplier3_order(order: Dict[str, Any]) -> None:
     if not tracking_number:
         raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для SUP3_TTN.")
 
-    if not ORCH_SUP3_STORAGE_STATE_FILE:
-        raise RuntimeError("ORCH_SUP3_STORAGE_STATE_FILE is empty.")
+    sup3_account = resolve_sup3_account_config(order)
 
     env = os.environ.copy()
     env.setdefault("SUP3_HEADLESS", ORCH_SUP3_HEADLESS)
     env["SUP3_STAGE"] = "run"
-    env["SUP3_STORAGE_STATE_FILE"] = ORCH_SUP3_STORAGE_STATE_FILE
+    env["SUP3_STORAGE_STATE_FILE"] = sup3_account["storage_state_file"]
+    env["SUP3_USE_CDP"] = sup3_account["use_cdp"]
+    if sup3_account.get("login_email"):
+        env["SUP3_LOGIN_EMAIL"] = sup3_account["login_email"]
+    if sup3_account.get("login_password"):
+        env["SUP3_LOGIN_PASSWORD"] = sup3_account["login_password"]
     env["SUP3_ITEMS"] = sup3_items
     env["SUP3_TTN"] = tracking_number
     env["SUP3_CLEAR_BASKET"] = ORCH_SUP3_CLEAR_BASKET
@@ -1497,6 +1546,15 @@ def process_one_supplier3_order(order: Dict[str, Any]) -> None:
 
     print(f"[ORCH] DSN SUP3_ITEMS => {sup3_items}")
     print(f"[ORCH] DSN TTN => {tracking_number}")
+    account_email = sup3_account.get("login_email") or "current SUP3 env/default"
+    print(
+        "[ORCH] DSN account => "
+        f"organizationId={sup3_account['organization_id']} "
+        f"storage_state={sup3_account['storage_state_file']!r} "
+        f"use_cdp={sup3_account['use_cdp']!r} "
+        f"email={account_email!r}",
+        flush=True,
+    )
 
     step_name = "supplier3_run_order"
     step_timeout = _timeout_for_step("SUP3_RUN_ORDER")
