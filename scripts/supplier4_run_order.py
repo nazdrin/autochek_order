@@ -2057,7 +2057,7 @@ async def _checkout_and_submit(page, ttn: str, *, items: list[Sup4Item], item_co
     await _ensure_checkout(page)
     final_cart_checks = await _verify_checkout_items(page, items, item_contexts=item_contexts)
     own_selected = await _ensure_own_ttn_selected(page)
-    await _fill_ttn(page, ttn)
+    print("[SUP4] ttn input skipped: supplier requires label file only")
     attach_info = await _attach_label_file(page, ttn)
     if SUP4_SKIP_SUBMIT:
         print("[SUP4] submit skipped by SUP4_SKIP_SUBMIT=1")
@@ -2066,8 +2066,9 @@ async def _checkout_and_submit(page, ttn: str, *, items: list[Sup4Item], item_co
         return {
             "ok": True,
             "radio_selected": bool(own_selected),
-            "ttn_set": True,
-            "ttn_verified_before_submit": True,
+            "ttn_set": False,
+            "ttn_verified_before_submit": False,
+            "ttn_input_skipped": True,
             "label_attached": True,
             "attach_invoice_label": attach_info,
             "submitted": False,
@@ -2083,8 +2084,9 @@ async def _checkout_and_submit(page, ttn: str, *, items: list[Sup4Item], item_co
     return {
         "ok": True,
         "radio_selected": bool(own_selected),
-        "ttn_set": True,
-        "ttn_verified_before_submit": True,
+        "ttn_set": False,
+        "ttn_verified_before_submit": False,
+        "ttn_input_skipped": True,
         "label_attached": True,
         "attach_invoice_label": attach_info,
         "submitted": True,

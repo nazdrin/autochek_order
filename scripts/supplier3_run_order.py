@@ -60,6 +60,7 @@ SUP3_USE_CDP = _to_bool(os.getenv("SUP3_USE_CDP", "0"), False)
 SUP3_CDP_URL = (os.getenv("SUP3_CDP_URL") or "").strip()
 SUP3_ITEMS = (os.getenv("SUP3_ITEMS") or "").strip()
 SUP3_TTN = (os.getenv("SUP3_TTN") or "").strip()
+SUP3_CITY_NAME = (os.getenv("SUP3_CITY_NAME") or os.getenv("BIOTUS_CITY_NAME") or "").strip()
 SUP3_NP_API_KEY = (
     os.getenv("SUP3_NP_API_KEY")
     or os.getenv("NP_API_KEY")
@@ -122,6 +123,31 @@ def _failure_screenshot_path() -> Path:
 
 def _add_items_failure_screenshot_path() -> Path:
     return ROOT / "supplier3_add_items_failed.png"
+
+
+async def _save_checkout_debug_artifacts(page, reason: str, details: dict | None = None) -> dict:
+    out: dict[str, Any] = dict(details or {})
+    try:
+        debug_dir = ROOT / "tmp" / "supplier3_debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        safe_reason = re.sub(r"[^a-zA-Z0-9_]+", "_", reason.strip().lower()).strip("_")[:80] or "checkout"
+        base = debug_dir / f"{stamp}_{safe_reason}"
+        html_path = base.with_suffix(".html")
+        png_path = base.with_suffix(".png")
+        try:
+            html_path.write_text(await page.content(), encoding="utf-8")
+            out["debug_html"] = str(html_path)
+        except Exception as e:
+            out["debug_html_error"] = str(e)
+        try:
+            await page.screenshot(path=str(png_path), full_page=True)
+            out["debug_screenshot"] = str(png_path)
+        except Exception as e:
+            out["debug_screenshot_error"] = str(e)
+    except Exception as e:
+        out["debug_artifacts_error"] = str(e)
+    return out
 
 
 def _browser_context_options(storage_state: str | None = None) -> dict:
@@ -2309,7 +2335,154 @@ async def _ensure_own_ttn_selected(page) -> bool:
         if await _ttn_input_enabled():
             return True
         await page.wait_for_timeout(180)
-    raise StageError(stage, "Own TTN option not selectable")
+    details = await _save_checkout_debug_artifacts(
+        page,
+        "own_ttn_option_not_selectable",
+        {
+            "url": page.url or SUP3_BASE_URL,
+            "radio_snapshot": await page.locator("input[type='radio']").evaluate_all(
+                """els => els.slice(0, 20).map((el) => ({
+                    name: el.getAttribute('name') || '',
+                    value: el.getAttribute('value') || '',
+                    checked: !!el.checked,
+                    disabled: !!el.disabled,
+                    id: el.getAttribute('id') || '',
+                    outerHTML: (el.outerHTML || '').slice(0, 500)
+                }))"""
+            ),
+            "ttn_input_snapshot": await page.locator("input[name*='ttn' i], input[id*='ttn' i]").evaluate_all(
+                """els => els.slice(0, 10).map((el) => ({
+                    name: el.getAttribute('name') || '',
+                    value: el.getAttribute('value') || '',
+                    disabled: !!el.disabled,
+                    id: el.getAttribute('id') || '',
+                    placeholder: el.getAttribute('placeholder') || '',
+                    outerHTML: (el.outerHTML || '').slice(0, 500)
+                }))"""
+            ),
+        },
+    )
+    raise StageError(stage, "Own TTN option not selectable", details)
+
+
+async def _raise_if_checkout_min_amount_blocked(page) -> None:
+    marker = page.locator("text=/Мінімальна сума для оформлення замовлення/i").first
+    try:
+        if await marker.count() == 0 or not await marker.is_visible():
+            return
+    except Exception:
+        return
+
+    text = ""
+    try:
+        section = marker.locator("xpath=ancestor::*[contains(@class, 'form-item')][1]").first
+        if await section.count() > 0:
+            text = (await section.inner_text(timeout=min(1500, SUP3_TIMEOUT_MS))).strip()
+    except Exception:
+        text = ""
+    if not text:
+        try:
+            text = (await marker.inner_text(timeout=min(1500, SUP3_TIMEOUT_MS))).strip()
+        except Exception:
+            text = "Мінімальна сума для оформлення замовлення"
+
+    details = await _save_checkout_debug_artifacts(
+        page,
+        "minimum_order_amount_not_met",
+        {"url": page.url or SUP3_BASE_URL, "message": text},
+    )
+    raise StageError("checkout_ttn", f"Minimum order amount not met: {text}", details)
+
+
+async def _ensure_checkout_city_selected(page) -> dict:
+    stage = "checkout_ttn"
+    city_name = SUP3_CITY_NAME.strip()
+    if not city_name:
+        return {"city_selected": False, "skipped": "SUP3_CITY_NAME is empty"}
+
+    city_input = page.locator("#checkout-city, input[name='Recipient[delivery_city]']").first
+    city_id_input = page.locator("input[name='Recipient[delivery_city_id]']").first
+    try:
+        await city_input.wait_for(state="visible", timeout=min(5000, SUP3_TIMEOUT_MS))
+    except Exception:
+        return {"city_selected": False, "skipped": "city input not visible"}
+
+    try:
+        current_city_id = (await city_id_input.input_value(timeout=min(1000, SUP3_TIMEOUT_MS))).strip()
+    except Exception:
+        current_city_id = ""
+    try:
+        current_city = (await city_input.input_value(timeout=min(1000, SUP3_TIMEOUT_MS))).strip()
+    except Exception:
+        current_city = ""
+    if current_city_id and current_city_id != "0" and current_city:
+        print(f"[SUP3] checkout_ttn: city already selected => {current_city} ({current_city_id})")
+        return {"city_selected": True, "city": current_city, "city_id": current_city_id, "already": True}
+
+    print(f"[SUP3] checkout_ttn: select city => {city_name}")
+    try:
+        await city_input.scroll_into_view_if_needed(timeout=min(1500, SUP3_TIMEOUT_MS))
+    except Exception:
+        pass
+    await city_input.click(timeout=min(3000, SUP3_TIMEOUT_MS), force=True)
+    await city_input.fill("", timeout=min(2000, SUP3_TIMEOUT_MS))
+    await city_input.type(city_name, delay=45, timeout=min(6000, SUP3_TIMEOUT_MS))
+
+    option_candidates = [
+        page.locator(".ui-autocomplete:visible li:has-text('%s')" % city_name).first,
+        page.locator(".ui-menu:visible li:has-text('%s')" % city_name).first,
+        page.locator("li.ui-menu-item:visible:has-text('%s')" % city_name).first,
+        page.locator(".ui-autocomplete:visible li").first,
+        page.locator(".ui-menu:visible li").first,
+    ]
+    clicked = False
+    for opt in option_candidates:
+        try:
+            await opt.wait_for(state="visible", timeout=min(5000, SUP3_TIMEOUT_MS))
+            await opt.click(timeout=min(3000, SUP3_TIMEOUT_MS), force=True)
+            clicked = True
+            break
+        except Exception:
+            continue
+    if not clicked:
+        try:
+            await city_input.press("ArrowDown", timeout=min(1500, SUP3_TIMEOUT_MS))
+            await city_input.press("Enter", timeout=min(1500, SUP3_TIMEOUT_MS))
+            clicked = True
+        except Exception:
+            pass
+    if not clicked:
+        details = await _save_checkout_debug_artifacts(
+            page,
+            "city_option_not_selectable",
+            {"url": page.url or SUP3_BASE_URL, "city": city_name},
+        )
+        raise StageError(stage, f"City option not selectable: {city_name}", details)
+
+    deadline = asyncio.get_running_loop().time() + min(8.0, SUP3_TIMEOUT_MS / 1000.0)
+    last_city = ""
+    last_city_id = ""
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            last_city = (await city_input.input_value(timeout=min(1000, SUP3_TIMEOUT_MS))).strip()
+        except Exception:
+            last_city = ""
+        try:
+            last_city_id = (await city_id_input.input_value(timeout=min(1000, SUP3_TIMEOUT_MS))).strip()
+        except Exception:
+            last_city_id = ""
+        if last_city_id and last_city_id != "0":
+            print(f"[SUP3] checkout_ttn: city selected => {last_city} ({last_city_id})")
+            await page.wait_for_timeout(800)
+            return {"city_selected": True, "city": last_city, "city_id": last_city_id}
+        await page.wait_for_timeout(200)
+
+    details = await _save_checkout_debug_artifacts(
+        page,
+        "city_not_applied",
+        {"url": page.url or SUP3_BASE_URL, "city": city_name, "current_city": last_city, "current_city_id": last_city_id},
+    )
+    raise StageError(stage, f"City was not applied: {city_name}", details)
 
 
 def _checkout_ttn_selectors_tried() -> list[str]:
@@ -2436,6 +2609,8 @@ async def _checkout_ttn_stage(page) -> dict:
             raise StageError(stage, "Did not reach checkout", {"url": page.url or SUP3_BASE_URL})
 
     await _best_effort_close_popups(page)
+    await _raise_if_checkout_min_amount_blocked(page)
+    city_info = await _ensure_checkout_city_selected(page)
     radio_selected = await _ensure_own_ttn_selected(page)
     ttn_set = await _fill_ttn_input(page, SUP3_TTN)
     if not SUP3_NP_API_KEY:
@@ -2462,6 +2637,7 @@ async def _checkout_ttn_stage(page) -> dict:
         "url": page.url or SUP3_BASE_URL,
         "numberSup": str(supplier_order_number),
         "checkout_clicked": checkout_clicked,
+        "city": city_info,
         "radio_selected": bool(pre_submit_ttn_check.get("radio_selected", radio_selected)),
         "ttn_set": bool(ttn_set),
         "ttn_verified_before_submit": bool(pre_submit_ttn_check.get("ttn_verified_before_submit")),

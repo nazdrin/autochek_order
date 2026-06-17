@@ -199,7 +199,8 @@ ORCH_DONE_STATUS_ID = int(os.getenv("ORCH_DONE_STATUS_ID", "4"))
 SALESDRIVE_BASE_URL = (os.getenv("SALESDRIVE_BASE_URL") or "https://petrenko.salesdrive.me").rstrip("/")
 SALESDRIVE_API_KEY = (os.getenv("SALESDRIVE_API_KEY") or "").strip()
 ORCH_HEADLESS = (os.getenv("ORCH_HEADLESS") or "").strip()
-ORCH_SUP2_HEADLESS = (os.getenv("ORCH_SUP2_HEADLESS") or ORCH_HEADLESS or "1").strip()
+ORCH_SUP2_ENABLED = (os.getenv("ORCH_SUP2_ENABLED") or "0").strip()
+ORCH_SUP2_HEADLESS = (os.getenv("ORCH_SUP2_HEADLESS") or "0").strip()
 ORCH_SUP2_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP2_STORAGE_STATE_FILE") or ".state_supplier2.json").strip()
 ORCH_SUP2_CLEAR_BASKET = (os.getenv("ORCH_SUP2_CLEAR_BASKET") or "1").strip()
 # DSN rejects login CSRF tokens in Chromium headless. Match supplier3 default.
@@ -1428,25 +1429,33 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
     if not sup2_items:
         raise RuntimeError("Не смог сформировать SUP2_ITEMS из order['products'].")
 
-    tracking_number = extract_tracking_number(order)
-    if not tracking_number:
-        raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для SUP2_TTN.")
-
-    if not ORCH_SUP2_STORAGE_STATE_FILE:
-        raise RuntimeError("ORCH_SUP2_STORAGE_STATE_FILE is empty.")
+    full_name = build_full_name(order)
+    phone_local = format_phone_local(order)
+    delivery_address, delivery_branch_number = extract_delivery_info(order)
+    city_env = extract_city_env(order)
+    city_name = city_env.get("BIOTUS_CITY_NAME", "")
+    if not full_name:
+        raise RuntimeError("Не найдено ФИО клиента для SUP2 checkout.")
+    if not phone_local:
+        raise RuntimeError("Не найден телефон клиента для SUP2 checkout.")
+    if not city_name:
+        raise RuntimeError("Не найден город доставки для SUP2 checkout.")
+    if not delivery_branch_number and not delivery_address:
+        raise RuntimeError("Не найдено отделение/адрес доставки для SUP2 checkout.")
 
     env = os.environ.copy()
     env.setdefault("SUP2_HEADLESS", ORCH_SUP2_HEADLESS)
-    env["SUP2_STORAGE_STATE_FILE"] = ORCH_SUP2_STORAGE_STATE_FILE
     env["SUP2_ITEMS"] = sup2_items
-    env["SUP2_TTN"] = tracking_number
+    env["SUP2_ORDER_JSON"] = json.dumps(order, ensure_ascii=False)
     env["SUP2_CLEAR_BASKET"] = ORCH_SUP2_CLEAR_BASKET
-    inject_np_api_key_env(env, order)
     if "SUP2_DEBUG_PAUSE_SECONDS" in os.environ:
         env["SUP2_DEBUG_PAUSE_SECONDS"] = os.environ["SUP2_DEBUG_PAUSE_SECONDS"]
 
     print(f"[ORCH] Dobavki SUP2_ITEMS => {sup2_items}")
-    print(f"[ORCH] Dobavki TTN => {tracking_number}")
+    print(f"[ORCH] Dobavki customer => name={full_name!r} phone={phone_local!r}")
+    print(
+        f"[ORCH] Dobavki delivery => city={city_name!r} branchNumber={delivery_branch_number!r} address={delivery_address!r}"
+    )
     print(f"[ORCH] start supplier2 order_id={order_id_int} run={RUN_INSTANCE_ID}", flush=True)
 
     step_name = "supplier2_run_order"
@@ -1496,11 +1505,21 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
 
     supplier_order_number = str(payload.get("supplier_order_number") or "").strip()
     submitted = bool(payload.get("submitted"))
+    dry_run = bool(payload.get("dry_run"))
     print(
-        f"[ORCH] supplier2 result order_id={order_id_int} ok=true submitted={submitted} supplier_order_number={supplier_order_number!r}",
+        f"[ORCH] supplier2 result order_id={order_id_int} ok=true submitted={submitted} dry_run={dry_run} supplier_order_number={supplier_order_number!r}",
         flush=True,
     )
+    if dry_run:
+        print(f"[ORCH] SUP2_DRY_RUN=1: SalesDrive status update skipped for order_id={order_id_int}")
+        return
     if not supplier_order_number:
+        if submitted:
+            salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID)
+            print(
+                f"[ORCH] SalesDrive status updated without numberSup: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}"
+            )
+            return
         raise StepError(step_name, "supplier_order_number is empty in supplier2_run_order response.")
 
     salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
@@ -1537,6 +1556,9 @@ def process_one_supplier3_order(order: Dict[str, Any]) -> None:
         env["SUP3_LOGIN_PASSWORD"] = sup3_account["login_password"]
     env["SUP3_ITEMS"] = sup3_items
     env["SUP3_TTN"] = tracking_number
+    sup3_city = extract_city_env(order).get("BIOTUS_CITY_NAME", "")
+    if sup3_city:
+        env["SUP3_CITY_NAME"] = sup3_city
     env["SUP3_CLEAR_BASKET"] = ORCH_SUP3_CLEAR_BASKET
     inject_np_api_key_env(env, order)
     if "SUP3_DEBUG_PAUSE_SECONDS" in os.environ:
@@ -1997,6 +2019,9 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
         return False
 
     if supplierlist == 41:
+        if ORCH_SUP2_ENABLED != "1":
+            print(f"[ORCH] Dobavki disabled by ORCH_SUP2_ENABLED={ORCH_SUP2_ENABLED!r}; skip order_id={order_id}")
+            return False
         process_one_dobavki_order(order)
         return True
 
@@ -2303,6 +2328,13 @@ def main() -> int:
                             print(f"[ORCH] SUP2_ITEMS => {sup2_items}")
                         else:
                             print(f"[ORCH] Routing preview skip => supplierlist={supplierlist!r} supplier={supplier!r}")
+
+                        if supplierlist == 41 and ORCH_SUP2_ENABLED != "1":
+                            print(
+                                f"[ORCH] Dobavki disabled by ORCH_SUP2_ENABLED={ORCH_SUP2_ENABLED!r}; "
+                                f"order_id={order_id} left unprocessed."
+                            )
+                            continue
 
                         if args.dry_run:
                             print("[ORCH] dry-run enabled, no steps executed.")
