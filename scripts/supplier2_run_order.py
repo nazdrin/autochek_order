@@ -874,7 +874,8 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
 def _parse_supplier_order_number(url: str, body_text: str) -> str:
     patterns = [
         r"/order/(\d+)",
-        r"(?:заказ|замовлення|order)\D{0,20}(\d{3,})",
+        r"(?:заказ|замовлення|order)\s*(?:№|#|No\.?|Nº)?\s*(\d{3,})",
+        r"(?:заказ|замовлення|order)\D{0,40}(\d{3,})",
         r"№\s*(\d{3,})",
     ]
     haystacks = [url or "", body_text or ""]
@@ -895,7 +896,19 @@ async def _submit_order(page) -> str:
         await page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_MS)
     except PWTimeoutError:
         pass
-    await page.wait_for_timeout(2500)
+    try:
+        await page.wait_for_function(
+            """() => {
+                const text = document.body ? document.body.innerText : '';
+                return /Ваш\\s+заказ\\s+принят/i.test(text)
+                    || /Заказ\\s*№\\s*\\d{3,}/i.test(text)
+                    || /(?:замовлення|order)\\D{0,40}\\d{3,}/i.test(text);
+            }""",
+            timeout=TIMEOUT_MS,
+        )
+    except PWTimeoutError:
+        await page.wait_for_timeout(2500)
+
     body_text = ""
     try:
         body_text = await page.locator("body").inner_text(timeout=TIMEOUT_MS)
@@ -903,6 +916,16 @@ async def _submit_order(page) -> str:
         pass
     order_no = _parse_supplier_order_number(page.url or "", body_text)
     _write_submit_checkpoint(url=page.url or "", submitted=True, order_number=order_no)
+    if not order_no:
+        raise StageError(
+            "post_submit_order_number",
+            "Supplier order was submitted, but Dobavki order number could not be parsed.",
+            {
+                "submitted": True,
+                "url": page.url or "",
+                "body_excerpt": re.sub(r"\s+", " ", body_text or "").strip()[:1000],
+            },
+        )
     return order_no
 
 

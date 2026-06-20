@@ -1514,13 +1514,8 @@ def process_one_dobavki_order(order: Dict[str, Any]) -> None:
         print(f"[ORCH] SUP2_DRY_RUN=1: SalesDrive status update skipped for order_id={order_id_int}")
         return
     if not supplier_order_number:
-        if submitted:
-            salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID)
-            print(
-                f"[ORCH] SalesDrive status updated without numberSup: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}"
-            )
-            return
-        raise StepError(step_name, "supplier_order_number is empty in supplier2_run_order response.")
+        suffix = " after submit" if submitted else ""
+        raise StepError(step_name, f"supplier_order_number is empty in supplier2_run_order response{suffix}.")
 
     salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
     print(
