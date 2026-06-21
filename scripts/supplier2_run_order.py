@@ -241,6 +241,70 @@ def _norm_match_text(value: str) -> str:
     return re.sub(r"[^0-9a-zа-яіїєґ]+", "", str(value or "").lower())
 
 
+def _ru_city_variant(value: str) -> str:
+    text = str(value or "").strip()
+    replacements = (
+        ("Київ", "Киев"),
+        ("київ", "киев"),
+        ("івськ", "овск"),
+        ("івський", "овский"),
+        ("івська", "овская"),
+        ("івське", "овское"),
+        ("івка", "овка"),
+        ("і", "и"),
+        ("ї", "и"),
+        ("є", "е"),
+        ("ґ", "г"),
+        ("І", "И"),
+        ("Ї", "И"),
+        ("Є", "Е"),
+        ("Ґ", "Г"),
+    )
+    for src, dst in replacements:
+        text = text.replace(src, dst)
+    return text
+
+
+def _unique_nonempty(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean = re.sub(r"\s+", " ", str(value or "").strip())
+        key = clean.lower()
+        if clean and key not in seen:
+            seen.add(key)
+            out.append(clean)
+    return out
+
+
+def _city_search_terms(city: str) -> list[str]:
+    raw = str(city or "").strip()
+    no_parentheses = re.sub(r"\s*\([^)]*\)", "", raw).strip()
+    before_comma = raw.split(",", 1)[0].strip()
+    candidates = [raw, no_parentheses, before_comma]
+    candidates.extend(_ru_city_variant(x) for x in list(candidates))
+    return _unique_nonempty(candidates)
+
+
+def _city_hint_terms(city: str) -> list[str]:
+    raw = str(city or "").strip()
+    hints: list[str] = []
+    hints.extend(re.findall(r"\(([^)]*)\)", raw))
+    hints.extend(part.strip() for part in re.split(r"[,;]", raw)[1:])
+    expanded: list[str] = []
+    for hint in hints:
+        tokens = re.split(r"[\s,.;/]+", hint)
+        for token in tokens:
+            token = token.strip("()")
+            if len(token) < 3:
+                continue
+            if token.lower() in {"р-н", "рн", "район", "обл", "область", "тг"}:
+                continue
+            expanded.append(token)
+            expanded.append(_ru_city_variant(token))
+    return _unique_nonempty(expanded)
+
+
 def _branch_number_from_value(value: Any) -> str:
     if value in (None, ""):
         return ""
@@ -661,50 +725,81 @@ async def _select_city(page, city_query: str) -> dict:
     city_input = page.locator("#checkout-city").first
     await city_input.wait_for(state="visible", timeout=TIMEOUT_MS)
 
+    city_terms = _city_search_terms(city_query)
+    city_hints = _city_hint_terms(city_query)
     api_result = await page.evaluate(
-        """async ([cityQuery, timeoutMs]) => {
+        """async ([cityQuery, cityTerms, cityHints, timeoutMs]) => {
             const mod = window.CheckoutModule && CheckoutModule.getInstance && CheckoutModule.getInstance();
             const recipient = mod && mod.getComponentByName && mod.getComponentByName('Recipient');
             if (!recipient || !recipient.performAction || !recipient.setCity) {
                 return {ok: false, reason: 'recipient_component_unavailable'};
             }
-            const response = await new Promise((resolve) => {
-                let done = false;
-                const finish = (value) => {
-                    if (done) return;
-                    done = true;
-                    resolve(value);
-                };
-                try {
-                    const req = recipient.performAction('findCities', {term: cityQuery}, (status, data) => finish({status, data}));
-                    if (req && req.fail) {
-                        req.fail((xhr, textStatus, errorThrown) => finish({
-                            status: 'AJAX_FAIL',
-                            textStatus,
-                            error: String(errorThrown || ''),
-                            responseText: xhr && xhr.responseText ? String(xhr.responseText).slice(0, 500) : ''
-                        }));
+
+            const normalize = (value) => String(value || '').toLowerCase().replace(/[^0-9a-zа-яіїєґ]+/g, '');
+            const hintsNorm = (cityHints || []).map(normalize).filter(Boolean);
+            const allCities = [];
+            const responses = [];
+            const seen = new Set();
+
+            for (const term of cityTerms || [cityQuery]) {
+                const response = await new Promise((resolve) => {
+                    let done = false;
+                    const finish = (value) => {
+                        if (done) return;
+                        done = true;
+                        resolve(value);
+                    };
+                    try {
+                        const req = recipient.performAction('findCities', {term}, (status, data) => finish({term, status, data}));
+                        if (req && req.fail) {
+                            req.fail((xhr, textStatus, errorThrown) => finish({
+                                term,
+                                status: 'AJAX_FAIL',
+                                textStatus,
+                                error: String(errorThrown || ''),
+                                responseText: xhr && xhr.responseText ? String(xhr.responseText).slice(0, 500) : ''
+                            }));
+                        }
+                    } catch (e) {
+                        finish({term, status: 'EXCEPTION', error: String(e)});
                     }
-                } catch (e) {
-                    finish({status: 'EXCEPTION', error: String(e)});
+                    setTimeout(() => finish({term, status: 'TIMEOUT'}), timeoutMs);
+                });
+                responses.push(response);
+                const cities = response && response.data && Array.isArray(response.data.cities) ? response.data.cities : [];
+                for (const item of cities) {
+                    if (!item || !item.id || item.disabled || seen.has(String(item.id))) continue;
+                    seen.add(String(item.id));
+                    allCities.push({...item, _term: term});
                 }
-                setTimeout(() => finish({status: 'TIMEOUT'}), timeoutMs);
+            }
+
+            const scored = allCities.map((city, idx) => {
+                const text = normalize([city.label, city.NPCityDescription].filter(Boolean).join(' '));
+                let score = 0;
+                for (const hint of hintsNorm) {
+                    if (hint && text.includes(hint)) score += 100;
+                }
+                return {city, score, idx};
             });
-            const cities = response && response.data && Array.isArray(response.data.cities) ? response.data.cities : [];
-            const city = cities.find((item) => item && item.id && !item.disabled) || null;
-            if (!city) return {ok: false, reason: 'city_not_found', response};
+            scored.sort((a, b) => (b.score - a.score) || (a.idx - b.idx));
+            const city = scored.length ? scored[0].city : null;
+            if (!city) return {ok: false, reason: 'city_not_found', responses, cityTerms, cityHints};
             recipient.setCity(city.label || city.NPCityDescription || city.value || cityQuery, String(city.id), city.NPCityDescription || '');
             return {
                 ok: true,
                 city: {
                     id: String(city.id),
                     label: city.label || '',
-                    NPCityDescription: city.NPCityDescription || ''
+                    NPCityDescription: city.NPCityDescription || '',
+                    term: city._term || ''
                 },
-                responseStatus: response.status
+                cityTerms,
+                cityHints,
+                selectedScore: scored.length ? scored[0].score : 0
             };
         }""",
-        [city_query, TIMEOUT_MS],
+        [city_query, city_terms, city_hints, TIMEOUT_MS],
     )
     if isinstance(api_result, dict) and api_result.get("ok"):
         await page.wait_for_timeout(1800)
@@ -718,17 +813,20 @@ async def _select_city(page, city_query: str) -> dict:
                 "city_id": city_id,
                 "city_label": city.get("label", ""),
                 "np_city_description": city.get("NPCityDescription", ""),
+                "city_search_terms": city_terms,
+                "city_hints": city_hints,
                 "selection": "api",
             }
 
+    ui_city_query = city_terms[1] if len(city_terms) > 1 else city_query
     await city_input.click(timeout=TIMEOUT_MS)
     await city_input.fill("", timeout=TIMEOUT_MS)
-    await city_input.type(city_query, delay=35, timeout=TIMEOUT_MS)
+    await city_input.type(ui_city_query, delay=35, timeout=TIMEOUT_MS)
     await page.wait_for_timeout(1200)
 
-    option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item", has_text=f"г. {city_query}").first
+    option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item", has_text=f"г. {ui_city_query}").first
     if await option.count() == 0:
-        option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item", has_text=city_query).first
+        option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item", has_text=ui_city_query).first
     if await option.count() == 0:
         options = await page.evaluate(
             """() => Array.from(document.querySelectorAll('.ui-autocomplete.ui-menu .ui-menu-item')).map((el) => ({
@@ -757,7 +855,13 @@ async def _select_city(page, city_query: str) -> dict:
             raise StageError(
                 "fill_checkout",
                 "City autocomplete option not found.",
-                {"city_query": city_query, "api_result": api_result, "options": options},
+                {
+                    "city_query": city_query,
+                    "city_search_terms": city_terms,
+                    "city_hints": city_hints,
+                    "api_result": api_result,
+                    "options": options,
+                },
             )
     await option.click(timeout=TIMEOUT_MS)
     await page.wait_for_timeout(1800)
