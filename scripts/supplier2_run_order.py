@@ -237,6 +237,10 @@ def _normalize_city_query(city: str) -> str:
     return aliases.get(city.lower(), city)
 
 
+def _norm_match_text(value: str) -> str:
+    return re.sub(r"[^0-9a-zа-яіїєґ]+", "", str(value or "").lower())
+
+
 def _branch_number_from_value(value: Any) -> str:
     if value in (None, ""):
         return ""
@@ -656,6 +660,67 @@ async def _set_item_quantities(page, items: list[Item], added: list[dict]) -> li
 async def _select_city(page, city_query: str) -> dict:
     city_input = page.locator("#checkout-city").first
     await city_input.wait_for(state="visible", timeout=TIMEOUT_MS)
+
+    api_result = await page.evaluate(
+        """async ([cityQuery, timeoutMs]) => {
+            const mod = window.CheckoutModule && CheckoutModule.getInstance && CheckoutModule.getInstance();
+            const recipient = mod && mod.getComponentByName && mod.getComponentByName('Recipient');
+            if (!recipient || !recipient.performAction || !recipient.setCity) {
+                return {ok: false, reason: 'recipient_component_unavailable'};
+            }
+            const response = await new Promise((resolve) => {
+                let done = false;
+                const finish = (value) => {
+                    if (done) return;
+                    done = true;
+                    resolve(value);
+                };
+                try {
+                    const req = recipient.performAction('findCities', {term: cityQuery}, (status, data) => finish({status, data}));
+                    if (req && req.fail) {
+                        req.fail((xhr, textStatus, errorThrown) => finish({
+                            status: 'AJAX_FAIL',
+                            textStatus,
+                            error: String(errorThrown || ''),
+                            responseText: xhr && xhr.responseText ? String(xhr.responseText).slice(0, 500) : ''
+                        }));
+                    }
+                } catch (e) {
+                    finish({status: 'EXCEPTION', error: String(e)});
+                }
+                setTimeout(() => finish({status: 'TIMEOUT'}), timeoutMs);
+            });
+            const cities = response && response.data && Array.isArray(response.data.cities) ? response.data.cities : [];
+            const city = cities.find((item) => item && item.id && !item.disabled) || null;
+            if (!city) return {ok: false, reason: 'city_not_found', response};
+            recipient.setCity(city.label || city.NPCityDescription || city.value || cityQuery, String(city.id), city.NPCityDescription || '');
+            return {
+                ok: true,
+                city: {
+                    id: String(city.id),
+                    label: city.label || '',
+                    NPCityDescription: city.NPCityDescription || ''
+                },
+                responseStatus: response.status
+            };
+        }""",
+        [city_query, TIMEOUT_MS],
+    )
+    if isinstance(api_result, dict) and api_result.get("ok"):
+        await page.wait_for_timeout(1800)
+        city_value = (await city_input.input_value(timeout=TIMEOUT_MS)).strip()
+        city_id = await page.locator('input[name="Recipient[delivery_city_id]"]').first.input_value(timeout=TIMEOUT_MS)
+        if city_id:
+            city = api_result.get("city") if isinstance(api_result.get("city"), dict) else {}
+            return {
+                "city_query": city_query,
+                "city_value": city_value,
+                "city_id": city_id,
+                "city_label": city.get("label", ""),
+                "np_city_description": city.get("NPCityDescription", ""),
+                "selection": "api",
+            }
+
     await city_input.click(timeout=TIMEOUT_MS)
     await city_input.fill("", timeout=TIMEOUT_MS)
     await city_input.type(city_query, delay=35, timeout=TIMEOUT_MS)
@@ -665,15 +730,47 @@ async def _select_city(page, city_query: str) -> dict:
     if await option.count() == 0:
         option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item", has_text=city_query).first
     if await option.count() == 0:
-        raise StageError("fill_checkout", "City autocomplete option not found.", {"city_query": city_query})
+        options = await page.evaluate(
+            """() => Array.from(document.querySelectorAll('.ui-autocomplete.ui-menu .ui-menu-item')).map((el) => ({
+                text: (el.innerText || el.textContent || '').trim(),
+                disabled: el.classList.contains('ui-state-disabled')
+            })).filter((item) => item.text)"""
+        )
+        query_norm = _norm_match_text(city_query)
+        chosen_idx = -1
+        if isinstance(options, list):
+            for idx, item in enumerate(options):
+                if not isinstance(item, dict) or item.get("disabled"):
+                    continue
+                text_norm = _norm_match_text(str(item.get("text") or ""))
+                if query_norm and query_norm in text_norm:
+                    chosen_idx = idx
+                    break
+            if chosen_idx < 0:
+                for idx, item in enumerate(options):
+                    if isinstance(item, dict) and item.get("text") and not item.get("disabled"):
+                        chosen_idx = idx
+                        break
+        if chosen_idx >= 0:
+            option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item").nth(chosen_idx)
+        else:
+            raise StageError(
+                "fill_checkout",
+                "City autocomplete option not found.",
+                {"city_query": city_query, "api_result": api_result, "options": options},
+            )
     await option.click(timeout=TIMEOUT_MS)
     await page.wait_for_timeout(1800)
 
     city_value = (await city_input.input_value(timeout=TIMEOUT_MS)).strip()
     city_id = await page.locator('input[name="Recipient[delivery_city_id]"]').first.input_value(timeout=TIMEOUT_MS)
     if not city_id:
-        raise StageError("fill_checkout", "City id was not set after city selection.", {"city_query": city_query, "city_value": city_value})
-    return {"city_query": city_query, "city_value": city_value, "city_id": city_id}
+        raise StageError(
+            "fill_checkout",
+            "City id was not set after city selection.",
+            {"city_query": city_query, "city_value": city_value, "api_result": api_result},
+        )
+    return {"city_query": city_query, "city_value": city_value, "city_id": city_id, "selection": "ui"}
 
 
 async def _select_payment_cod(page) -> dict:

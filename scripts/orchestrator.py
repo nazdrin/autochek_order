@@ -41,6 +41,17 @@ from supplier7_email_supplier import (
     supplier7_dry_run_enabled,
     supplier7_number_sup_value,
 )
+from supplier63_vitaworld_telegram import (
+    build_vitaworld_message,
+    build_vitaworld_salesdrive_products,
+    download_vitaworld_label_pdf,
+    parse_vitaworld_items,
+    send_vitaworld_telegram,
+    vitaworld_dry_run_enabled,
+    vitaworld_number_sup_value,
+    vitaworld_tg_bot_token,
+    vitaworld_tg_chat_id,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -65,6 +76,7 @@ SUP4_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier4_run_order.py"
 SUP6_RUN_ORDER_SCRIPT = ROOT / "scripts" / "supplier6_run_order.py"
 SUP5_ZOOHUB_SCRIPT = ROOT / "scripts" / "supplier5_zoohub.py"
 SUP7_EMAIL_SUPPLIER_SCRIPT = ROOT / "scripts" / "supplier7_email_supplier.py"
+SUP63_VITAWORLD_TELEGRAM_SCRIPT = ROOT / "scripts" / "supplier63_vitaworld_telegram.py"
 SUP2_EXPORT_PRODUCTS_SCRIPT = ROOT / "scripts" / "supplier2_export_products.py"
 
 
@@ -224,9 +236,10 @@ ORCH_SUP6_HEADLESS = (os.getenv("ORCH_SUP6_HEADLESS") or ORCH_HEADLESS or "1").s
 ORCH_SUP6_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP6_STORAGE_STATE_FILE") or ".state_supplier6.json").strip()
 ORCH_SUP5_SUPPLIERLIST = int(os.getenv("ORCH_SUP5_SUPPLIERLIST", "47"))
 ORCH_SUP7_SUPPLIERLIST = int(os.getenv("ORCH_SUP7_SUPPLIERLIST", "48"))
-ORCH_EXPORT_DOBAVKI_ENABLED = (os.getenv("ORCH_EXPORT_DOBAVKI_ENABLED") or "1").strip()
+ORCH_VITAWORLD_SUPPLIERLIST = int(os.getenv("ORCH_VITAWORLD_SUPPLIERLIST", "63"))
+ORCH_EXPORT_DOBAVKI_ENABLED = (os.getenv("ORCH_EXPORT_DOBAVKI_ENABLED") or "0").strip()
 ORCH_EXPORT_DOBAVKI_EVERY_MIN = int((os.getenv("ORCH_EXPORT_DOBAVKI_EVERY_MIN") or "720").strip())
-ORCH_EXPORT_DOBAVKI_AFTER_RUN = (os.getenv("ORCH_EXPORT_DOBAVKI_AFTER_RUN") or "1").strip()
+ORCH_EXPORT_DOBAVKI_AFTER_RUN = (os.getenv("ORCH_EXPORT_DOBAVKI_AFTER_RUN") or "0").strip()
 ORCH_EXPORT_DOBAVKI_TIMEOUT_SEC = int((os.getenv("ORCH_EXPORT_DOBAVKI_TIMEOUT_SEC") or "240").strip())
 ORCH_LOCK_FILE = Path(os.getenv("ORCH_LOCK_FILE", str(ROOT / ".orchestrator.lock")))
 RUN_INSTANCE_ID = uuid.uuid4().hex[:12]
@@ -637,6 +650,7 @@ def load_state() -> Dict[str, Any]:
             "biotus_submitted_orders": {},
             "zoohub_sent": {},
             "supplier7_sent": {},
+            "vitaworld_sent": {},
             "last_dobavki_export_ts": 0,
         }
     try:
@@ -682,6 +696,10 @@ def load_state() -> Dict[str, Any]:
         if not isinstance(supplier7_sent, dict):
             supplier7_sent = {}
         data["supplier7_sent"] = supplier7_sent
+        vitaworld_sent = data.get("vitaworld_sent")
+        if not isinstance(vitaworld_sent, dict):
+            vitaworld_sent = {}
+        data["vitaworld_sent"] = vitaworld_sent
         try:
             data["last_dobavki_export_ts"] = int(data.get("last_dobavki_export_ts") or 0)
         except Exception:
@@ -695,6 +713,7 @@ def load_state() -> Dict[str, Any]:
             "biotus_submitted_orders": {},
             "zoohub_sent": {},
             "supplier7_sent": {},
+            "vitaworld_sent": {},
             "last_dobavki_export_ts": 0,
         }
 def _now_ts() -> int:
@@ -765,6 +784,11 @@ def is_supplier6_order(order: Dict[str, Any]) -> bool:
 def is_supplier7_order(order: Dict[str, Any]) -> bool:
     supplierlist, _ = parse_order_supplierlist(order)
     return supplierlist == ORCH_SUP7_SUPPLIERLIST
+
+
+def is_vitaworld_order(order: Dict[str, Any]) -> bool:
+    supplierlist, _ = parse_order_supplierlist(order)
+    return supplierlist == ORCH_VITAWORLD_SUPPLIERLIST
 
 
 # Helpers for terminal/attempts
@@ -2003,6 +2027,103 @@ def process_one_supplier7_order(order: Dict[str, Any], state: Dict[str, Any]) ->
     )
 
 
+def process_one_vitaworld_order(order: Dict[str, Any], state: Dict[str, Any]) -> None:
+    order_id = order.get("id")
+    try:
+        order_id_int = int(order_id)
+    except Exception:
+        raise RuntimeError(f"Invalid order id: {order_id}")
+
+    tracking_number = extract_tracking_number(order)
+    if not tracking_number:
+        raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для VITAWORLD_TTN.")
+
+    items = parse_vitaworld_items(order)
+    products_payload = build_vitaworld_salesdrive_products(order)
+    message = build_vitaworld_message(tracking_number, items)
+    dry_run = vitaworld_dry_run_enabled()
+    number_sup_value = vitaworld_number_sup_value()
+    done_status_id = 4
+
+    sent_map: Dict[str, Any] = state.setdefault("vitaworld_sent", {})
+    sent_key = str(order_id_int)
+    sent_entry = sent_map.get(sent_key)
+    if isinstance(sent_entry, dict):
+        print(
+            f"[ORCH] Vitaworld Telegram already sent for order_id={order_id_int}; "
+            "skip send and retry status update only."
+        )
+        salesdrive_update_status(
+            order_id_int,
+            done_status_id,
+            number_sup=number_sup_value,
+            products=products_payload,
+        )
+        print(
+            f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={done_status_id}, numberSup={number_sup_value}"
+        )
+        return
+
+    if dry_run:
+        chat_id = vitaworld_tg_chat_id()
+        print(
+            f"[ORCH] VITAWORLD_DRY_RUN=1: would send Telegram order_id={order_id_int} "
+            f"chat_id={chat_id} ttn={tracking_number} items={len(items)}"
+        )
+        print(message)
+        return
+
+    try:
+        with np_api_key_env_for_order(order):
+            pdf_path = download_vitaworld_label_pdf(tracking_number)
+    except Exception as e:
+        raise StepError("vitaworld_label_download", f"Label download failed: {e}") from e
+
+    try:
+        token = vitaworld_tg_bot_token()
+        chat_id = vitaworld_tg_chat_id()
+        send_vitaworld_telegram(token=token, chat_id=chat_id, text=message, pdf_path=pdf_path)
+    except Exception as e:
+        raise StepError("vitaworld_telegram_send", str(e)) from e
+
+    sent_map[sent_key] = {
+        "ts": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+        "ttn": tracking_number,
+        "chat_id": chat_id,
+        "pdf": str(pdf_path),
+    }
+    state["vitaworld_sent"] = sent_map
+    save_state(state)
+
+    try:
+        salesdrive_update_status(
+            order_id_int,
+            done_status_id,
+            number_sup=number_sup_value,
+            products=products_payload,
+        )
+    except Exception as e:
+        raise StepError("vitaworld_status_update", str(e)) from e
+
+    print(
+        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={done_status_id}, numberSup={number_sup_value}"
+    )
+
+    delete_label = (os.getenv("VITAWORLD_DELETE_LABEL_AFTER_SEND") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    pdf_path_str = str(pdf_path)
+    if delete_label and pdf_path_str:
+        try:
+            Path(pdf_path_str).unlink(missing_ok=True)
+            print(f"[ORCH] Vitaworld label deleted after send: {pdf_path_str}")
+        except Exception:
+            pass
+
+
 def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None) -> bool:
     supplier = str(order.get("supplier") or "").strip()
     supplierlist, err = parse_order_supplierlist(order)
@@ -2038,6 +2159,12 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
         if state is None:
             raise RuntimeError("state is required for supplierlist=48")
         process_one_supplier7_order(order, state)
+        return True
+
+    if supplierlist == ORCH_VITAWORLD_SUPPLIERLIST:
+        if state is None:
+            raise RuntimeError("state is required for supplierlist=63")
+        process_one_vitaworld_order(order, state)
         return True
 
     if supplierlist == ORCH_SUP6_SUPPLIERLIST:
@@ -2150,6 +2277,7 @@ def main() -> int:
         ("Supplier6 run order script", SUP6_RUN_ORDER_SCRIPT),
         ("Supplier5 Zoohub script", SUP5_ZOOHUB_SCRIPT),
         ("Supplier7 email supplier script", SUP7_EMAIL_SUPPLIER_SCRIPT),
+        ("Supplier63 Vitaworld Telegram script", SUP63_VITAWORLD_TELEGRAM_SCRIPT),
         ("Step2_3 script", STEP2_3_SCRIPT),
         ("Step4 script", STEP4_SCRIPT),
         ("Step5 drop tab script", STEP5_DROP_TAB_SCRIPT),
@@ -2180,6 +2308,7 @@ def main() -> int:
     state.setdefault("in_progress_orders", {})
     state.setdefault("zoohub_sent", {})
     state.setdefault("supplier7_sent", {})
+    state.setdefault("vitaworld_sent", {})
     state.setdefault("last_dobavki_export_ts", 0)
     processed_ids: List[int] = state.get("processed_ids", [])
 
@@ -2313,6 +2442,11 @@ def main() -> int:
                             print(f"[ORCH] Routing => Zoohub (supplierlist={ORCH_SUP5_SUPPLIERLIST}, supplier={supplier!r})")
                         elif supplierlist == ORCH_SUP7_SUPPLIERLIST:
                             print(f"[ORCH] Routing => Supplier7 email (supplierlist={ORCH_SUP7_SUPPLIERLIST}, supplier={supplier!r})")
+                        elif supplierlist == ORCH_VITAWORLD_SUPPLIERLIST:
+                            print(
+                                f"[ORCH] Routing => Vitaworld Telegram "
+                                f"(supplierlist={ORCH_VITAWORLD_SUPPLIERLIST}, supplier={supplier!r})"
+                            )
                         elif supplierlist == ORCH_SUP6_SUPPLIERLIST:
                             sup6_items = build_sup6_items(order)
                             print(f"[ORCH] Routing => ProteinPlus (supplierlist={ORCH_SUP6_SUPPLIERLIST}, supplier={supplier!r})")
@@ -2365,6 +2499,8 @@ def main() -> int:
                             if is_supplier5_order(order) and step in {"zoohub_email_send"}:
                                 force_terminal = True
                             if is_supplier7_order(order) and step in {"supplier7_email_send"}:
+                                force_terminal = True
+                            if is_vitaworld_order(order) and step in {"vitaworld_telegram_send"}:
                                 force_terminal = True
                             if is_supplier6_order(order) and step in {"submit_order", "step7_submit_order"}:
                                 force_terminal = True
