@@ -1090,7 +1090,7 @@ async def _select_delivery_method(page, recipient: Recipient) -> dict:
     meta = await page.evaluate(
         """(targetWords) => {
             const selects = Array.from(document.querySelectorAll('select'));
-            const candidates = selects.map((sel) => {
+            const toRow = (sel) => {
                 const options = Array.from(sel.options).map((o) => ({value: o.value, text: o.text, selected: o.selected}));
                 const text = options.map((o) => o.text).join(' | ').toLowerCase();
                 const option = options.find((o) => targetWords.some((word) => String(o.text || '').toLowerCase().includes(word)));
@@ -1103,41 +1103,66 @@ async def _select_delivery_method(page, recipient: Recipient) -> dict:
                     optionCount: options.length,
                     text
                 };
-            }).filter((row) => row.option
+            };
+            const byName = selects.find((sel) => sel.name === 'Delivery[delivery_type]' || sel.id === 'checkout-delivery-type');
+            if (byName) return toRow(byName);
+            const candidates = selects.map(toRow).filter((row) => row.option
                 && row.optionCount > 1
                 && row.optionCount <= 10
-                && /отделение|відділення|поштомат|почтомат|новой почты|нової пошти/.test(row.text));
+                && /курьер|кур'єр|отделение|відділення|поштомат|почтомат|новой почты|нової пошти/.test(row.text));
             return candidates[0] || {option: null, selectCount: selects.length};
         }""",
         target_words,
     )
     option = meta.get("option") if isinstance(meta, dict) else None
     if not option:
-        if recipient.delivery_kind == "warehouse":
-            return {"kind": recipient.delivery_kind, "selected": False, "reason": "method_select_not_found"}
         raise StageError(
             "fill_checkout",
-            "Postomat delivery method option not found.",
+            "Delivery method option not found.",
             {"delivery_kind": recipient.delivery_kind, "branch_query": recipient.branch_query, "meta": meta},
         )
 
-    if str(meta.get("current") or "") != str(option.get("value") or ""):
-        await page.evaluate(
-            """([name, value]) => {
-                const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
-                if (!sel) throw new Error('delivery method select not found');
-                sel.value = value;
-                sel.dispatchEvent(new Event('change', {bubbles: true}));
-            }""",
-            [meta["name"], str(option["value"])],
+    await page.evaluate(
+        """([name, value]) => {
+            const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
+            if (!sel) throw new Error('delivery method select not found');
+            sel.value = value;
+            sel.dispatchEvent(new Event('change', {bubbles: true}));
+        }""",
+        [meta["name"], str(option["value"])],
+    )
+    await page.wait_for_timeout(1800)
+
+    selected = await page.evaluate(
+        """(name) => {
+            const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
+            if (!sel) return {value: '', text: ''};
+            return {
+                value: sel.value,
+                text: sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : ''
+            };
+        }""",
+        meta["name"],
+    )
+    selected_text = str((selected or {}).get("text") or "")
+    if str((selected or {}).get("value") or "") != str(option.get("value") or ""):
+        raise StageError(
+            "fill_checkout",
+            "Delivery method selection did not stick.",
+            {"expected": option, "selected": selected, "meta": meta},
         )
-        await page.wait_for_timeout(1800)
+    if not any(word in selected_text.lower() for word in target_words):
+        raise StageError(
+            "fill_checkout",
+            "Delivery method final validation failed.",
+            {"delivery_kind": recipient.delivery_kind, "expected_words": target_words, "selected": selected, "meta": meta},
+        )
 
     return {
         "kind": recipient.delivery_kind,
         "selected": True,
-        "value": option.get("value", ""),
-        "text": option.get("text", ""),
+        "value": (selected or {}).get("value", ""),
+        "text": selected_text,
         "name": meta.get("name", ""),
     }
 
