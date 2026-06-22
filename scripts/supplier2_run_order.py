@@ -432,6 +432,52 @@ def _delivery_kind_from_delivery(delivery: dict[str, Any], branch_query: str) ->
     return "warehouse"
 
 
+def _normalize_delivery_text(value: str) -> str:
+    text = _ru_city_variant(str(value or "").lower())
+    replacements = (
+        ("вулиця", "ул"),
+        ("вул.", "ул"),
+        ("вул ", "ул "),
+        ("улица", "ул"),
+        ("проспект", "просп"),
+        ("пр-т", "просп"),
+        ("провулок", "пер"),
+        ("переулок", "пер"),
+    )
+    for src, dst in replacements:
+        text = text.replace(src, dst)
+    return re.sub(r"[^0-9a-zа-яіїєґ]+", "", text)
+
+
+def _delivery_number_matches(text: str, branch_number: str) -> bool:
+    number = str(branch_number or "").strip()
+    if not number:
+        return False
+    return bool(re.search(rf"(?:№|#)\s*{re.escape(number)}(?!\d)", str(text or ""), flags=re.IGNORECASE))
+
+
+def _validate_selected_delivery_text(
+    *,
+    selected_text: str,
+    recipient: Recipient,
+    match_reason: str,
+    np_lookup: dict[str, Any],
+) -> dict[str, Any]:
+    if _delivery_number_matches(selected_text, recipient.branch_number):
+        return {"valid": True, "reason": "branch_number", "score": None, "hits": []}
+
+    tokens = np_lookup.get("tokens") if isinstance(np_lookup, dict) else []
+    token_norms = _unique_nonempty(
+        [_normalize_delivery_text(str(token or "")) for token in tokens if _normalize_delivery_text(str(token or ""))]
+    )
+    selected_norm = _normalize_delivery_text(selected_text)
+    hits = [token for token in token_norms if len(token) >= 4 and token in selected_norm]
+    if match_reason == "np_address" and len(hits) >= 2:
+        return {"valid": True, "reason": "np_address", "score": len(hits), "hits": hits}
+
+    return {"valid": False, "reason": match_reason or "unmatched", "score": len(hits), "hits": hits}
+
+
 def _extract_recipient(order: dict[str, Any]) -> Recipient:
     delivery = _first_delivery(order)
     env_name = (os.getenv("SUP2_CUSTOMER_NAME") or "").strip()
@@ -1196,11 +1242,33 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
     )
     if str(option["text"]) != str(selected_text):
         raise StageError("fill_checkout", "Warehouse selection did not stick.", {"expected": option, "selected_text": selected_text})
+    validation = _validate_selected_delivery_text(
+        selected_text=selected_text,
+        recipient=recipient,
+        match_reason=str(meta.get("matchReason") or ""),
+        np_lookup=np_lookup,
+    )
+    if not validation.get("valid"):
+        raise StageError(
+            "fill_checkout",
+            "Selected delivery point failed final validation.",
+            {
+                "selected_text": selected_text,
+                "branch_number": recipient.branch_number,
+                "branch_query": recipient.branch_query,
+                "delivery_kind": recipient.delivery_kind,
+                "match_reason": meta.get("matchReason", ""),
+                "validation": validation,
+                "np_lookup": np_lookup,
+                "meta": meta,
+            },
+        )
     return {
         "value": option["value"],
         "text": selected_text,
         "branch_number": recipient.branch_number,
         "match_reason": meta.get("matchReason", ""),
+        "validation": validation,
         "np_lookup": np_lookup if meta.get("matchReason") == "np_address" else {},
     }
 
