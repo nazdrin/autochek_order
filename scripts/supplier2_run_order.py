@@ -4,6 +4,8 @@ import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,12 @@ CLEAR_BASKET = _to_bool(os.getenv("SUP2_CLEAR_BASKET", "1"), True)
 DEBUG_PAUSE_SECONDS = _to_int(os.getenv("SUP2_DEBUG_PAUSE_SECONDS", "0"), 0)
 DRY_RUN = _to_bool(os.getenv("SUP2_DRY_RUN", "0"), False)
 PROMO_CODE = (os.getenv("SUP2_PROMO_CODE") or "SALE15").strip()
+NP_API_KEY = (
+    os.getenv("SUP2_NP_API_KEY")
+    or os.getenv("BIOTUS_NP_API_KEY")
+    or os.getenv("NP_API_KEY")
+    or ""
+).strip()
 
 
 @dataclass(frozen=True)
@@ -305,6 +313,70 @@ def _city_hint_terms(city: str) -> list[str]:
     return _unique_nonempty(expanded)
 
 
+def _np_warehouse_lookup(city_name: str, branch_number: str) -> dict[str, Any]:
+    if not NP_API_KEY or not city_name or not branch_number:
+        return {"ok": False, "reason": "np_lookup_unavailable"}
+    payload = {
+        "apiKey": NP_API_KEY,
+        "modelName": "AddressGeneral",
+        "calledMethod": "getWarehouses",
+        "methodProperties": {
+            "CityName": city_name,
+            "FindByString": str(branch_number),
+            "Page": "1",
+            "Limit": "50",
+        },
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.novaposhta.ua/v2.0/json/",
+        data=data,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+        return {"ok": False, "reason": "np_lookup_error", "error": str(e)}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {"ok": False, "reason": "np_lookup_non_json", "raw": raw[:300]}
+    if not parsed.get("success"):
+        return {"ok": False, "reason": "np_lookup_failed", "errors": parsed.get("errors"), "warnings": parsed.get("warnings")}
+    wanted = str(branch_number).strip()
+    rows = parsed.get("data") if isinstance(parsed.get("data"), list) else []
+    exact = None
+    for row in rows:
+        if str((row or {}).get("Number") or "").strip() == wanted:
+            exact = row
+            break
+    if not exact:
+        return {"ok": False, "reason": "np_branch_not_found", "count": len(rows)}
+    text = " ".join(
+        str(exact.get(key) or "")
+        for key in ("Description", "DescriptionRu", "ShortAddress", "ShortAddressRu")
+    )
+    generic_tokens = {"відділення", "отделение", "пункт", "прим", "одеса", "одесса"}
+    tokens: list[str] = []
+    for token in re.split(r"[\s,.;:/()\"«»]+", text):
+        token = token.strip()
+        token_norm = _ru_city_variant(token.lower()).strip("№#")
+        if len(token_norm) < 4 or token_norm.isdigit() or token.startswith(("№", "#")):
+            continue
+        if token_norm in generic_tokens:
+            continue
+        tokens.append(token)
+    return {
+        "ok": True,
+        "number": str(exact.get("Number") or ""),
+        "description": str(exact.get("Description") or ""),
+        "short_address": str(exact.get("ShortAddress") or ""),
+        "tokens": _unique_nonempty(tokens),
+    }
+
+
 def _branch_number_from_value(value: Any) -> str:
     if value in (None, ""):
         return ""
@@ -428,7 +500,7 @@ async def _open_product_candidate(page, sku: str, href: str, result_text: str = 
     await _safe_wait_networkidle(page)
 
     body_text = await page.locator("body").inner_text(timeout=TIMEOUT_MS)
-    if sku not in body_text:
+    if str(sku or "").strip().lower() not in body_text.lower():
         return None
 
     h1 = ""
@@ -442,20 +514,28 @@ async def _open_product_candidate(page, sku: str, href: str, result_text: str = 
 async def _find_product_via_search_page(page, sku: str) -> dict[str, str]:
     await _goto_retry(page, f"{BASE_URL}/catalog/search/?q={sku}")
     candidates = await page.evaluate(
-        """() => Array.from(document.querySelectorAll('main .catalogCard-title a[href], main .catalogCard a[href], main a[href]')).map((a) => ({
-            text: (a.innerText || '').replace(/\\s+/g, ' ').trim(),
-            href: a.href || ''
-        })).filter((x) => {
-            if (!x.href || !x.text) return false;
-            if (x.href.includes('/catalog/search')) return false;
-            if (x.href.includes('/filter/')) return false;
-            if (x.href.includes('#')) return false;
-            if (/^(🌿?Каталог|О нас|Контакты|Блог|Оплата|Отзывы|Политика|Обмен|Договор|Система|DOBAVKI|Витамины оптом|Партнерская|Подбор)/i.test(x.text)) return false;
-            return x.href.startsWith(location.origin + '/');
-        })"""
+        """() => {
+            const out = [];
+            const push = (a) => {
+                if (!a) return;
+                const text = (a.innerText || a.textContent || '').replace(/\\s+/g, ' ').trim();
+                const href = a.href || '';
+                if (!href || !text) return;
+                if (href.includes('/catalog/search') || href.includes('/filter/') || href.includes('#')) return;
+                if (!href.startsWith(location.origin + '/')) return;
+                out.push({text, href});
+            };
+            for (const card of Array.from(document.querySelectorAll('main .catalogCard'))) {
+                push(card.querySelector('.catalogCard-title a[href]') || card.querySelector('a[href]'));
+            }
+            if (!out.length) {
+                for (const a of Array.from(document.querySelectorAll('main .catalogCard-title a[href]'))) push(a);
+            }
+            return out;
+        }"""
     )
     seen: set[str] = set()
-    for candidate in candidates[:20]:
+    for candidate in candidates[:3]:
         href = str(candidate.get("href") or "")
         if not href or href in seen:
             continue
@@ -463,10 +543,15 @@ async def _find_product_via_search_page(page, sku: str) -> dict[str, str]:
         product = await _open_product_candidate(page, sku, href, str(candidate.get("text") or ""))
         if product:
             return product
-    raise StageError("add_items", f"No exact product page found for sku={sku}", {"sku": sku, "candidates": candidates[:20]})
+    raise StageError("add_items", f"No exact product page found for sku={sku}", {"sku": sku, "candidates": candidates[:10]})
 
 
 async def _search_and_open_product(page, sku: str) -> dict[str, str]:
+    try:
+        return await _find_product_via_search_page(page, sku)
+    except StageError as search_page_error:
+        search_page_details = search_page_error.details
+
     await _goto_retry(page, HOME_URL)
     search = page.locator("input[name='q']").first
     await search.wait_for(state="visible", timeout=TIMEOUT_MS)
@@ -479,7 +564,11 @@ async def _search_and_open_product(page, sku: str) -> dict[str, str]:
     product = await _open_product_candidate(page, sku, href, results[0].get("text", ""))
     if product:
         return product
-    return await _find_product_via_search_page(page, sku)
+    raise StageError(
+        "add_items",
+        f"No exact product page found for sku={sku}",
+        {"sku": sku, "quick_results": results[:10], "search_page": search_page_details},
+    )
 
 
 async def _wait_ajax_cart_product(page, product_id: str) -> dict:
@@ -905,21 +994,53 @@ async def _select_payment_cod(page) -> dict:
 async def _select_warehouse(page, recipient: Recipient) -> dict:
     deadline = asyncio.get_running_loop().time() + (TIMEOUT_MS / 1000.0)
     meta: dict[str, Any] = {}
+    np_lookup = _np_warehouse_lookup(recipient.city_query, recipient.branch_number)
     while asyncio.get_running_loop().time() < deadline:
         meta = await page.evaluate(
-            """([branchNumber, branchQuery]) => {
+            """([branchNumber, branchQuery, npLookup]) => {
                 const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name.includes('warehouse.id'));
                 if (!sel) return {found: false};
                 const options = Array.from(sel.options).map((o) => ({value: o.value, text: o.text, selected: o.selected}));
                 const num = String(branchNumber || '').trim();
                 const query = String(branchQuery || '').trim().toLowerCase();
+                const normalize = (value) => String(value || '')
+                    .toLowerCase()
+                    .replace(/вулиця|улица/g, 'ул')
+                    .replace(/вул\\.?/g, 'ул')
+                    .replace(/проспект|пр-т/g, 'просп')
+                    .replace(/провулок|переулок/g, 'пер')
+                    .replace(/[^0-9a-zа-яіїєґ]+/g, '');
                 let option = null;
+                let matchReason = '';
+                let addressMatches = [];
                 if (num) {
                     const re = new RegExp(`(?:Отделение|Відділення|Пункт)\\\\s*№${num}(?!\\\\d)`, 'i');
                     option = options.find((o) => re.test(o.text));
+                    if (option) matchReason = 'branch_number';
                 }
                 if (!option && query) {
                     option = options.find((o) => o.text.toLowerCase().includes(query));
+                    if (option) matchReason = 'branch_query';
+                }
+                if (!option && npLookup && npLookup.ok && Array.isArray(npLookup.tokens)) {
+                    const tokenNorms = Array.from(new Set(npLookup.tokens.map(normalize).filter((token) => token.length >= 4)));
+                    const scored = options.map((o) => {
+                        const text = normalize(o.text);
+                        const hits = tokenNorms.filter((token) => text.includes(token));
+                        return {option: o, hits, score: hits.length};
+                    }).filter((row) => row.score > 0);
+                    scored.sort((a, b) => b.score - a.score);
+                    addressMatches = scored.slice(0, 5).map((row) => ({
+                        text: row.option.text,
+                        value: row.option.value,
+                        hits: row.hits,
+                        score: row.score
+                    }));
+                    const best = scored[0];
+                    if (best && (best.score >= 2 || best.hits.some((hit) => hit.length >= 7))) {
+                        option = best.option;
+                        matchReason = 'np_address';
+                    }
                 }
                 return {
                     found: true,
@@ -928,10 +1049,13 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
                     current: sel.value,
                     selectedText: sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '',
                     option,
-                    optionCount: options.length
+                    optionCount: options.length,
+                    matchReason,
+                    npLookup,
+                    addressMatches
                 };
             }""",
-            [recipient.branch_number, recipient.branch_query],
+            [recipient.branch_number, recipient.branch_query, np_lookup],
         )
         if meta.get("found") and meta.get("option"):
             break
@@ -943,7 +1067,7 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
         raise StageError(
             "fill_checkout",
             "Warehouse option not found.",
-            {"branch_number": recipient.branch_number, "branch_query": recipient.branch_query, "meta": meta},
+            {"branch_number": recipient.branch_number, "branch_query": recipient.branch_query, "np_lookup": np_lookup, "meta": meta},
         )
 
     warehouse = page.locator(f'select[name="{meta["name"]}"]').first
@@ -967,7 +1091,13 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
     )
     if str(option["text"]) != str(selected_text):
         raise StageError("fill_checkout", "Warehouse selection did not stick.", {"expected": option, "selected_text": selected_text})
-    return {"value": option["value"], "text": selected_text, "branch_number": recipient.branch_number}
+    return {
+        "value": option["value"],
+        "text": selected_text,
+        "branch_number": recipient.branch_number,
+        "match_reason": meta.get("matchReason", ""),
+        "np_lookup": np_lookup if meta.get("matchReason") == "np_address" else {},
+    }
 
 
 async def _apply_coupon(page) -> dict:
