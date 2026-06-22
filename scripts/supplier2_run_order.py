@@ -71,6 +71,7 @@ class Recipient:
     city_query: str
     branch_number: str
     branch_query: str
+    delivery_kind: str
     email: str = ""
 
 
@@ -358,14 +359,44 @@ def _np_warehouse_lookup(city_name: str, branch_number: str) -> dict[str, Any]:
         str(exact.get(key) or "")
         for key in ("Description", "DescriptionRu", "ShortAddress", "ShortAddressRu")
     )
-    generic_tokens = {"відділення", "отделение", "пункт", "прим", "одеса", "одесса"}
+    city_tokens = {
+        _ru_city_variant(token.lower()).strip("№#")
+        for token in re.split(
+            r"[\s,.;:/()\"«»]+",
+            " ".join(
+                str(value or "")
+                for value in (
+                    city_name,
+                    _ru_city_variant(city_name),
+                    exact.get("CityDescription"),
+                    exact.get("CityDescriptionRu"),
+                    exact.get("SettlementDescription"),
+                    exact.get("SettlementDescriptionRu"),
+                )
+            ),
+        )
+        if len(token) >= 4
+    }
+    generic_tokens = {
+        "відділення",
+        "отделение",
+        "пункт",
+        "прим",
+        "поштомат",
+        "почтомат",
+        "нова",
+        "новая",
+        "пошта",
+        "почта",
+        "магазин",
+    }
     tokens: list[str] = []
     for token in re.split(r"[\s,.;:/()\"«»]+", text):
         token = token.strip()
         token_norm = _ru_city_variant(token.lower()).strip("№#")
         if len(token_norm) < 4 or token_norm.isdigit() or token.startswith(("№", "#")):
             continue
-        if token_norm in generic_tokens:
+        if token_norm in generic_tokens or token_norm in city_tokens:
             continue
         tokens.append(token)
     return {
@@ -386,6 +417,21 @@ def _branch_number_from_value(value: Any) -> str:
         return str(value).strip()
 
 
+def _delivery_kind_from_delivery(delivery: dict[str, Any], branch_query: str) -> str:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            branch_query,
+            delivery.get("address"),
+            delivery.get("shipping_address"),
+            delivery.get("type"),
+        )
+    ).lower()
+    if "поштомат" in text or "почтомат" in text or "postomat" in text:
+        return "postomat"
+    return "warehouse"
+
+
 def _extract_recipient(order: dict[str, Any]) -> Recipient:
     delivery = _first_delivery(order)
     env_name = (os.getenv("SUP2_CUSTOMER_NAME") or "").strip()
@@ -400,6 +446,7 @@ def _extract_recipient(order: dict[str, Any]) -> Recipient:
     city_raw = env_city or str(delivery.get("cityName") or "").strip()
     branch_number = env_branch or _branch_number_from_value(delivery.get("branchNumber"))
     branch_query = env_branch_query or str(delivery.get("address") or "").strip()
+    delivery_kind = _delivery_kind_from_delivery(delivery, branch_query)
     email = env_email or _first_email_from_order(order)
 
     missing = []
@@ -421,6 +468,7 @@ def _extract_recipient(order: dict[str, Any]) -> Recipient:
         city_query=_normalize_city_query(city_raw),
         branch_number=branch_number,
         branch_query=branch_query,
+        delivery_kind=delivery_kind,
         email=email,
     )
 
@@ -991,6 +1039,63 @@ async def _select_payment_cod(page) -> dict:
     return {"value": value, "text": text}
 
 
+async def _select_delivery_method(page, recipient: Recipient) -> dict:
+    target_words = ["поштомат", "почтомат"] if recipient.delivery_kind == "postomat" else ["отделение", "відділення"]
+    meta = await page.evaluate(
+        """(targetWords) => {
+            const selects = Array.from(document.querySelectorAll('select'));
+            const candidates = selects.map((sel) => {
+                const options = Array.from(sel.options).map((o) => ({value: o.value, text: o.text, selected: o.selected}));
+                const text = options.map((o) => o.text).join(' | ').toLowerCase();
+                const option = options.find((o) => targetWords.some((word) => String(o.text || '').toLowerCase().includes(word)));
+                return {
+                    name: sel.name,
+                    id: sel.id,
+                    current: sel.value,
+                    selectedText: sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '',
+                    option,
+                    optionCount: options.length,
+                    text
+                };
+            }).filter((row) => row.option
+                && row.optionCount > 1
+                && row.optionCount <= 10
+                && /отделение|відділення|поштомат|почтомат|новой почты|нової пошти/.test(row.text));
+            return candidates[0] || {option: null, selectCount: selects.length};
+        }""",
+        target_words,
+    )
+    option = meta.get("option") if isinstance(meta, dict) else None
+    if not option:
+        if recipient.delivery_kind == "warehouse":
+            return {"kind": recipient.delivery_kind, "selected": False, "reason": "method_select_not_found"}
+        raise StageError(
+            "fill_checkout",
+            "Postomat delivery method option not found.",
+            {"delivery_kind": recipient.delivery_kind, "branch_query": recipient.branch_query, "meta": meta},
+        )
+
+    if str(meta.get("current") or "") != str(option.get("value") or ""):
+        await page.evaluate(
+            """([name, value]) => {
+                const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
+                if (!sel) throw new Error('delivery method select not found');
+                sel.value = value;
+                sel.dispatchEvent(new Event('change', {bubbles: true}));
+            }""",
+            [meta["name"], str(option["value"])],
+        )
+        await page.wait_for_timeout(1800)
+
+    return {
+        "kind": recipient.delivery_kind,
+        "selected": True,
+        "value": option.get("value", ""),
+        "text": option.get("text", ""),
+        "name": meta.get("name", ""),
+    }
+
+
 async def _select_warehouse(page, recipient: Recipient) -> dict:
     deadline = asyncio.get_running_loop().time() + (TIMEOUT_MS / 1000.0)
     meta: dict[str, Any] = {}
@@ -1014,7 +1119,7 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
                 let matchReason = '';
                 let addressMatches = [];
                 if (num) {
-                    const re = new RegExp(`(?:Отделение|Відділення|Пункт)\\\\s*№${num}(?!\\\\d)`, 'i');
+                    const re = new RegExp(`(?:Отделение|Відділення|Пункт|Поштомат|Почтомат)\\\\s*№${num}(?!\\\\d)`, 'i');
                     option = options.find((o) => re.test(o.text));
                     if (option) matchReason = 'branch_number';
                 }
@@ -1037,7 +1142,7 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
                         score: row.score
                     }));
                     const best = scored[0];
-                    if (best && (best.score >= 2 || best.hits.some((hit) => hit.length >= 7))) {
+                    if (best && best.score >= 2) {
                         option = best.option;
                         matchReason = 'np_address';
                     }
@@ -1181,6 +1286,7 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
 
     city = await _select_city(page, recipient.city_query)
     payment = await _select_payment_cod(page)
+    delivery_method = await _select_delivery_method(page, recipient)
     warehouse = await _select_warehouse(page, recipient)
     coupon = await _apply_coupon(page)
     customer = await _fill_recipient_fields(page, recipient)
@@ -1194,7 +1300,7 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
     totals = await _read_totals(page)
     return {
         "customer": customer,
-        "delivery": {"city": city, "warehouse": warehouse},
+        "delivery": {"city": city, "method": delivery_method, "warehouse": warehouse},
         "payment": payment,
         "coupon": coupon,
         "rows": rows,
