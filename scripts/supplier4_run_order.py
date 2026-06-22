@@ -545,19 +545,50 @@ async def _login(page) -> None:
         await email.wait_for(state="visible", timeout=min(7000, SUP4_TIMEOUT_MS))
         await email.fill(SUP4_LOGIN_EMAIL)
         await passwd.fill(SUP4_LOGIN_PASSWORD)
+        try:
+            await page.wait_for_function(
+                """() => Boolean(
+                    window.grecaptcha
+                    && window.horoshopReCaptcha
+                    && document.querySelector("#login_form_id textarea[name='g-recaptcha-response']")
+                    && document.querySelector("#login_form_id iframe[src*='recaptcha']")
+                )""",
+                timeout=min(8000, SUP4_TIMEOUT_MS),
+            )
+            await page.wait_for_timeout(800)
+        except Exception:
+            print("[SUP4] login warning: reCAPTCHA widget readiness not confirmed before submit")
         await submit.click(timeout=min(4000, SUP4_TIMEOUT_MS))
     except Exception as e:
         raise StageError(stage, f"Login form interaction failed: {e}") from e
 
     deadline = asyncio.get_running_loop().time() + (SUP4_TIMEOUT_MS / 1000.0)
+    last_error = ""
     while asyncio.get_running_loop().time() < deadline:
         await _best_effort_close_popups(page)
         if await _is_logged_in(page):
             print("[SUP4] login ok")
             return
+        try:
+            txt = await page.locator(
+                "#login_form_id .session-message:visible, "
+                "#login_form_id .j-login-info-message:visible, "
+                ".session-message.s-error:visible"
+            ).first.inner_text(timeout=500)
+            last_error = re.sub(r"\s+", " ", txt or "").strip()
+        except Exception:
+            pass
         await page.wait_for_timeout(200)
 
-    raise StageError(stage, "Login verification failed")
+    details = await _capture_debug_artifacts(
+        page,
+        stage,
+        "verification_failed",
+        extra={"site_error": last_error} if last_error else None,
+    )
+    if "recaptcha" in last_error.casefold():
+        raise StageError(stage, f"Login blocked by site reCAPTCHA: {last_error}", details)
+    raise StageError(stage, f"Login verification failed{': ' + last_error if last_error else ''}", details)
 
 
 async def _open_cart_modal(page) -> None:
