@@ -17,9 +17,10 @@ from playwright.async_api import async_playwright
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 
-BASE_URL = "https://dobavki.ua"
+BASE_URL = (os.getenv("SUP2_BASE_URL") or "https://dobavki.ua/ua").strip().rstrip("/")
 HOME_URL = f"{BASE_URL}/"
 CHECKOUT_URL = f"{BASE_URL}/checkout/"
+UKRAINIAN_SITE = BASE_URL.rstrip("/").endswith("/ua")
 PAYMENT_COD_VALUE = "15"
 SUPPLIER_RESULT_JSON_PREFIX = "SUPPLIER_RESULT_JSON="
 SUBMIT_CHECKPOINT_FILE = ROOT / ".supplier2_submit_checkpoint.json"
@@ -238,12 +239,20 @@ def _normalize_dobavki_phone(raw: str) -> str:
 
 def _normalize_city_query(city: str) -> str:
     city = str(city or "").strip()
-    aliases = {
-        "київ": "Киев",
-        "м. київ": "Киев",
-        "г. киев": "Киев",
-        "киев": "Киев",
-    }
+    if UKRAINIAN_SITE:
+        aliases = {
+            "киев": "Київ",
+            "г. киев": "Київ",
+            "м. київ": "Київ",
+            "київ": "Київ",
+        }
+    else:
+        aliases = {
+            "київ": "Киев",
+            "м. київ": "Киев",
+            "г. киев": "Киев",
+            "киев": "Киев",
+        }
     return aliases.get(city.lower(), city)
 
 
@@ -293,20 +302,36 @@ def _city_search_terms(city: str) -> list[str]:
     before_comma = raw.split(",", 1)[0].strip()
     candidates = [raw, no_parentheses, before_comma]
     candidates.extend(_ru_city_variant(x) for x in list(candidates))
-    aliases = {
-        "київ": ["Киев"],
-        "киев": ["Киев", "Київ"],
-        "львів": ["Львов"],
-        "львов": ["Львов", "Львів"],
-        "харків": ["Харьков"],
-        "харьков": ["Харьков", "Харків"],
-        "миколаїв": ["Николаев"],
-        "николаев": ["Николаев", "Миколаїв"],
-        "черкаси": ["Черкассы"],
-        "черкассы": ["Черкассы", "Черкаси"],
-        "одеса": ["Одесса"],
-        "одесса": ["Одесса", "Одеса"],
-    }
+    if UKRAINIAN_SITE:
+        aliases = {
+            "київ": ["Київ", "Киев"],
+            "киев": ["Київ", "Киев"],
+            "львів": ["Львів", "Львов"],
+            "львов": ["Львів", "Львов"],
+            "харків": ["Харків", "Харьков"],
+            "харьков": ["Харків", "Харьков"],
+            "миколаїв": ["Миколаїв", "Николаев"],
+            "николаев": ["Миколаїв", "Николаев"],
+            "черкаси": ["Черкаси", "Черкассы"],
+            "черкассы": ["Черкаси", "Черкассы"],
+            "одеса": ["Одеса", "Одесса"],
+            "одесса": ["Одеса", "Одесса"],
+        }
+    else:
+        aliases = {
+            "київ": ["Киев"],
+            "киев": ["Киев", "Київ"],
+            "львів": ["Львов"],
+            "львов": ["Львов", "Львів"],
+            "харків": ["Харьков"],
+            "харьков": ["Харьков", "Харків"],
+            "миколаїв": ["Николаев"],
+            "николаев": ["Николаев", "Миколаїв"],
+            "черкаси": ["Черкассы"],
+            "черкассы": ["Черкассы", "Черкаси"],
+            "одеса": ["Одесса"],
+            "одесса": ["Одесса", "Одеса"],
+        }
     for candidate in list(candidates):
         candidates.extend(aliases.get(candidate.lower(), []))
     return _unique_nonempty(candidates)
@@ -752,7 +777,9 @@ async def _add_items(page, items: list[Item]) -> list[dict]:
             else:
                 await buy_btn.click(timeout=TIMEOUT_MS)
             try:
-                await page.get_by_text("Товар добавлен в корзину", exact=False).wait_for(state="visible", timeout=5000)
+                await page.get_by_text(re.compile(r"Товар\s+(?:добавлен|додано|доданий)", re.IGNORECASE)).wait_for(
+                    state="visible", timeout=5000
+                )
             except Exception:
                 await page.wait_for_timeout(1200)
             await _wait_ajax_cart_product(page, product_id)
@@ -1399,8 +1426,8 @@ async def _read_totals(page) -> dict:
             const text = document.body.innerText || '';
             const lines = text.split('\\n').map((x) => x.trim()).filter(Boolean);
             return {
-                totals: lines.filter((x) => /^(Итого|Скидка|Доставка)|грн$|–\\s*\\d/.test(x)).slice(-30),
-                summary: lines.filter((x) => /Итого|Скидка по купону|грн/.test(x)).slice(-30)
+                totals: lines.filter((x) => /^(Итого|Разом|Скидка|Знижка|Доставка)|грн$|–\\s*\\d/.test(x)).slice(-30),
+                summary: lines.filter((x) => /Итого|Разом|Скидка по купону|Знижка за купоном|грн/.test(x)).slice(-30)
             };
         }"""
     )
@@ -1417,7 +1444,7 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
     coupon = await _apply_coupon(page)
     customer = await _fill_recipient_fields(page, recipient)
 
-    submit = page.locator("button.j-submit", has_text="Оформить заказ").first
+    submit = page.locator("button.j-submit").first
     await submit.wait_for(state="visible", timeout=TIMEOUT_MS)
     if not await submit.is_enabled():
         raise StageError("fill_checkout", "Submit button is disabled after checkout fill.", {})
@@ -1451,7 +1478,7 @@ def _parse_supplier_order_number(url: str, body_text: str) -> str:
 
 
 async def _submit_order(page) -> str:
-    submit = page.locator("button.j-submit", has_text="Оформить заказ").first
+    submit = page.locator("button.j-submit").first
     await submit.wait_for(state="visible", timeout=TIMEOUT_MS)
     await submit.click(timeout=TIMEOUT_MS)
     _write_submit_checkpoint(url=page.url or "", submitted=True)
@@ -1464,7 +1491,9 @@ async def _submit_order(page) -> str:
             """() => {
                 const text = document.body ? document.body.innerText : '';
                 return /Ваш\\s+заказ\\s+принят/i.test(text)
+                    || /Ваше\\s+замовлення\\s+прийнято/i.test(text)
                     || /Заказ\\s*№\\s*\\d{3,}/i.test(text)
+                    || /Замовлення\\s*№\\s*\\d{3,}/i.test(text)
                     || /(?:замовлення|order)\\D{0,40}\\d{3,}/i.test(text);
             }""",
             timeout=TIMEOUT_MS,
