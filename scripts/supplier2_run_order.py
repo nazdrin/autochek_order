@@ -49,6 +49,7 @@ CLEAR_BASKET = _to_bool(os.getenv("SUP2_CLEAR_BASKET", "1"), True)
 DEBUG_PAUSE_SECONDS = _to_int(os.getenv("SUP2_DEBUG_PAUSE_SECONDS", "0"), 0)
 DRY_RUN = _to_bool(os.getenv("SUP2_DRY_RUN", "0"), False)
 PROMO_CODE = (os.getenv("SUP2_PROMO_CODE") or "SALE15").strip()
+DISABLE_CITY_API = _to_bool(os.getenv("SUP2_DISABLE_CITY_API", "0"), False)
 NP_API_KEY = (
     os.getenv("SUP2_NP_API_KEY")
     or os.getenv("BIOTUS_NP_API_KEY")
@@ -292,6 +293,22 @@ def _city_search_terms(city: str) -> list[str]:
     before_comma = raw.split(",", 1)[0].strip()
     candidates = [raw, no_parentheses, before_comma]
     candidates.extend(_ru_city_variant(x) for x in list(candidates))
+    aliases = {
+        "київ": ["Киев"],
+        "киев": ["Киев", "Київ"],
+        "львів": ["Львов"],
+        "львов": ["Львов", "Львів"],
+        "харків": ["Харьков"],
+        "харьков": ["Харьков", "Харків"],
+        "миколаїв": ["Николаев"],
+        "николаев": ["Николаев", "Миколаїв"],
+        "черкаси": ["Черкассы"],
+        "черкассы": ["Черкассы", "Черкаси"],
+        "одеса": ["Одесса"],
+        "одесса": ["Одесса", "Одеса"],
+    }
+    for candidate in list(candidates):
+        candidates.extend(aliases.get(candidate.lower(), []))
     return _unique_nonempty(candidates)
 
 
@@ -925,8 +942,10 @@ async def _select_city(page, city_query: str) -> dict:
 
     city_terms = _city_search_terms(city_query)
     city_hints = _city_hint_terms(city_query)
-    api_result = await page.evaluate(
-        """async ([cityQuery, cityTerms, cityHints, timeoutMs]) => {
+    api_result = {"ok": False, "reason": "city_api_disabled", "cityTerms": city_terms, "cityHints": city_hints}
+    if not DISABLE_CITY_API:
+        api_result = await page.evaluate(
+            """async ([cityQuery, cityTerms, cityHints, timeoutMs]) => {
             const mod = window.CheckoutModule && CheckoutModule.getInstance && CheckoutModule.getInstance();
             const recipient = mod && mod.getComponentByName && mod.getComponentByName('Recipient');
             if (!recipient || !recipient.performAction || !recipient.setCity) {
@@ -997,8 +1016,8 @@ async def _select_city(page, city_query: str) -> dict:
                 selectedScore: scored.length ? scored[0].score : 0
             };
         }""",
-        [city_query, city_terms, city_hints, TIMEOUT_MS],
-    )
+            [city_query, city_terms, city_hints, TIMEOUT_MS],
+        )
     if isinstance(api_result, dict) and api_result.get("ok"):
         await page.wait_for_timeout(1800)
         city_value = (await city_input.input_value(timeout=TIMEOUT_MS)).strip()
@@ -1016,51 +1035,50 @@ async def _select_city(page, city_query: str) -> dict:
                 "selection": "api",
             }
 
-    ui_city_query = city_terms[1] if len(city_terms) > 1 else city_query
-    await city_input.click(timeout=TIMEOUT_MS)
-    await city_input.fill("", timeout=TIMEOUT_MS)
-    await city_input.type(ui_city_query, delay=35, timeout=TIMEOUT_MS)
-    await page.wait_for_timeout(1200)
+    attempted_options: list[dict[str, Any]] = []
+    option = None
+    ui_city_query = ""
+    for term in city_terms:
+        ui_city_query = term
+        await city_input.click(timeout=TIMEOUT_MS)
+        await city_input.fill("", timeout=TIMEOUT_MS)
+        await city_input.type(ui_city_query, delay=35, timeout=TIMEOUT_MS)
+        await page.wait_for_timeout(1200)
 
-    option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item", has_text=f"г. {ui_city_query}").first
-    if await option.count() == 0:
-        option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item", has_text=ui_city_query).first
-    if await option.count() == 0:
         options = await page.evaluate(
             """() => Array.from(document.querySelectorAll('.ui-autocomplete.ui-menu .ui-menu-item')).map((el) => ({
                 text: (el.innerText || el.textContent || '').trim(),
                 disabled: el.classList.contains('ui-state-disabled')
             })).filter((item) => item.text)"""
         )
-        query_norm = _norm_match_text(city_query)
+        attempted_options.append({"term": term, "options": options[:10] if isinstance(options, list) else []})
+        query_norms = [_norm_match_text(x) for x in _unique_nonempty([term, city_query, *city_terms]) if _norm_match_text(x)]
         chosen_idx = -1
         if isinstance(options, list):
             for idx, item in enumerate(options):
                 if not isinstance(item, dict) or item.get("disabled"):
                     continue
                 text_norm = _norm_match_text(str(item.get("text") or ""))
-                if query_norm and query_norm in text_norm:
+                if any(query_norm and query_norm in text_norm for query_norm in query_norms):
                     chosen_idx = idx
                     break
-            if chosen_idx < 0:
-                for idx, item in enumerate(options):
-                    if isinstance(item, dict) and item.get("text") and not item.get("disabled"):
-                        chosen_idx = idx
-                        break
+            if chosen_idx < 0 and len(options) == 1 and isinstance(options[0], dict) and not options[0].get("disabled"):
+                chosen_idx = 0
         if chosen_idx >= 0:
             option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item").nth(chosen_idx)
-        else:
-            raise StageError(
-                "fill_checkout",
-                "City autocomplete option not found.",
-                {
-                    "city_query": city_query,
-                    "city_search_terms": city_terms,
-                    "city_hints": city_hints,
-                    "api_result": api_result,
-                    "options": options,
-                },
-            )
+            break
+    if option is None:
+        raise StageError(
+            "fill_checkout",
+            "City autocomplete option not found.",
+            {
+                "city_query": city_query,
+                "city_search_terms": city_terms,
+                "city_hints": city_hints,
+                "api_result": api_result,
+                "attempted_options": attempted_options,
+            },
+        )
     await option.click(timeout=TIMEOUT_MS)
     await page.wait_for_timeout(1800)
 
