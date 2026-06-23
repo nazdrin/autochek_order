@@ -589,12 +589,22 @@ async def _wait_search_result(page, sku: str) -> list[dict[str, str]]:
     raise StageError("add_items", f"Search result did not appear for sku={sku}", {"sku": sku, "latest": latest})
 
 
+def _extract_article_match(body_text: str, sku: str) -> str:
+    sku_value = str(sku or "").strip()
+    if not sku_value:
+        return ""
+    pattern = rf"Артикул\s*:\s*({re.escape(sku_value)})\b"
+    m = re.search(pattern, body_text or "", flags=re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
 async def _open_product_candidate(page, sku: str, href: str, result_text: str = "") -> dict[str, str] | None:
     await _goto_retry(page, href)
     await _safe_wait_networkidle(page)
 
     body_text = await page.locator("body").inner_text(timeout=TIMEOUT_MS)
-    if str(sku or "").strip().lower() not in body_text.lower():
+    article_match = _extract_article_match(body_text, sku)
+    if not article_match:
         return None
 
     h1 = ""
@@ -602,7 +612,7 @@ async def _open_product_candidate(page, sku: str, href: str, result_text: str = 
         h1 = (await page.locator("h1").first.inner_text(timeout=TIMEOUT_MS)).strip()
     except Exception:
         pass
-    return {"sku": sku, "href": page.url or href, "title": h1, "search_text": result_text}
+    return {"sku": sku, "href": page.url or href, "title": h1, "search_text": result_text, "article": article_match}
 
 
 async def _find_product_via_search_page(page, sku: str) -> dict[str, str]:
@@ -654,10 +664,15 @@ async def _search_and_open_product(page, sku: str) -> dict[str, str]:
     await search.type(sku, delay=35, timeout=TIMEOUT_MS)
 
     results = await _wait_search_result(page, sku)
-    href = results[0]["href"]
-    product = await _open_product_candidate(page, sku, href, results[0].get("text", ""))
-    if product:
-        return product
+    seen: set[str] = set()
+    for result in results[:5]:
+        href = str(result.get("href") or "")
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        product = await _open_product_candidate(page, sku, href, result.get("text", ""))
+        if product:
+            return product
     raise StageError(
         "add_items",
         f"No exact product page found for sku={sku}",
