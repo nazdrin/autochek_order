@@ -73,6 +73,7 @@ class Recipient:
     city_query: str
     branch_number: str
     branch_query: str
+    branch_address: str
     delivery_kind: str
     email: str = ""
 
@@ -364,6 +365,62 @@ def _city_hint_terms(city: str) -> list[str]:
     return _unique_nonempty(expanded)
 
 
+def _delivery_match_tokens(text: str, branch_number: str = "", city_name: str = "", extra_city_values: list[str] | None = None) -> list[str]:
+    city_tokens = {
+        _ru_city_variant(token.lower()).strip("№#")
+        for token in re.split(
+            r"[\s,.;:/()\"«»]+",
+            " ".join([city_name, _ru_city_variant(city_name), *(extra_city_values or [])]),
+        )
+        if len(token) >= 4
+    }
+    generic_tokens = {
+        "відділення",
+        "отделение",
+        "пункт",
+        "приймання",
+        "видачі",
+        "выдачи",
+        "прим",
+        "поштомат",
+        "почтомат",
+        "нова",
+        "новая",
+        "пошта",
+        "почта",
+        "магазин",
+        "одне",
+        "место",
+        "місце",
+        "вул",
+        "ул",
+        "улица",
+        "приймання-видачі",
+        "прийманнявидачі",
+        "прийманнявидачи",
+        "приема-выдачи",
+        "приемавыдачи",
+    }
+    branch_norm = str(branch_number or "").strip()
+    tokens: list[str] = []
+    for token in re.split(r"[\s,.;:/()\"«»]+", str(text or "")):
+        token = token.strip()
+        token_norm = _ru_city_variant(token.lower()).strip("№#")
+        token_compact = re.sub(r"[^0-9a-zа-яіїєґ]+", "", token_norm)
+        if not token_norm or token.startswith(("№", "#")):
+            continue
+        if token_norm == branch_norm:
+            continue
+        if token_norm.isdigit() and token_norm in {"1", "2", "3", "5", "10", "30"}:
+            continue
+        if len(token_norm) < 3 and not token_norm.isdigit():
+            continue
+        if token_norm in generic_tokens or token_compact in generic_tokens or token_norm in city_tokens or token_compact in city_tokens:
+            continue
+        tokens.append(token)
+    return _unique_nonempty(tokens)
+
+
 def _np_warehouse_lookup(city_name: str, branch_number: str) -> dict[str, Any]:
     if not NP_API_KEY or not city_name or not branch_number:
         return {"ok": False, "reason": "np_lookup_unavailable"}
@@ -409,46 +466,17 @@ def _np_warehouse_lookup(city_name: str, branch_number: str) -> dict[str, Any]:
         str(exact.get(key) or "")
         for key in ("Description", "DescriptionRu", "ShortAddress", "ShortAddressRu")
     )
-    city_tokens = {
-        _ru_city_variant(token.lower()).strip("№#")
-        for token in re.split(
-            r"[\s,.;:/()\"«»]+",
-            " ".join(
-                str(value or "")
-                for value in (
-                    city_name,
-                    _ru_city_variant(city_name),
-                    exact.get("CityDescription"),
-                    exact.get("CityDescriptionRu"),
-                    exact.get("SettlementDescription"),
-                    exact.get("SettlementDescriptionRu"),
-                )
-            ),
-        )
-        if len(token) >= 4
-    }
-    generic_tokens = {
-        "відділення",
-        "отделение",
-        "пункт",
-        "прим",
-        "поштомат",
-        "почтомат",
-        "нова",
-        "новая",
-        "пошта",
-        "почта",
-        "магазин",
-    }
-    tokens: list[str] = []
-    for token in re.split(r"[\s,.;:/()\"«»]+", text):
-        token = token.strip()
-        token_norm = _ru_city_variant(token.lower()).strip("№#")
-        if len(token_norm) < 4 or token_norm.isdigit() or token.startswith(("№", "#")):
-            continue
-        if token_norm in generic_tokens or token_norm in city_tokens:
-            continue
-        tokens.append(token)
+    tokens = _delivery_match_tokens(
+        text,
+        branch_number,
+        city_name,
+        [
+            str(exact.get("CityDescription") or ""),
+            str(exact.get("CityDescriptionRu") or ""),
+            str(exact.get("SettlementDescription") or ""),
+            str(exact.get("SettlementDescriptionRu") or ""),
+        ],
+    )
     return {
         "ok": True,
         "number": str(exact.get("Number") or ""),
@@ -512,18 +540,28 @@ def _validate_selected_delivery_text(
     recipient: Recipient,
     match_reason: str,
     np_lookup: dict[str, Any],
+    extra_tokens: list[str] | None = None,
 ) -> dict[str, Any]:
     if _delivery_number_matches(selected_text, recipient.branch_number):
         return {"valid": True, "reason": "branch_number", "score": None, "hits": []}
 
-    tokens = np_lookup.get("tokens") if isinstance(np_lookup, dict) else []
+    tokens = list(extra_tokens or [])
+    if isinstance(np_lookup, dict) and isinstance(np_lookup.get("tokens"), list):
+        tokens.extend(np_lookup.get("tokens") or [])
     token_norms = _unique_nonempty(
         [_normalize_delivery_text(str(token or "")) for token in tokens if _normalize_delivery_text(str(token or ""))]
     )
     selected_norm = _normalize_delivery_text(selected_text)
-    hits = [token for token in token_norms if len(token) >= 4 and token in selected_norm]
-    if match_reason == "np_address" and len(hits) >= 2:
-        return {"valid": True, "reason": "np_address", "score": len(hits), "hits": hits}
+    selected_tokens = [_normalize_delivery_text(token) for token in re.split(r"[^0-9a-zа-яіїєґ]+", selected_text.lower()) if token]
+    hits = [
+        token
+        for token in token_norms
+        if (token.isdigit() and token in selected_tokens)
+        or (any(ch.isdigit() for ch in token) and token in selected_norm)
+        or (not token.isdigit() and len(token) >= 4 and token in selected_norm)
+    ]
+    if match_reason in {"np_address", "address"} and len(hits) >= 2:
+        return {"valid": True, "reason": match_reason, "score": len(hits), "hits": hits}
 
     return {"valid": False, "reason": match_reason or "unmatched", "score": len(hits), "hits": hits}
 
@@ -546,6 +584,7 @@ def _extract_recipient(order: dict[str, Any]) -> Recipient:
     city_raw = env_city or str(delivery.get("cityName") or "").strip()
     branch_number = env_branch or _branch_number_from_value(delivery.get("branchNumber"))
     branch_query = env_branch_query or str(delivery.get("address") or "").strip()
+    branch_address = str(order.get("shipping_address") or delivery.get("shipping_address") or "").strip()
     delivery_kind = _delivery_kind_from_delivery(delivery, branch_query)
     email = env_email or _first_email_from_order(order)
 
@@ -568,6 +607,7 @@ def _extract_recipient(order: dict[str, Any]) -> Recipient:
         city_query=_normalize_city_query(city_raw),
         branch_number=branch_number,
         branch_query=branch_query,
+        branch_address=branch_address,
         delivery_kind=delivery_kind,
         email=email,
     )
@@ -1243,9 +1283,10 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
     deadline = asyncio.get_running_loop().time() + (TIMEOUT_MS / 1000.0)
     meta: dict[str, Any] = {}
     np_lookup = _np_warehouse_lookup(recipient.city_query, recipient.branch_number)
+    branch_address_tokens = _delivery_match_tokens(recipient.branch_address, recipient.branch_number, recipient.city_query)
     while asyncio.get_running_loop().time() < deadline:
         meta = await page.evaluate(
-            """([branchNumber, branchQuery, npLookup]) => {
+            """([branchNumber, branchQuery, branchAddressTokens, npLookup]) => {
                 const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name.includes('warehouse.id'));
                 if (!sel) return {found: false};
                 const options = Array.from(sel.options).map((o) => ({value: o.value, text: o.text, selected: o.selected}));
@@ -1262,7 +1303,7 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
                 let matchReason = '';
                 let addressMatches = [];
                 if (num) {
-                    const re = new RegExp(`(?:Отделение|Відділення|Пункт|Поштомат|Почтомат)\\\\s*№${num}(?!\\\\d)`, 'i');
+                    const re = new RegExp(`(?:Отделение|Відділення|Пункт|Поштомат|Почтомат)[^№#]{0,100}(?:№|#)\\\\s*${num}(?!\\\\d)`, 'i');
                     option = options.find((o) => re.test(o.text));
                     if (option) matchReason = 'branch_number';
                 }
@@ -1270,11 +1311,23 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
                     option = options.find((o) => o.text.toLowerCase().includes(query));
                     if (option) matchReason = 'branch_query';
                 }
-                if (!option && npLookup && npLookup.ok && Array.isArray(npLookup.tokens)) {
-                    const tokenNorms = Array.from(new Set(npLookup.tokens.map(normalize).filter((token) => token.length >= 4)));
+                if (!option) {
+                    const addressTokens = [
+                        ...(Array.isArray(branchAddressTokens) ? branchAddressTokens : []),
+                        ...((npLookup && npLookup.ok && Array.isArray(npLookup.tokens)) ? npLookup.tokens : [])
+                    ];
+                    const tokenNorms = Array.from(new Set(addressTokens.map(normalize).filter((token) => token.length >= 2)));
                     const scored = options.map((o) => {
                         const text = normalize(o.text);
-                        const hits = tokenNorms.filter((token) => text.includes(token));
+                        const optionTokens = String(o.text || '').toLowerCase()
+                            .replace(/вулиця|улица/g, 'ул')
+                            .replace(/вул\\.?/g, 'ул')
+                            .replace(/проспект|пр-т/g, 'просп')
+                            .replace(/провулок|переулок/g, 'пер')
+                            .split(/[^0-9a-zа-яіїєґ]+/)
+                            .map(normalize)
+                            .filter(Boolean);
+                        const hits = tokenNorms.filter((token) => /^\\d+$/.test(token) ? optionTokens.includes(token) : text.includes(token));
                         return {option: o, hits, score: hits.length};
                     }).filter((row) => row.score > 0);
                     scored.sort((a, b) => b.score - a.score);
@@ -1287,7 +1340,7 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
                     const best = scored[0];
                     if (best && best.score >= 2) {
                         option = best.option;
-                        matchReason = 'np_address';
+                        matchReason = 'address';
                     }
                 }
                 return {
@@ -1303,7 +1356,7 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
                     addressMatches
                 };
             }""",
-            [recipient.branch_number, recipient.branch_query, np_lookup],
+            [recipient.branch_number, recipient.branch_query, branch_address_tokens, np_lookup],
         )
         if meta.get("found") and meta.get("option"):
             break
@@ -1315,7 +1368,14 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
         raise StageError(
             "fill_checkout",
             "Warehouse option not found.",
-            {"branch_number": recipient.branch_number, "branch_query": recipient.branch_query, "np_lookup": np_lookup, "meta": meta},
+            {
+                "branch_number": recipient.branch_number,
+                "branch_query": recipient.branch_query,
+                "branch_address": recipient.branch_address,
+                "branch_address_tokens": branch_address_tokens,
+                "np_lookup": np_lookup,
+                "meta": meta,
+            },
         )
 
     warehouse = page.locator(f'select[name="{meta["name"]}"]').first
@@ -1344,6 +1404,7 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
         recipient=recipient,
         match_reason=str(meta.get("matchReason") or ""),
         np_lookup=np_lookup,
+        extra_tokens=branch_address_tokens,
     )
     if not validation.get("valid"):
         raise StageError(
