@@ -200,8 +200,16 @@ def _full_name_from_order(order: dict[str, Any]) -> str:
         pc = {}
     last = str(pc.get("lName") or "").strip()
     first = str(pc.get("fName") or "").strip()
-    middle = str(pc.get("mName") or pc.get("middleName") or "").strip()
+    middle = _patronymic_from_order(order)
     return " ".join(x for x in (last, first, middle) if x).strip()
+
+
+def _patronymic_from_order(order: dict[str, Any]) -> str:
+    pc = order.get("primaryContact") or {}
+    if not isinstance(pc, dict):
+        pc = {}
+    value = str(pc.get("mName") or pc.get("middleName") or "").strip()
+    return value or "Побатькові"
 
 
 def _first_phone_from_order(order: dict[str, Any]) -> str:
@@ -528,8 +536,12 @@ def _extract_recipient(order: dict[str, Any]) -> Recipient:
     env_branch = (os.getenv("SUP2_BRANCH_NUMBER") or "").strip()
     env_branch_query = (os.getenv("SUP2_BRANCH_QUERY") or "").strip()
     env_email = (os.getenv("SUP2_CUSTOMER_EMAIL") or "").strip()
+    env_patronymic = (os.getenv("SUP2_CUSTOMER_PATRONYMIC") or "").strip()
 
+    patronymic = env_patronymic or _patronymic_from_order(order)
     name = env_name or _full_name_from_order(order)
+    if env_name and patronymic and _norm_match_text(patronymic) not in _norm_match_text(name):
+        name = f"{name} {patronymic}".strip()
     phone_source = env_phone or _first_phone_from_order(order)
     city_raw = env_city or str(delivery.get("cityName") or "").strip()
     branch_number = env_branch or _branch_number_from_value(delivery.get("branchNumber"))
