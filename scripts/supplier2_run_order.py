@@ -1536,10 +1536,10 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
 
 def _parse_supplier_order_number(url: str, body_text: str) -> str:
     patterns = [
-        r"/order/(\d+)",
-        r"(?:заказ|замовлення|order)\s*(?:№|#|No\.?|Nº)?\s*(\d{3,})",
-        r"(?:заказ|замовлення|order)\D{0,40}(\d{3,})",
-        r"№\s*(\d{3,})",
+        r"/(?:order|orders)/(\d{5,})(?:[/?#]|$)",
+        r"(?:заказ|замовлення|order)\s*(?:№|#|No\.?|Nº)\s*(\d{5,})\b",
+        r"(?:номер|number)\s+(?:заказу|заказа|замовлення|order)\s*(?:№|#|No\.?|Nº)?\s*(\d{5,})\b",
+        r"(?:заказу|заказа|замовлення|order)\s*(?:№|#|No\.?|Nº)\s*(\d{5,})\b",
     ]
     haystacks = [url or "", body_text or ""]
     for haystack in haystacks:
@@ -1565,9 +1565,8 @@ async def _submit_order(page) -> str:
                 const text = document.body ? document.body.innerText : '';
                 return /Ваш\\s+заказ\\s+принят/i.test(text)
                     || /Ваше\\s+замовлення\\s+прийнято/i.test(text)
-                    || /Заказ\\s*№\\s*\\d{3,}/i.test(text)
-                    || /Замовлення\\s*№\\s*\\d{3,}/i.test(text)
-                    || /(?:замовлення|order)\\D{0,40}\\d{3,}/i.test(text);
+                    || /Заказ\\s*№\\s*\\d{5,}/i.test(text)
+                    || /Замовлення\\s*№\\s*\\d{5,}/i.test(text);
             }""",
             timeout=TIMEOUT_MS,
         )
