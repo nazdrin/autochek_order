@@ -85,13 +85,14 @@ class StageError(RuntimeError):
         self.details = details or {}
 
 
-def _write_submit_checkpoint(url: str, submitted: bool, order_number: str = "") -> None:
+def _write_submit_checkpoint(url: str, submitted: bool, order_number: str = "", **extra: Any) -> None:
     payload = {
         "ts": int(time.time()),
         "url": str(url or ""),
         "submitted": bool(submitted),
         "order_number": str(order_number or ""),
     }
+    payload.update(extra)
     try:
         tmp = SUBMIT_CHECKPOINT_FILE.with_suffix(SUBMIT_CHECKPOINT_FILE.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1435,30 +1436,111 @@ async def _apply_coupon(page) -> dict:
     if not PROMO_CODE:
         return {"code": "", "applied": False, "text": ""}
 
-    coupon_input = page.locator(".j-coupon-input").first
-    input_visible = await coupon_input.count() > 0 and await coupon_input.is_visible()
-    if not input_visible:
-        toggle = page.locator("a.j-coupon-add").first
-        if await toggle.count() > 0:
-            await toggle.click(timeout=TIMEOUT_MS, force=True)
-            await page.wait_for_timeout(500)
+    async def read_coupon_state() -> dict:
+        return await page.evaluate(
+            """(code) => {
+                const norm = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+                const body = document.body ? document.body.innerText || '' : '';
+                const lines = body.split('\\n').map(norm).filter(Boolean);
+                const couponLines = lines.filter((x) => /(?:знижка|скидка)\\s+по\\s+купону/i.test(x));
+                const codeSeen = lines.some((x) => x.toUpperCase().includes(String(code || '').toUpperCase()));
+                const removeVisible = Array.from(document.querySelectorAll('a.j-coupon-remove'))
+                    .some((el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+                const detailsText = norm(Array.from(document.querySelectorAll('.order-details, .checkout-total, .order-summary'))
+                    .map((el) => el.innerText || el.textContent || '').join('\\n'));
+                return {
+                    applied: couponLines.length > 0,
+                    text: couponLines.join(' | '),
+                    codeSeen,
+                    removeVisible,
+                    detailsText,
+                };
+            }""",
+            PROMO_CODE,
+        )
 
-    if await coupon_input.count() == 0 or not await coupon_input.is_visible():
-        raise StageError("fill_checkout", "Coupon input is not visible.", {"code": PROMO_CODE})
+    last_state: dict[str, Any] = {}
+    for attempt in range(1, 4):
+        coupon_input = page.locator(".j-coupon-input").first
+        input_visible = await coupon_input.count() > 0 and await coupon_input.is_visible()
+        if not input_visible:
+            toggle = page.locator("a.j-coupon-add").first
+            if await toggle.count() > 0:
+                await toggle.click(timeout=TIMEOUT_MS, force=True)
+                await page.wait_for_timeout(500)
 
-    await coupon_input.fill(PROMO_CODE, timeout=TIMEOUT_MS)
-    submit = page.locator("a.j-coupon-submit").first
-    await submit.wait_for(state="visible", timeout=TIMEOUT_MS)
-    await submit.click(timeout=TIMEOUT_MS)
-    await page.wait_for_timeout(1800)
-    coupon_text = await page.evaluate(
+        if await coupon_input.count() == 0 or not await coupon_input.is_visible():
+            raise StageError("fill_checkout", "Coupon input is not visible.", {"code": PROMO_CODE, "attempt": attempt})
+
+        await coupon_input.fill(PROMO_CODE, timeout=TIMEOUT_MS)
+        input_value = (await coupon_input.input_value(timeout=TIMEOUT_MS)).strip()
+        if input_value.upper() != PROMO_CODE.upper():
+            raise StageError(
+                "fill_checkout",
+                "Coupon input value did not stick.",
+                {"code": PROMO_CODE, "value": input_value, "attempt": attempt},
+            )
+
+        submit = page.locator("a.j-coupon-submit").first
+        await submit.wait_for(state="visible", timeout=TIMEOUT_MS)
+        await submit.click(timeout=TIMEOUT_MS)
+        try:
+            await page.wait_for_function(
+                """(code) => {
+                    const text = document.body ? document.body.innerText || '' : '';
+                    return /(?:Знижка|Скидка)\\s+по\\s+купону/i.test(text)
+                        || text.toUpperCase().includes(String(code || '').toUpperCase());
+                }""",
+                PROMO_CODE,
+                timeout=5000,
+            )
+        except PWTimeoutError:
+            pass
+        await page.wait_for_timeout(700)
+        last_state = await read_coupon_state()
+        if last_state.get("applied"):
+            return {
+                "code": PROMO_CODE,
+                "applied": True,
+                "text": str(last_state.get("text") or ""),
+                "remove_visible": bool(last_state.get("removeVisible")),
+            }
+
+    raise StageError(
+        "fill_checkout",
+        "Coupon was not confirmed in checkout totals.",
+        {"code": PROMO_CODE, "state": last_state},
+    )
+
+
+async def _read_success_page(page) -> dict:
+    return await page.evaluate(
         """() => {
-            const text = document.body.innerText || '';
-            const lines = text.split('\\n').map((x) => x.trim()).filter(Boolean);
-            return lines.filter((x) => /купон|скид|SALE/i.test(x)).join(' | ');
+            const norm = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+            const root = document.querySelector('section.checkout.__success') || document.querySelector('section.checkout');
+            const complete = document.querySelector('section.checkout-complete') || root;
+            const headingEl = root ? root.querySelector('h1.main-h, h1') : null;
+            const numberEl = complete ? complete.querySelector('.h2') : null;
+            const heading = norm(headingEl ? headingEl.innerText || headingEl.textContent || '' : '');
+            const numberText = norm(numberEl ? numberEl.innerText || numberEl.textContent || '' : '');
+            const completeText = norm(complete ? complete.innerText || complete.textContent || '' : '');
+            const couponLines = complete
+                ? (complete.innerText || '').split('\\n').map(norm).filter((x) => /(?:знижка|скидка)\\s+по\\s+купону/i.test(x))
+                : [];
+            const m = numberText.match(/(?:Замовлення|Заказ)\\s*№\\s*(\\d{5,})/i);
+            return {
+                url: location.href,
+                title: document.title || '',
+                successRoot: !!root,
+                completeRoot: !!complete,
+                heading,
+                numberText,
+                orderNumber: m ? m[1] : '',
+                couponText: couponLines.join(' | '),
+                completeText,
+            };
         }"""
     )
-    return {"code": PROMO_CODE, "applied": bool(coupon_text), "text": coupon_text}
 
 
 async def _fill_text_field(page, selector: str, value: str, *, clear: bool = True) -> str:
@@ -1563,32 +1645,46 @@ async def _submit_order(page) -> str:
         await page.wait_for_function(
             """() => {
                 const text = document.body ? document.body.innerText : '';
-                return /Ваш\\s+заказ\\s+принят/i.test(text)
+                const success = document.querySelector('section.checkout.__success');
+                const complete = document.querySelector('section.checkout-complete');
+                const numberText = complete && complete.querySelector('.h2')
+                    ? complete.querySelector('.h2').innerText || ''
+                    : '';
+                return (
+                    (location.href.includes('/checkout/complete/') && success && complete)
+                    || /Ваш\\s+заказ\\s+принят/i.test(text)
                     || /Ваше\\s+замовлення\\s+прийнято/i.test(text)
-                    || /Заказ\\s*№\\s*\\d{5,}/i.test(text)
-                    || /Замовлення\\s*№\\s*\\d{5,}/i.test(text);
+                ) && /(?:Заказ|Замовлення)\\s*№\\s*\\d{5,}/i.test(numberText || text);
             }""",
             timeout=TIMEOUT_MS,
         )
     except PWTimeoutError:
         await page.wait_for_timeout(2500)
 
-    body_text = ""
-    try:
-        body_text = await page.locator("body").inner_text(timeout=TIMEOUT_MS)
-    except Exception:
-        pass
-    order_no = _parse_supplier_order_number(page.url or "", body_text)
-    _write_submit_checkpoint(url=page.url or "", submitted=True, order_number=order_no)
+    success = await _read_success_page(page)
+    body_text = str(success.get("completeText") or "")
+    order_no = str(success.get("orderNumber") or "").strip()
     if not order_no:
+        order_no = _parse_supplier_order_number(page.url or "", body_text)
+    _write_submit_checkpoint(url=page.url or "", submitted=True, order_number=order_no, success=success)
+    success_url = "/checkout/complete/" in str(success.get("url") or page.url or "")
+    success_heading = bool(re.search(r"(Ваш\s+заказ\s+принят|Ваше\s+замовлення\s+отримано|Ваше\s+замовлення\s+прийнято)", str(success.get("heading") or ""), re.I))
+    if not success_url or not success.get("successRoot") or not success.get("completeRoot") or not success_heading or not order_no:
         raise StageError(
             "post_submit_order_number",
-            "Supplier order was submitted, but Dobavki order number could not be parsed.",
+            "Supplier order was submitted, but Dobavki success page could not be verified.",
             {
                 "submitted": True,
                 "url": page.url or "",
+                "success": success,
                 "body_excerpt": re.sub(r"\s+", " ", body_text or "").strip()[:1000],
             },
+        )
+    if PROMO_CODE and not success.get("couponText"):
+        raise StageError(
+            "post_submit_coupon",
+            "Supplier order was submitted, but coupon line is missing on Dobavki success page.",
+            {"submitted": True, "url": page.url or "", "success": success},
         )
     return order_no
 
