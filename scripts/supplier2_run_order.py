@@ -1491,7 +1491,7 @@ async def _apply_coupon(page) -> dict:
                     return /(?:Знижка|Скидка)\\s+по\\s+купону/i.test(text)
                         || text.toUpperCase().includes(String(code || '').toUpperCase());
                 }""",
-                PROMO_CODE,
+                arg=PROMO_CODE,
                 timeout=5000,
             )
         except PWTimeoutError:
