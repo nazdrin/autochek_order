@@ -52,6 +52,17 @@ from supplier63_vitaworld_telegram import (
     vitaworld_tg_bot_token,
     vitaworld_tg_chat_id,
 )
+from supplier43_sportatlet_telegram import (
+    build_sportatlet_salesdrive_products,
+    build_sportatlet_xlsx_file,
+    download_sportatlet_label_pdf,
+    parse_sportatlet_items,
+    send_sportatlet_telegram_media_group,
+    sportatlet_dry_run_enabled,
+    sportatlet_number_sup_value,
+    sportatlet_tg_bot_token,
+    sportatlet_tg_chat_id,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -237,6 +248,7 @@ ORCH_SUP6_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP6_STORAGE_STATE_FILE") or ".s
 ORCH_SUP5_SUPPLIERLIST = int(os.getenv("ORCH_SUP5_SUPPLIERLIST", "47"))
 ORCH_SUP7_SUPPLIERLIST = int(os.getenv("ORCH_SUP7_SUPPLIERLIST", "48"))
 ORCH_VITAWORLD_SUPPLIERLIST = int(os.getenv("ORCH_VITAWORLD_SUPPLIERLIST", "63"))
+ORCH_SPORTATLET_SUPPLIERLIST = int(os.getenv("ORCH_SPORTATLET_SUPPLIERLIST", "43"))
 ORCH_EXPORT_DOBAVKI_ENABLED = (os.getenv("ORCH_EXPORT_DOBAVKI_ENABLED") or "0").strip()
 ORCH_EXPORT_DOBAVKI_EVERY_MIN = int((os.getenv("ORCH_EXPORT_DOBAVKI_EVERY_MIN") or "720").strip())
 ORCH_EXPORT_DOBAVKI_AFTER_RUN = (os.getenv("ORCH_EXPORT_DOBAVKI_AFTER_RUN") or "0").strip()
@@ -651,6 +663,7 @@ def load_state() -> Dict[str, Any]:
             "zoohub_sent": {},
             "supplier7_sent": {},
             "vitaworld_sent": {},
+            "sportatlet_sent": {},
             "last_dobavki_export_ts": 0,
         }
     try:
@@ -663,6 +676,8 @@ def load_state() -> Dict[str, Any]:
                 "biotus_submitted_orders": {},
                 "zoohub_sent": {},
                 "supplier7_sent": {},
+                "vitaworld_sent": {},
+                "sportatlet_sent": {},
                 "last_dobavki_export_ts": 0,
             }
         ids = data.get("processed_ids")
@@ -700,6 +715,10 @@ def load_state() -> Dict[str, Any]:
         if not isinstance(vitaworld_sent, dict):
             vitaworld_sent = {}
         data["vitaworld_sent"] = vitaworld_sent
+        sportatlet_sent = data.get("sportatlet_sent")
+        if not isinstance(sportatlet_sent, dict):
+            sportatlet_sent = {}
+        data["sportatlet_sent"] = sportatlet_sent
         try:
             data["last_dobavki_export_ts"] = int(data.get("last_dobavki_export_ts") or 0)
         except Exception:
@@ -714,6 +733,7 @@ def load_state() -> Dict[str, Any]:
             "zoohub_sent": {},
             "supplier7_sent": {},
             "vitaworld_sent": {},
+            "sportatlet_sent": {},
             "last_dobavki_export_ts": 0,
         }
 def _now_ts() -> int:
@@ -789,6 +809,11 @@ def is_supplier7_order(order: Dict[str, Any]) -> bool:
 def is_vitaworld_order(order: Dict[str, Any]) -> bool:
     supplierlist, _ = parse_order_supplierlist(order)
     return supplierlist == ORCH_VITAWORLD_SUPPLIERLIST
+
+
+def is_sportatlet_order(order: Dict[str, Any]) -> bool:
+    supplierlist, _ = parse_order_supplierlist(order)
+    return supplierlist == ORCH_SPORTATLET_SUPPLIERLIST
 
 
 # Helpers for terminal/attempts
@@ -2124,6 +2149,99 @@ def process_one_vitaworld_order(order: Dict[str, Any], state: Dict[str, Any]) ->
             pass
 
 
+def process_one_sportatlet_order(order: Dict[str, Any], state: Dict[str, Any]) -> None:
+    order_id = order.get("id")
+    try:
+        order_id_int = int(order_id)
+    except Exception:
+        raise RuntimeError(f"Invalid order id: {order_id}")
+
+    tracking_number = extract_tracking_number(order)
+    if not tracking_number:
+        raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для SPORTATLET_TTN.")
+
+    items = parse_sportatlet_items(order)
+    products_payload = build_sportatlet_salesdrive_products(order)
+    dry_run = sportatlet_dry_run_enabled()
+    number_sup_value = sportatlet_number_sup_value()
+    done_status_id = ORCH_DONE_STATUS_ID
+
+    sent_map: Dict[str, Any] = state.setdefault("sportatlet_sent", {})
+    sent_key = str(order_id_int)
+    sent_entry = sent_map.get(sent_key)
+    if isinstance(sent_entry, dict):
+        print(
+            f"[ORCH] Sport-atlet Telegram already sent for order_id={order_id_int}; "
+            "skip send and retry status update only."
+        )
+        salesdrive_update_status(
+            order_id_int,
+            done_status_id,
+            number_sup=number_sup_value,
+            products=products_payload,
+        )
+        print(
+            f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={done_status_id}, numberSup={number_sup_value}"
+        )
+        return
+
+    if dry_run:
+        chat_id = sportatlet_tg_chat_id()
+        print(
+            f"[ORCH] SPORTATLET_DRY_RUN=1: would send Telegram order_id={order_id_int} "
+            f"chat_id={chat_id} ttn={tracking_number} items={len(items)}"
+        )
+        return
+
+    try:
+        xlsx_path = build_sportatlet_xlsx_file(tracking_number, items)
+    except Exception as e:
+        raise StepError("sportatlet_xlsx_build", f"XLSX build failed: {e}") from e
+
+    try:
+        with np_api_key_env_for_order(order):
+            pdf_path = download_sportatlet_label_pdf(tracking_number)
+    except Exception as e:
+        raise StepError("sportatlet_label_download", f"Label download failed: {e}") from e
+
+    try:
+        token = sportatlet_tg_bot_token()
+        chat_id = sportatlet_tg_chat_id()
+        send_sportatlet_telegram_media_group(
+            token=token,
+            chat_id=chat_id,
+            xlsx_path=xlsx_path,
+            pdf_path=pdf_path,
+            caption=tracking_number,
+        )
+    except Exception as e:
+        raise StepError("sportatlet_telegram_send", str(e)) from e
+
+    sent_map[sent_key] = {
+        "ts": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+        "ttn": tracking_number,
+        "chat_id": chat_id,
+        "xlsx": str(xlsx_path),
+        "pdf": str(pdf_path),
+    }
+    state["sportatlet_sent"] = sent_map
+    save_state(state)
+
+    try:
+        salesdrive_update_status(
+            order_id_int,
+            done_status_id,
+            number_sup=number_sup_value,
+            products=products_payload,
+        )
+    except Exception as e:
+        raise StepError("sportatlet_status_update", str(e)) from e
+
+    print(
+        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={done_status_id}, numberSup={number_sup_value}"
+    )
+
+
 def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None) -> bool:
     supplier = str(order.get("supplier") or "").strip()
     supplierlist, err = parse_order_supplierlist(order)
@@ -2165,6 +2283,12 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
         if state is None:
             raise RuntimeError("state is required for supplierlist=63")
         process_one_vitaworld_order(order, state)
+        return True
+
+    if supplierlist == ORCH_SPORTATLET_SUPPLIERLIST:
+        if state is None:
+            raise RuntimeError("state is required for supplierlist=43")
+        process_one_sportatlet_order(order, state)
         return True
 
     if supplierlist == ORCH_SUP6_SUPPLIERLIST:
@@ -2309,6 +2433,7 @@ def main() -> int:
     state.setdefault("zoohub_sent", {})
     state.setdefault("supplier7_sent", {})
     state.setdefault("vitaworld_sent", {})
+    state.setdefault("sportatlet_sent", {})
     state.setdefault("last_dobavki_export_ts", 0)
     processed_ids: List[int] = state.get("processed_ids", [])
 
@@ -2447,6 +2572,11 @@ def main() -> int:
                                 f"[ORCH] Routing => Vitaworld Telegram "
                                 f"(supplierlist={ORCH_VITAWORLD_SUPPLIERLIST}, supplier={supplier!r})"
                             )
+                        elif supplierlist == ORCH_SPORTATLET_SUPPLIERLIST:
+                            print(
+                                f"[ORCH] Routing => Sport-atlet Telegram "
+                                f"(supplierlist={ORCH_SPORTATLET_SUPPLIERLIST}, supplier={supplier!r})"
+                            )
                         elif supplierlist == ORCH_SUP6_SUPPLIERLIST:
                             sup6_items = build_sup6_items(order)
                             print(f"[ORCH] Routing => ProteinPlus (supplierlist={ORCH_SUP6_SUPPLIERLIST}, supplier={supplier!r})")
@@ -2501,6 +2631,8 @@ def main() -> int:
                             if is_supplier7_order(order) and step in {"supplier7_email_send"}:
                                 force_terminal = True
                             if is_vitaworld_order(order) and step in {"vitaworld_telegram_send"}:
+                                force_terminal = True
+                            if is_sportatlet_order(order) and step in {"sportatlet_telegram_send"}:
                                 force_terminal = True
                             if is_supplier6_order(order) and step in {"submit_order", "step7_submit_order"}:
                                 force_terminal = True
