@@ -111,7 +111,7 @@ STEP_TIMEOUT_DEFAULTS: Dict[str, int] = {
     "STEP4": int(os.getenv("ORCH_TIMEOUT_STEP4", "45")),
     "STEP5_DROP_TAB": int(os.getenv("ORCH_TIMEOUT_STEP5_DROP_TAB", "25")),
     "STEP5_CITY": int(os.getenv("ORCH_TIMEOUT_STEP5_CITY", "35")),
-    "STEP5_FILL_NAME_PHONE": int(os.getenv("ORCH_TIMEOUT_STEP5_FILL_NAME_PHONE", "30")),
+    "STEP5_FILL_NAME_PHONE": int(os.getenv("ORCH_TIMEOUT_STEP5_FILL_NAME_PHONE", "60")),
     "STEP6_BRANCH": int(os.getenv("ORCH_TIMEOUT_STEP6_BRANCH", "20")),
     "STEP6_TERMINAL": int(os.getenv("ORCH_TIMEOUT_STEP6_TERMINAL", "25")),
     "STEP7_TTN": int(os.getenv("ORCH_TIMEOUT_STEP7_TTN", "25")),

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
+from step2_3_add_items_to_cart import parse_expected_items, verify_cart_or_raise
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -14,6 +15,9 @@ load_dotenv(ROOT / ".env")
 USE_CDP = os.getenv("BIOTUS_USE_CDP", "0") == "1"
 CDP_ENDPOINT = os.getenv("BIOTUS_CDP_ENDPOINT", "http://127.0.0.1:9222")
 TIMEOUT_MS = int(os.getenv("BIOTUS_TIMEOUT_MS", "25000"))
+ITEMS_RAW = (os.getenv("BIOTUS_ITEMS") or "").strip()
+FINAL_CART_VERIFY_ENABLED = os.getenv("BIOTUS_FINAL_CART_VERIFY", "1") == "1"
+FINAL_CART_VERIFY_SCREENSHOT = os.getenv("BIOTUS_FINAL_CART_VERIFY_SCREENSHOT", "1") == "1"
 
 ART = ROOT / "artifacts"
 ART.mkdir(parents=True, exist_ok=True)
@@ -373,6 +377,24 @@ async def _extract_order_number_if_success(page) -> tuple[str, str]:
     return "", "order number not found"
 
 
+async def _verify_cart_before_submit(page) -> None:
+    if not (FINAL_CART_VERIFY_ENABLED and ITEMS_RAW):
+        return
+    expected = parse_expected_items(ITEMS_RAW)
+    if not expected:
+        return
+    await verify_cart_or_raise(
+        page,
+        expected,
+        strict=True,
+        screenshot_on_fail=FINAL_CART_VERIFY_SCREENSHOT,
+        save_ok_html=False,
+        fail_prefix="step9_pre_submit_cart_verify_failed",
+        ok_html_name="step9_pre_submit_cart_verify_ok.html",
+        go_to_cart=False,
+    )
+
+
 async def main() -> dict:
     async with async_playwright() as p:
         if USE_CDP:
@@ -385,6 +407,8 @@ async def main() -> dict:
             page = await context.new_page()
 
         await page.wait_for_timeout(200)
+
+        await _verify_cart_before_submit(page)
 
         # Кнопка "Підтверджую замовлення" (основной способ)
         btn = page.get_by_role("button", name="Підтверджую замовлення").locator(":visible")

@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,7 @@ NP_API_KEY = (
     or os.getenv("NP_API_KEY")
     or ""
 ).strip()
+PRICE_TOLERANCE_UAH = Decimal("3")
 
 
 @dataclass(frozen=True)
@@ -184,6 +186,65 @@ def _parse_order_payload() -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError("SUP2_ORDER_JSON must be a JSON object.")
     return data
+
+
+def _parse_price_decimal(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            return Decimal(str(value)).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return None
+
+    text = str(value or "").replace("\xa0", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
+
+    candidates: list[str] = []
+    if re.fullmatch(r"\d+(?:[.,]\d+)?", text):
+        candidates.append(text)
+    candidates.extend(re.findall(r"(\d[\d\s]*(?:[.,]\d+)?)\s*(?:грн|uah|₴)", text, flags=re.IGNORECASE))
+    if not candidates:
+        candidates.extend(re.findall(r"(?<!\d)(\d{2,6}(?:[.,]\d{1,2})?)(?!\d)", text))
+
+    for raw in candidates:
+        normalized = re.sub(r"\s+", "", raw).replace(",", ".")
+        try:
+            return Decimal(normalized).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            continue
+    return None
+
+
+def _build_order_price_map(order: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    products = order.get("products") or []
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(products, list):
+        return out
+
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        desc = str(p.get("description") or "").strip()
+        sku = desc.split(",", 1)[0].strip() if desc else ""
+        if not sku:
+            sku = str(p.get("sku") or p.get("parameter") or p.get("barcode") or "").strip()
+        if not sku:
+            continue
+
+        price_field = ""
+        price_raw: Any = None
+        for field in ("price", "costPerItem"):
+            if p.get(field) not in (None, ""):
+                parsed = _parse_price_decimal(p.get(field))
+                if parsed is not None:
+                    price_field = field
+                    price_raw = p.get(field)
+                    out[sku] = {"price": parsed, "raw": price_raw, "field": price_field, "product_id": p.get("id")}
+                    break
+    return out
 
 
 def _first_delivery(order: dict[str, Any]) -> dict[str, Any]:
@@ -775,6 +836,108 @@ async def _search_and_open_product(page, sku: str) -> dict[str, str]:
     )
 
 
+async def _extract_product_page_price(page, sku: str) -> dict[str, Any]:
+    candidates = await page.evaluate(
+        """() => {
+            const selectors = [
+                "meta[itemprop='price']",
+                "[itemprop='price'][content]",
+                "[data-price]",
+                ".product-price__main",
+                ".product-price",
+                ".productCard-price",
+                ".price"
+            ];
+            const out = [];
+            const push = (selector, el) => {
+                if (!el) return;
+                const raw = el.getAttribute('content')
+                    || el.getAttribute('data-price')
+                    || el.getAttribute('value')
+                    || el.textContent
+                    || '';
+                const text = String(raw).replace(/\\s+/g, ' ').trim();
+                if (text) out.push({selector, text});
+            };
+            for (const selector of selectors) {
+                for (const el of Array.from(document.querySelectorAll(selector)).slice(0, 6)) {
+                    push(selector, el);
+                }
+                if (out.length) break;
+            }
+            if (!out.length) {
+                const body = (document.body && document.body.innerText || '').replace(/\\s+/g, ' ');
+                for (const match of body.matchAll(/\\d[\\d\\s]*(?:[,.]\\d+)?\\s*(?:грн|UAH|₴)/gi)) {
+                    out.push({selector: 'body_fallback', text: match[0].trim()});
+                    if (out.length >= 8) break;
+                }
+            }
+            return out;
+        }"""
+    )
+    if not isinstance(candidates, list):
+        candidates = []
+
+    parsed_candidates: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        parsed = _parse_price_decimal(candidate.get("text"))
+        row = {**candidate, "price": str(parsed) if parsed is not None else None}
+        parsed_candidates.append(row)
+        if parsed is not None:
+            return {"sku": sku, "price": parsed, "raw": candidate.get("text"), "selector": candidate.get("selector"), "candidates": parsed_candidates}
+
+    raise StageError(
+        "price_check",
+        f"PRICE_NOT_FOUND_ON_SITE: sku={sku}",
+        {"sku": sku, "url": page.url or "", "candidates": parsed_candidates},
+    )
+
+
+async def _verify_product_price(page, item: Item, product: dict[str, Any], order_price_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    order_price_info = order_price_map.get(item.sku)
+    if not order_price_info:
+        raise StageError(
+            "price_check",
+            f"ORDER_PRICE_NOT_FOUND: sku={item.sku}",
+            {"sku": item.sku, "product": product},
+        )
+
+    order_price = order_price_info.get("price")
+    if not isinstance(order_price, Decimal):
+        raise StageError(
+            "price_check",
+            f"ORDER_PRICE_NOT_PARSED: sku={item.sku}",
+            {"sku": item.sku, "order_price": order_price_info},
+        )
+
+    site_price_info = await _extract_product_page_price(page, item.sku)
+    site_price = site_price_info["price"]
+    diff = abs(site_price - order_price)
+    check = {
+        "sku": item.sku,
+        "qty": item.qty,
+        "order_price": str(order_price),
+        "order_price_raw": order_price_info.get("raw"),
+        "order_price_field": order_price_info.get("field"),
+        "site_price": str(site_price),
+        "site_price_raw": site_price_info.get("raw"),
+        "site_price_selector": site_price_info.get("selector"),
+        "difference": str(diff),
+        "tolerance": str(PRICE_TOLERANCE_UAH),
+        "product": product,
+    }
+    if diff > PRICE_TOLERANCE_UAH:
+        raise StageError(
+            "price_check",
+            f"PRICE_MISMATCH: sku={item.sku} order={order_price} site={site_price} diff={diff} грн > {PRICE_TOLERANCE_UAH} грн",
+            check,
+        )
+    print(f"[SUP2] price check ok: sku={item.sku} order={order_price} site={site_price} diff={diff}")
+    return check
+
+
 async def _wait_ajax_cart_product(page, product_id: str) -> dict:
     if not product_id:
         await page.wait_for_timeout(1200)
@@ -807,10 +970,11 @@ async def _wait_ajax_cart_product(page, product_id: str) -> dict:
     return latest
 
 
-async def _add_items(page, items: list[Item]) -> list[dict]:
+async def _add_items(page, items: list[Item], order_price_map: dict[str, dict[str, Any]]) -> list[dict]:
     added: list[dict] = []
     for item in items:
         product = await _search_and_open_product(page, item.sku)
+        price_check = await _verify_product_price(page, item, product, order_price_map)
         product_added = False
         for attempt in range(1, 4):
             if attempt > 1:
@@ -938,7 +1102,7 @@ async def _add_items(page, items: list[Item]) -> list[dict]:
                 f"Product was not found in checkout cart after add click: sku={item.sku}",
                 {"sku": item.sku, "product": product, "rows": await _read_checkout_rows(page), "js_result": locals().get("js_result")},
             )
-        added.append({**product, "qty": item.qty})
+        added.append({**product, "qty": item.qty, "price_check": price_check})
     return added
 
 
@@ -1693,6 +1857,7 @@ async def _run() -> tuple[bool, dict]:
     items = _parse_items()
     order_payload = _parse_order_payload()
     recipient = _extract_recipient(order_payload)
+    order_price_map = _build_order_price_map(order_payload)
 
     browser = None
     context = None
@@ -1737,7 +1902,7 @@ async def _run() -> tuple[bool, dict]:
                 clear_result = {"removed": 0, "skipped": True}
 
             stage = "add_items"
-            added = await _add_items(page, items)
+            added = await _add_items(page, items, order_price_map)
 
             stage = "set_quantities"
             quantity_result = await _set_item_quantities(page, items, added)

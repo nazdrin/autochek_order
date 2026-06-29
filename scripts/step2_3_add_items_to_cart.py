@@ -139,6 +139,8 @@ def parse_items() -> List[Item]:
 
 
 class _CartHTMLParser(HTMLParser):
+    VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+
     def __init__(self):
         super().__init__()
         self.depth = 0
@@ -185,7 +187,7 @@ class _CartHTMLParser(HTMLParser):
                     n = int(lv)
                     if n > 0:
                         return n
-            if lk == "value" and attrs.get("type", "").lower() in {"number", "text"}:
+            if lk == "value" and attrs.get("type", "").lower() in {"", "number", "text", "tel"}:
                 name_blob = " ".join([attrs.get("name", ""), attrs.get("id", ""), attrs.get("class", "")]).lower()
                 if any(mark in name_blob for mark in qty_keys) and lv.isdigit():
                     n = int(lv)
@@ -194,10 +196,12 @@ class _CartHTMLParser(HTMLParser):
         return None
 
     def handle_starttag(self, tag, attrs):
-        self.depth += 1
+        is_void = tag.lower() in self.VOID_TAGS
+        if not is_void:
+            self.depth += 1
         attrs_d = self._attrs_dict(attrs)
 
-        if self._looks_like_item_tag(tag, attrs_d):
+        if not is_void and self._looks_like_item_tag(tag, attrs_d):
             self.open_blocks.append(
                 {
                     "depth": self.depth,
@@ -469,6 +473,7 @@ async def read_cart_items_detailed(
     page,
     expected: Dict[str, int] | None = None,
     timeout_ms: int | None = None,
+    strict: bool = False,
 ) -> CartReadResult:
     expected = expected or {}
     deadline = time.monotonic() + ((timeout_ms if timeout_ms is not None else min(5000, TIMEOUT_MS)) / 1000.0)
@@ -483,11 +488,23 @@ async def read_cart_items_detailed(
         except Exception as e:
             html = CartReadResult({}, "html", {"error": str(e)})
 
-        for result in (storage, dom, html):
-            if result.found:
-                best = result
-                if not expected or not _validate_cart(expected, result.found, strict=False):
-                    return result
+        if strict and expected:
+            visible_results = [result for result in (dom, html) if result.found]
+            if visible_results:
+                for result in visible_results:
+                    best = result
+                    if not _validate_cart(expected, result.found, strict=True):
+                        return result
+            elif storage.found:
+                best = storage
+                if not _validate_cart(expected, storage.found, strict=True):
+                    return storage
+        else:
+            for result in (storage, dom, html):
+                if result.found:
+                    best = result
+                    if not expected or not _validate_cart(expected, result.found, strict=False):
+                        return result
 
         if time.monotonic() >= deadline:
             if best.found:
@@ -733,9 +750,11 @@ async def verify_cart_or_raise(
     save_ok_html: bool,
     fail_prefix: str,
     ok_html_name: str,
+    go_to_cart: bool = True,
 ):
-    await _goto_cart_page(page)
-    read_result = await read_cart_items_detailed(page, expected=expected)
+    if go_to_cart:
+        await _goto_cart_page(page)
+    read_result = await read_cart_items_detailed(page, expected=expected, strict=strict)
     found = read_result.found
     mismatches = _validate_cart(expected, found, strict=strict)
 
@@ -767,6 +786,26 @@ async def verify_cart_or_raise(
 
     checkpoint = save_cart_checkpoint(expected, found, source=read_result.source, url=page.url)
     print(f"CART VERIFY OK: {_fmt_items(expected)} source={read_result.source} checkpoint={checkpoint}")
+
+
+async def _detect_insufficient_qty_warning(page, *, sku: str, qty: int) -> str:
+    try:
+        text = await page.locator("body").inner_text(timeout=2500)
+    except Exception:
+        text = ""
+    normalized = re.sub(r"\s+", " ", text or "").strip()
+    patterns = [
+        r"не\s+всі\s+ваші\s+товари\s+наявні\s+в\s+запрошеній\s+кількості",
+        r"максимум\s+\d+\s+од\.?\s+одного\s+товару",
+        r"не\s+все\s+ваши\s+товары\s+доступны\s+в\s+запрошенном\s+количестве",
+    ]
+    if any(re.search(pattern, normalized, re.I) for pattern in patterns):
+        try:
+            await page.screenshot(path=str(ART / f"step3_insufficient_qty_{sku}.png"), full_page=True)
+        except Exception:
+            pass
+        return f"BIOTUS_INSUFFICIENT_QTY: SKU={sku} requested={qty}. Site warning: {normalized[:500]}"
+    return ""
 
 
 # --- Helper: clear cart if any items present ---
@@ -859,7 +898,7 @@ async def _set_qty(page, qty: int):
     await page.wait_for_timeout(200)
 
 
-async def _click_add_to_cart(page, *, keep_cart_modal_open: bool = False):
+async def _click_add_to_cart(page, *, sku: str, qty: int, keep_cart_modal_open: bool = False):
     await page.wait_for_timeout(200)
 
     add_re = re.compile(r"(в\s+кошик|до\s+кошика|у\s+кошик|в\s+корзин[уы]|add\s*to\s*cart)", re.I)
@@ -883,6 +922,10 @@ async def _click_add_to_cart(page, *, keep_cart_modal_open: bool = False):
 
     await btn.click(force=True, timeout=30000)
     await page.wait_for_timeout(800)
+
+    insufficient_warning = await _detect_insufficient_qty_warning(page, sku=sku, qty=qty)
+    if insufficient_warning:
+        raise RuntimeError(insufficient_warning)
 
     # Между товарами закрываем модалку, чтобы не блокировала поиск.
     # Но после последнего товара оставляем/открываем её, чтобы step4 мог нажать "Оформити".
@@ -934,7 +977,7 @@ async def main():
                 await page.screenshot(path=str(ART / f"step2_qty_{idx}_{it.sku}.png"), full_page=True)
 
                 keep_open = SHOW_CART_MODAL_AT_END and not CART_VERIFY_ENABLED and (idx == len(items))
-                await _click_add_to_cart(page, keep_cart_modal_open=keep_open)
+                await _click_add_to_cart(page, sku=it.sku, qty=it.qty, keep_cart_modal_open=keep_open)
                 await page.screenshot(path=str(ART / f"step3_added_{idx}_{it.sku}.png"), full_page=True)
 
                 # small pause between items (UI animations)

@@ -31,6 +31,43 @@ def _digits(s: str) -> str:
     return re.sub(r"\D+", "", s or "")
 
 
+async def pick_checkout_page(context):
+    pages = list(context.pages)
+    for p in pages:
+        try:
+            if p.is_closed():
+                continue
+        except Exception:
+            pass
+        try:
+            url = p.url or ""
+        except Exception:
+            url = ""
+        if "opt.biotus" in url and "/checkout" in url:
+            try:
+                await p.bring_to_front()
+            except Exception:
+                pass
+            return p
+
+    for p in pages:
+        try:
+            url = p.url or ""
+        except Exception:
+            url = ""
+        if "opt.biotus" in url:
+            try:
+                await p.bring_to_front()
+            except Exception:
+                pass
+            return p
+
+    if pages:
+        return pages[-1]
+
+    return await context.new_page()
+
+
 
 async def _first_visible(loc):
     """Return first visible element from a Locator or None."""
@@ -154,14 +191,22 @@ async def main():
         if USE_CDP:
             browser = await p.chromium.connect_over_cdp(CDP_ENDPOINT)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = context.pages[-1] if context.pages else await context.new_page()
+            page = await pick_checkout_page(context)
         else:
             browser = await p.chromium.launch(headless=False)
             context = await browser.new_context()
             page = await context.new_page()
 
         # Wait until checkout recipient form inputs are rendered
-        await page.locator("#address-firstname").first.wait_for(state="visible", timeout=30000)
+        firstname = page.locator("#address-firstname:visible, input[name='firstname']:visible").first
+        try:
+            await firstname.wait_for(state="visible", timeout=30000)
+        except Exception:
+            try:
+                await page.screenshot(path=str(ART / "step5_err_no_firstname.png"), full_page=True)
+            except Exception:
+                pass
+            raise
 
         await page.wait_for_timeout(800)
         await page.screenshot(path=str(ART / "step5_2_before_fill.png"), full_page=True)
