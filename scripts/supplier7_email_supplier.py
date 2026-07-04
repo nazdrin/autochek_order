@@ -7,6 +7,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -39,6 +40,17 @@ def _parse_sku(description: str) -> str:
     return re.split(r"[\s,]+", text, maxsplit=1)[0].strip()
 
 
+def _parse_qty(value: Any) -> int:
+    raw = str(value if value is not None else "").strip().replace(",", ".")
+    if not raw:
+        return 1
+    try:
+        qty = int(Decimal(raw))
+    except (InvalidOperation, ValueError):
+        return 1
+    return qty if qty >= 1 else 1
+
+
 def parse_supplier7_items(order: Dict[str, Any]) -> List[Dict[str, Any]]:
     products = order.get("products") or []
     out: List[Dict[str, Any]] = []
@@ -47,12 +59,7 @@ def parse_supplier7_items(order: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         sku = _parse_sku(str(p.get("description") or ""))
         name = str(p.get("text") or p.get("name") or "").strip()
-        try:
-            qty = int(p.get("amount") or 1)
-        except Exception:
-            qty = 1
-        if qty < 1:
-            qty = 1
+        qty = _parse_qty(p.get("amount"))
         out.append({"name": name, "sku": sku, "qty": qty})
     if not out:
         raise RuntimeError("No products for Supplier7 order")
@@ -68,8 +75,11 @@ def build_supplier7_body(order: Dict[str, Any], ttn: str, items: List[Dict[str, 
     for idx, it in enumerate(items):
         name = str(it.get("name") or "").strip() or "(без назви)"
         sku = str(it.get("sku") or "").strip()
+        qty = _parse_qty(it.get("qty"))
         lines.append(name)
-        lines.append(sku)
+        if sku:
+            lines.append(sku)
+        lines.append(f"К-во: {qty}")
         if idx != len(items) - 1:
             lines.append("")
     lines.append("")
