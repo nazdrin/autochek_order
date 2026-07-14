@@ -88,6 +88,53 @@ def _sku_regex(sku: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![0-9a-zа-яёіїєґ]){escaped}(?![0-9a-zа-яёіїєґ])", re.I)
 
 
+def _exact_sku_sources(sku: str, candidate: dict[str, Any]) -> list[str]:
+    """Return independent fields that contain SKU as a whole article number."""
+    sku_re = _sku_regex(sku)
+    sources: list[str] = []
+    if sku_re.search(str(candidate.get("text") or "")):
+        sources.append("dropdown_text")
+    if sku_re.search(str(candidate.get("href") or "")):
+        sources.append("href")
+    metadata = candidate.get("metadata")
+    if isinstance(metadata, dict) and any(sku_re.search(str(value or "")) for value in metadata.values()):
+        sources.append("metadata")
+    return sources
+
+
+def _classify_exact_dropdown_candidates(sku: str, candidates: list[dict[str, Any]]) -> tuple[str, dict[str, Any] | None]:
+    """Classify product links without allowing fuzzy or single-result fallbacks."""
+    exact_matches: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not candidate.get("is_product_link"):
+            continue
+        sources = _exact_sku_sources(sku, candidate)
+        if sources:
+            matched = dict(candidate)
+            matched["sku_match_sources"] = sources
+            exact_matches.append(matched)
+    if len(exact_matches) == 1:
+        return "exact", exact_matches[0]
+    if len(exact_matches) > 1:
+        return "ambiguous", None
+    return "no_exact", None
+
+
+def _product_page_sku_match_sources(sku: str, *, title: str, body_text: str, url: str, metadata: dict[str, Any] | None = None) -> list[str]:
+    """Return page-local evidence only; dropdown title is intentionally excluded."""
+    sku_re = _sku_regex(sku)
+    sources: list[str] = []
+    if sku_re.search(title or ""):
+        sources.append("title")
+    if sku_re.search(url or ""):
+        sources.append("url")
+    if isinstance(metadata, dict) and any(sku_re.search(str(value or "")) for value in metadata.values()):
+        sources.append("metadata")
+    if sku_re.search(body_text or ""):
+        sources.append("page_text")
+    return sources
+
+
 def _state_path() -> Path:
     p = Path(SUP4_STORAGE_STATE_FILE)
     if not p.is_absolute():
@@ -922,18 +969,15 @@ async def _open_search_and_fill(page, sku: str) -> None:
         raise StageError(stage, f"Search fill failed for sku={sku}: {e}") from e
 
 
-async def _open_product_from_dropdown(page, sku: str) -> dict[str, str]:
+async def _open_product_from_dropdown(page, sku: str) -> dict[str, Any]:
     stage = "add_items"
     results, count = await _wait_dropdown_candidates(page, sku)
     if count <= 0:
         details = await _capture_debug_artifacts(page, stage, "search_dropdown_empty", extra={"sku": sku, "dropdown_count": count})
         raise StageError(stage, "SEARCH_DROPDOWN_EMPTY", details)
 
-    exact_matches: list[tuple[Any, dict[str, str]]] = []
-    safe_contains_matches: list[tuple[Any, dict[str, str]]] = []
-    visible_product_links: list[tuple[Any, dict[str, str]]] = []
+    candidates: list[tuple[Any, dict[str, Any]]] = []
     seen_keys: set[str] = set()
-    sku_re = _sku_regex(sku)
     for i in range(min(count, 20)):
         row = results.nth(i)
         try:
@@ -949,48 +993,48 @@ async def _open_product_from_dropdown(page, sku: str) -> dict[str, str]:
                     href = link_href
             txt_raw = re.sub(r"\s+", " ", (await row.inner_text(timeout=900)) or "").strip()
             txt_norm = _norm_text(txt_raw)
-            info = {"text": txt_raw, "href": href}
+            row_metadata = await row.evaluate(
+                """el => Object.fromEntries(Array.from(el.attributes)
+                    .filter(attr => attr.name.startsWith('data-'))
+                    .map(attr => [attr.name, attr.value]))"""
+            )
+            link_metadata = {}
+            if click_target is not row:
+                link_metadata = await click_target.evaluate(
+                    """el => Object.fromEntries(Array.from(el.attributes)
+                        .filter(attr => attr.name.startsWith('data-'))
+                        .map(attr => [attr.name, attr.value]))"""
+                )
+            metadata = {}
+            if isinstance(row_metadata, dict):
+                metadata.update(row_metadata)
+            if isinstance(link_metadata, dict):
+                metadata.update(link_metadata)
+            href_lower = href.casefold()
+            is_product_link = bool(href) and not href_lower.startswith(("javascript:", "#")) and "/search" not in href_lower
+            info = {"text": txt_raw, "href": href, "metadata": metadata, "is_product_link": is_product_link}
             dedupe_key = f"{href}|{txt_norm}"
             if dedupe_key in seen_keys:
                 continue
             seen_keys.add(dedupe_key)
-            if href.startswith("http") and "monsterlab.com.ua" in href and "/search" not in href:
-                visible_product_links.append((click_target, info))
-            if sku_re.search(txt_raw):
-                exact_matches.append((click_target, info))
-                continue
-            if _norm_text(sku) in txt_norm:
-                safe_contains_matches.append((click_target, info))
+            candidates.append((click_target, info))
         except Exception:
             continue
 
-    chosen = None
-    chosen_info: dict[str, str] = {}
+    candidate_infos = [info for _, info in candidates]
+    outcome, chosen_info = _classify_exact_dropdown_candidates(sku, candidate_infos)
     print(
-        f"[SUP4] dropdown classify: sku={sku} exact={len(exact_matches)} "
-        f"contains={len(safe_contains_matches)} visible_links={len(visible_product_links)}"
+        f"[SUP4] dropdown classify: sku={sku} candidates={len(candidate_infos)} outcome={outcome}"
     )
-    if len(exact_matches) == 1:
-        chosen, chosen_info = exact_matches[0]
-    elif len(exact_matches) > 1:
+    if outcome == "ambiguous":
         details = await _capture_debug_artifacts(
             page,
             stage,
-            "search_no_exact_match_ambiguous",
-            extra={"sku": sku, "matches": [m[1] for m in exact_matches[:5]], "dropdown_count": count},
+            "search_exact_match_ambiguous",
+            extra={"sku": sku, "candidates": candidate_infos[:20], "dropdown_count": count},
         )
-        raise StageError(stage, "SEARCH_NO_EXACT_MATCH", details)
-    elif len(safe_contains_matches) == 1:
-        chosen, chosen_info = safe_contains_matches[0]
-    elif len(visible_product_links) == 1:
-        chosen, chosen_info = visible_product_links[0]
-        print(f"[SUP4] dropdown fallback: single visible product link used for sku={sku}")
-    elif len(visible_product_links) > 1:
-        exact_href_matches = [m for m in visible_product_links if sku.casefold().replace("-", "") in m[1].get("href", "").casefold().replace("-", "")]
-        if len(exact_href_matches) == 1:
-            chosen, chosen_info = exact_href_matches[0]
-            print(f"[SUP4] dropdown fallback: href matched sku for sku={sku}")
-    else:
+        raise StageError(stage, "SEARCH_EXACT_MATCH_AMBIGUOUS", details)
+    if outcome != "exact" or chosen_info is None:
         details = await _capture_debug_artifacts(
             page,
             stage,
@@ -998,11 +1042,12 @@ async def _open_product_from_dropdown(page, sku: str) -> dict[str, str]:
             extra={
                 "sku": sku,
                 "dropdown_count": count,
-                "candidates": [m[1] for m in safe_contains_matches[:5]],
-                "visible_product_links": [m[1] for m in visible_product_links[:5]],
+                "candidates": candidate_infos[:20],
             },
         )
         raise StageError(stage, "SEARCH_NO_EXACT_MATCH", details)
+
+    chosen = next(target for target, info in candidates if info == {key: value for key, value in chosen_info.items() if key != "sku_match_sources"})
 
     try:
         await chosen.click(timeout=min(3500, SUP4_TIMEOUT_MS), force=True)
@@ -1016,7 +1061,12 @@ async def _open_product_from_dropdown(page, sku: str) -> dict[str, str]:
 
     print(f"[SUP4] sku found in dropdown: {sku}, chosen={chosen_info}")
     print(f"[SUP4] product page opened: {page.url}")
-    return {"sku": sku, "dropdown_text": chosen_info.get("text", ""), "dropdown_href": chosen_info.get("href", "")}
+    return {
+        "sku": sku,
+        "dropdown_text": str(chosen_info.get("text") or ""),
+        "dropdown_href": str(chosen_info.get("href") or ""),
+        "dropdown_sku_match_sources": list(chosen_info.get("sku_match_sources") or []),
+    }
 
 
 async def _click_buy_on_product(page, sku: str) -> None:
@@ -1114,7 +1164,7 @@ async def _get_product_page_title(page) -> str:
     return ""
 
 
-async def _verify_product_page_identity(page, sku: str, *, dropdown_text: str = "") -> str:
+async def _verify_product_page_identity(page, sku: str) -> tuple[str, list[str]]:
     stage = "add_items"
     title = await _get_product_page_title(page)
     body_text = ""
@@ -1122,20 +1172,29 @@ async def _verify_product_page_identity(page, sku: str, *, dropdown_text: str = 
         body_text = await page.inner_text("body")
     except Exception:
         body_text = ""
-    title_norm = _norm_text(title)
-    dropdown_norm = _norm_text(dropdown_text)
-    sku_ok = bool(_sku_regex(sku).search(body_text or "")) or bool(_sku_regex(sku).search(title or "")) or sku.casefold() in (page.url or "").casefold()
-    title_ok = bool(title_norm and dropdown_norm and (title_norm in dropdown_norm or dropdown_norm in title_norm))
-    print(f"[SUP4] product page identity: sku={sku} title={title!r} sku_ok={sku_ok} title_ok={title_ok}")
-    if not sku_ok and not title_ok:
+    metadata = await page.evaluate(
+        """() => Object.fromEntries(Array.from(document.querySelectorAll('[data-sku], [data-article], [data-product-sku], [data-product-code]'))
+            .flatMap(el => Array.from(el.attributes)
+                .filter(attr => attr.name.startsWith('data-'))
+                .map(attr => [attr.name, attr.value])))"""
+    )
+    page_sources = _product_page_sku_match_sources(
+        sku,
+        title=title,
+        body_text=body_text,
+        url=page.url or "",
+        metadata=metadata if isinstance(metadata, dict) else None,
+    )
+    print(f"[SUP4] product page identity: sku={sku} title={title!r} page_sources={page_sources}")
+    if not page_sources:
         details = await _capture_debug_artifacts(
             page,
             stage,
             "product_page_sku_mismatch",
-            extra={"sku": sku, "title": title, "dropdown_text": dropdown_text, "url": page.url},
+            extra={"sku": sku, "title": title, "url": page.url, "metadata": metadata},
         )
         raise StageError(stage, f"PRODUCT_PAGE_SKU_MISMATCH: sku={sku}", details)
-    return title
+    return title, page_sources
 
 
 async def _cart_rows(page):
@@ -1429,7 +1488,7 @@ async def _continue_or_checkout(page, *, last_item: bool) -> None:
     raise StageError(stage, "Could not click return-to-shopping button")
 
 
-async def _search_open_verify_product(page, sku: str) -> dict[str, str]:
+async def _search_open_verify_product(page, sku: str) -> dict[str, Any]:
     stage = "add_items"
     attempts = (
         {"reload": False, "label": "initial"},
@@ -1444,8 +1503,9 @@ async def _search_open_verify_product(page, sku: str) -> dict[str, str]:
                 await _best_effort_close_popups(page)
             await _open_search_and_fill(page, sku)
             dropdown_info = await _open_product_from_dropdown(page, sku)
-            product_title = await _verify_product_page_identity(page, sku, dropdown_text=dropdown_info.get("dropdown_text", ""))
+            product_title, product_page_sku_match_sources = await _verify_product_page_identity(page, sku)
             dropdown_info["product_title"] = product_title
+            dropdown_info["product_page_sku_match_sources"] = product_page_sku_match_sources
             return dropdown_info
         except StageError as e:
             last_error = e
@@ -1480,6 +1540,9 @@ async def _add_items(page, items: list[Sup4Item]) -> dict[str, Any]:
                 "qty": item.qty,
                 "product_title": product_info.get("product_title", ""),
                 "dropdown_text": product_info.get("dropdown_text", ""),
+                "dropdown_href": product_info.get("dropdown_href", ""),
+                "dropdown_sku_match_sources": product_info.get("dropdown_sku_match_sources", []),
+                "product_page_sku_match_sources": product_info.get("product_page_sku_match_sources", []),
                 "product_url": page.url or "",
             }
         )
