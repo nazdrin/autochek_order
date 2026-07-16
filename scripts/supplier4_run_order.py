@@ -42,14 +42,11 @@ SUP4_HEADLESS = _to_bool(os.getenv("SUP4_HEADLESS", "1"), True)
 SUP4_TIMEOUT_MS = _to_int(os.getenv("SUP4_TIMEOUT_MS", "20000"), 20000)
 SUP4_CLEAR_BASKET = _to_bool(os.getenv("SUP4_CLEAR_BASKET", "1"), True)
 SUP4_ITEMS = (os.getenv("SUP4_ITEMS") or "").strip()
-SUP4_ITEM_TITLES_JSON = (os.getenv("SUP4_ITEM_TITLES_JSON") or "").strip()
 SUP4_TTN = (os.getenv("SUP4_TTN") or "").strip()
 SUP4_ATTACH_DIR = (os.getenv("SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 SUP4_PAUSE_SEC = _to_int(os.getenv("SUP4_PAUSE_SEC", "0"), 0)
 SUP4_STAGE = (os.getenv("SUP4_STAGE") or "run").strip().lower() or "run"
 SUP4_FORCE_LOGIN = _to_bool(os.getenv("SUP4_FORCE_LOGIN", "0"), False)
-SUP4_LOGIN_RECAPTCHA_WAIT_MS = _to_int(os.getenv("SUP4_LOGIN_RECAPTCHA_WAIT_MS", "15000"), 15000)
-SUP4_LOGIN_RECAPTCHA_PAUSE_MS = _to_int(os.getenv("SUP4_LOGIN_RECAPTCHA_PAUSE_MS", "3000"), 3000)
 SUP4_SKIP_SUBMIT = _to_bool(os.getenv("SUP4_SKIP_SUBMIT", "0"), False)
 SUP4_NP_API_KEY = (
     os.getenv("SUP4_NP_API_KEY")
@@ -72,7 +69,6 @@ class StageError(RuntimeError):
 class Sup4Item:
     sku: str
     qty: int
-    expected_title: str = ""
 
 
 def _digits_only(value: str) -> str:
@@ -106,12 +102,9 @@ def _exact_sku_sources(sku: str, candidate: dict[str, Any]) -> list[str]:
     return sources
 
 
-def _classify_exact_dropdown_candidates(
-    sku: str, candidates: list[dict[str, Any]], *, expected_title: str = ""
-) -> tuple[str, dict[str, Any] | None]:
-    """Choose only a product confirmed by exact SKU or the order's product title."""
+def _classify_exact_dropdown_candidates(sku: str, candidates: list[dict[str, Any]]) -> tuple[str, dict[str, Any] | None]:
+    """Prefer an exact SKU in the dropdown; otherwise open one result for article verification."""
     exact_matches: list[dict[str, Any]] = []
-    title_matches: list[dict[str, Any]] = []
     for candidate in candidates:
         if not candidate.get("is_product_link"):
             continue
@@ -120,49 +113,21 @@ def _classify_exact_dropdown_candidates(
             matched = dict(candidate)
             matched["sku_match_sources"] = sources
             exact_matches.append(matched)
-        if expected_title and _title_identity_matches(expected_title, str(candidate.get("text") or "")):
-            matched = dict(candidate)
-            matched["sku_match_sources"] = ["order_title"]
-            title_matches.append(matched)
-
-    if expected_title:
-        if len(title_matches) == 1:
-            return "order_title", title_matches[0]
-        if len(title_matches) > 1:
-            return "ambiguous", None
-        return "no_exact", None
     if len(exact_matches) == 1:
         return "exact", exact_matches[0]
     if len(exact_matches) > 1:
         return "ambiguous", None
+    product_links = [candidate for candidate in candidates if candidate.get("is_product_link")]
+    if len(product_links) == 1:
+        matched = dict(product_links[0])
+        matched["sku_match_sources"] = ["single_dropdown_result"]
+        return "single_result", matched
     return "no_exact", None
 
 
-def _product_page_sku_match_sources(sku: str, *, title: str, body_text: str, url: str, metadata: dict[str, Any] | None = None) -> list[str]:
-    """Return page-local evidence only; dropdown title is intentionally excluded."""
-    sku_re = _sku_regex(sku)
-    sources: list[str] = []
-    if sku_re.search(title or ""):
-        sources.append("title")
-    if sku_re.search(url or ""):
-        sources.append("url")
-    if isinstance(metadata, dict) and any(sku_re.search(str(value or "")) for value in metadata.values()):
-        sources.append("metadata")
-    if sku_re.search(body_text or ""):
-        sources.append("page_text")
-    return sources
-
-
-def _title_identity_matches(expected_title: str, actual_title: str) -> bool:
-    expected = _norm_text(expected_title)
-    actual = _norm_text(actual_title)
-    if not expected or not actual:
-        return False
-    if expected in actual or actual in expected:
-        return True
-    expected_tokens = {token for token in re.findall(r"[\wа-яёіїєґ]+", expected) if len(token) >= 3}
-    actual_tokens = {token for token in re.findall(r"[\wа-яёіїєґ]+", actual) if len(token) >= 3}
-    return len(expected_tokens) >= 2 and expected_tokens.issubset(actual_tokens)
+def _article_matches_sku(sku: str, article: str) -> bool:
+    """The Monsterlab card article is the sole identity check before purchase."""
+    return bool(_norm_text(article)) and _norm_text(article) == _norm_text(sku)
 
 
 def _state_path() -> Path:
@@ -229,19 +194,6 @@ def _parse_items() -> list[Sup4Item]:
     raw = SUP4_ITEMS.strip()
     if not raw:
         raise RuntimeError("SUP4_ITEMS is required (format: SKU1:2,SKU2:1)")
-    expected_titles: dict[str, str] = {}
-    if SUP4_ITEM_TITLES_JSON:
-        try:
-            raw_titles = json.loads(SUP4_ITEM_TITLES_JSON)
-            if not isinstance(raw_titles, dict):
-                raise ValueError("must be an object")
-            expected_titles = {
-                str(sku).strip(): str(title).strip()
-                for sku, title in raw_titles.items()
-                if str(sku).strip() and str(title).strip()
-            }
-        except Exception as e:
-            raise RuntimeError(f"Invalid SUP4_ITEM_TITLES_JSON: {e}") from e
     out: list[Sup4Item] = []
     parts = [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
     for idx, part in enumerate(parts, start=1):
@@ -254,7 +206,7 @@ def _parse_items() -> list[Sup4Item]:
             qty = 1
         if not sku:
             raise RuntimeError(f"SUP4_ITEMS part #{idx} has empty sku")
-        out.append(Sup4Item(sku=sku, qty=qty, expected_title=expected_titles.get(sku, "")))
+        out.append(Sup4Item(sku=sku, qty=qty))
     return out
 
 
@@ -643,11 +595,9 @@ async def _login(page) -> None:
                     && document.querySelector("#login_form_id textarea[name='g-recaptcha-response']")
                     && document.querySelector("#login_form_id iframe[src*='recaptcha']")
                 )""",
-                timeout=min(SUP4_LOGIN_RECAPTCHA_WAIT_MS, SUP4_TIMEOUT_MS),
+                timeout=min(8000, SUP4_TIMEOUT_MS),
             )
-            if SUP4_LOGIN_RECAPTCHA_PAUSE_MS > 0:
-                print(f"[SUP4] login: waiting {SUP4_LOGIN_RECAPTCHA_PAUSE_MS}ms for reCAPTCHA to settle")
-                await page.wait_for_timeout(SUP4_LOGIN_RECAPTCHA_PAUSE_MS)
+            await page.wait_for_timeout(800)
         except Exception:
             print("[SUP4] login warning: reCAPTCHA widget readiness not confirmed before submit")
         await submit.click(timeout=min(4000, SUP4_TIMEOUT_MS))
@@ -1014,7 +964,7 @@ async def _open_search_and_fill(page, sku: str) -> None:
         raise StageError(stage, f"Search fill failed for sku={sku}: {e}") from e
 
 
-async def _open_product_from_dropdown(page, sku: str, *, expected_title: str = "") -> dict[str, Any]:
+async def _open_product_from_dropdown(page, sku: str) -> dict[str, Any]:
     stage = "add_items"
     results, count = await _wait_dropdown_candidates(page, sku)
     if count <= 0:
@@ -1067,10 +1017,8 @@ async def _open_product_from_dropdown(page, sku: str, *, expected_title: str = "
             continue
 
     candidate_infos = [info for _, info in candidates]
-    outcome, chosen_info = _classify_exact_dropdown_candidates(sku, candidate_infos, expected_title=expected_title)
-    print(
-        f"[SUP4] dropdown classify: sku={sku} expected_title={expected_title!r} candidates={len(candidate_infos)} outcome={outcome}"
-    )
+    outcome, chosen_info = _classify_exact_dropdown_candidates(sku, candidate_infos)
+    print(f"[SUP4] dropdown classify: sku={sku} candidates={len(candidate_infos)} outcome={outcome}")
     if outcome == "ambiguous":
         details = await _capture_debug_artifacts(
             page,
@@ -1079,7 +1027,7 @@ async def _open_product_from_dropdown(page, sku: str, *, expected_title: str = "
             extra={"sku": sku, "candidates": candidate_infos[:20], "dropdown_count": count},
         )
         raise StageError(stage, "SEARCH_EXACT_MATCH_AMBIGUOUS", details)
-    if outcome != "exact" or chosen_info is None:
+    if outcome not in {"exact", "single_result"} or chosen_info is None:
         details = await _capture_debug_artifacts(
             page,
             stage,
@@ -1111,7 +1059,6 @@ async def _open_product_from_dropdown(page, sku: str, *, expected_title: str = "
         "dropdown_text": str(chosen_info.get("text") or ""),
         "dropdown_href": str(chosen_info.get("href") or ""),
         "dropdown_sku_match_sources": list(chosen_info.get("sku_match_sources") or []),
-        "expected_title": expected_title,
     }
 
 
@@ -1210,49 +1157,29 @@ async def _get_product_page_title(page) -> str:
     return ""
 
 
-async def _verify_product_page_identity(page, sku: str, *, expected_title: str = "") -> tuple[str, list[str]]:
+async def _verify_product_page_identity(page, sku: str) -> tuple[str, list[str]]:
     stage = "add_items"
     title = await _get_product_page_title(page)
-    body_text = ""
+    article = ""
     try:
-        body_text = await page.inner_text("body")
+        article = (await page.locator("meta[itemprop='sku']").first.get_attribute("content") or "").strip()
     except Exception:
-        body_text = ""
-    metadata = await page.evaluate(
-        """() => Object.fromEntries(Array.from(document.querySelectorAll('[data-sku], [data-article], [data-product-sku], [data-product-code]'))
-            .flatMap(el => Array.from(el.attributes)
-                .filter(attr => attr.name.startsWith('data-'))
-                .map(attr => [attr.name, attr.value])))"""
-    )
-    page_sources = _product_page_sku_match_sources(
-        sku,
-        title=title,
-        body_text=body_text,
-        url=page.url or "",
-        metadata=metadata if isinstance(metadata, dict) else None,
-    )
-    title_ok = _title_identity_matches(expected_title, title) if expected_title else False
-    print(
-        f"[SUP4] product page identity: sku={sku} title={title!r} expected_title={expected_title!r} "
-        f"page_sources={page_sources} title_ok={title_ok}"
-    )
-    if expected_title and not title_ok:
+        pass
+    if not article:
+        try:
+            article_text = await page.locator(".product-header__code").first.inner_text(timeout=1500)
+            match = re.search(r"артикул\s*:\s*([^\s]+)", article_text or "", flags=re.I)
+            article = match.group(1).strip() if match else ""
+        except Exception:
+            pass
+    article_ok = _article_matches_sku(sku, article)
+    print(f"[SUP4] product page article: expected={sku} actual={article!r} matched={article_ok}")
+    if not article_ok:
         details = await _capture_debug_artifacts(
-            page,
-            stage,
-            "product_page_title_mismatch",
-            extra={"sku": sku, "title": title, "expected_title": expected_title, "url": page.url},
+            page, stage, "product_page_sku_mismatch", extra={"sku": sku, "article": article, "title": title, "url": page.url}
         )
-        raise StageError(stage, f"PRODUCT_PAGE_TITLE_MISMATCH: sku={sku}", details)
-    if not expected_title and not page_sources:
-        details = await _capture_debug_artifacts(
-            page,
-            stage,
-            "product_page_sku_mismatch",
-            extra={"sku": sku, "title": title, "url": page.url, "metadata": metadata},
-        )
-        raise StageError(stage, f"PRODUCT_PAGE_SKU_MISMATCH: sku={sku}", details)
-    return title, (["order_title"] if title_ok else page_sources)
+        raise StageError(stage, f"PRODUCT_PAGE_SKU_MISMATCH: expected={sku} actual={article or 'missing'}", details)
+    return title, ["product_page_article"]
 
 
 async def _cart_rows(page):
@@ -1546,7 +1473,7 @@ async def _continue_or_checkout(page, *, last_item: bool) -> None:
     raise StageError(stage, "Could not click return-to-shopping button")
 
 
-async def _search_open_verify_product(page, sku: str, *, expected_title: str = "") -> dict[str, Any]:
+async def _search_open_verify_product(page, sku: str) -> dict[str, Any]:
     stage = "add_items"
     attempts = (
         {"reload": False, "label": "initial"},
@@ -1560,9 +1487,9 @@ async def _search_open_verify_product(page, sku: str, *, expected_title: str = "
                 await page.goto(SUP4_BASE_URL, wait_until="domcontentloaded")
                 await _best_effort_close_popups(page)
             await _open_search_and_fill(page, sku)
-            dropdown_info = await _open_product_from_dropdown(page, sku, expected_title=expected_title)
+            dropdown_info = await _open_product_from_dropdown(page, sku)
             product_title, product_page_sku_match_sources = await _verify_product_page_identity(
-                page, sku, expected_title=expected_title
+                page, sku
             )
             dropdown_info["product_title"] = product_title
             dropdown_info["product_page_sku_match_sources"] = product_page_sku_match_sources
@@ -1589,7 +1516,7 @@ async def _add_items(page, items: list[Sup4Item]) -> dict[str, Any]:
     for idx, item in enumerate(items):
         await page.goto(SUP4_BASE_URL, wait_until="domcontentloaded")
         await _best_effort_close_popups(page)
-        product_info = await _search_open_verify_product(page, item.sku, expected_title=item.expected_title)
+        product_info = await _search_open_verify_product(page, item.sku)
         await _click_buy_on_product(page, item.sku)
         await _wait_cart_modal(page)
         qty_check = await _set_modal_qty(page, item.sku, item.qty, product_title=product_info.get("product_title", ""))
@@ -1598,7 +1525,6 @@ async def _add_items(page, items: list[Sup4Item]) -> dict[str, Any]:
             {
                 "sku": item.sku,
                 "qty": item.qty,
-                "expected_title": item.expected_title,
                 "product_title": product_info.get("product_title", ""),
                 "dropdown_text": product_info.get("dropdown_text", ""),
                 "dropdown_href": product_info.get("dropdown_href", ""),

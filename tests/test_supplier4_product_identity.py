@@ -7,11 +7,9 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from supplier4_run_order import (  # noqa: E402
+    _article_matches_sku,
     _classify_exact_dropdown_candidates,
-    _product_page_sku_match_sources,
-    _title_identity_matches,
 )
-from orchestrator import build_sup4_item_titles  # noqa: E402
 
 
 def candidate(*, text="", href="", metadata=None, is_product_link=True):
@@ -24,35 +22,13 @@ def candidate(*, text="", href="", metadata=None, is_product_link=True):
 
 
 class Supplier4ProductIdentityTests(unittest.TestCase):
-    def test_single_irrelevant_result_is_rejected(self):
+    def test_single_result_is_opened_for_product_page_article_check(self):
         outcome, selected = _classify_exact_dropdown_candidates(
             "NOW-00105",
             [candidate(text="NOW L-Lysine 500 mg 100 таблеток", href="/l-lysine")],
         )
-        self.assertEqual("no_exact", outcome)
-        self.assertIsNone(selected)
-
-    def test_single_result_is_selected_only_when_order_title_matches(self):
-        outcome, selected = _classify_exact_dropdown_candidates(
-            "NOW-00105",
-            [candidate(text="NOW L-Lysine 500 mg 100 таблеток", href="/l-lysine")],
-            expected_title="NOW L-Lysine 500 mg, 100 таблеток",
-        )
-        self.assertEqual("order_title", outcome)
-        self.assertEqual(["order_title"], selected["sku_match_sources"])
-
-    def test_wrong_single_result_is_rejected_when_order_title_is_present(self):
-        outcome, selected = _classify_exact_dropdown_candidates(
-            "NOW-00105",
-            [candidate(text="NOW L-Lysine 500 mg 100 таблеток", href="/l-lysine")],
-            expected_title="NOW Vitamin C 1000 mg 100 tablets",
-        )
-        self.assertEqual("no_exact", outcome)
-        self.assertIsNone(selected)
-
-    def test_title_match_requires_meaningful_product_identity(self):
-        self.assertTrue(_title_identity_matches("NOW L-Lysine 500 mg", "NOW L-Lysine 500 mg 100 таблеток"))
-        self.assertFalse(_title_identity_matches("NOW Vitamin C 1000 mg", "NOW L-Lysine 500 mg 100 таблеток"))
+        self.assertEqual("single_result", outcome)
+        self.assertEqual(["single_dropdown_result"], selected["sku_match_sources"])
 
     def test_exact_sku_in_dropdown_text_is_selected(self):
         outcome, selected = _classify_exact_dropdown_candidates(
@@ -72,14 +48,14 @@ class Supplier4ProductIdentityTests(unittest.TestCase):
                 self.assertEqual("exact", outcome)
                 self.assertIn(expected_source, selected["sku_match_sources"])
 
-    def test_partial_skus_do_not_match(self):
+    def test_partial_skus_are_not_accepted_without_product_page_check(self):
         for value in ("NOW-0010", "NOW-00100"):
             with self.subTest(value=value):
                 outcome, selected = _classify_exact_dropdown_candidates(
                     "NOW-00105", [candidate(text=f"Product {value}", href=f"/product/{value}")]
                 )
-                self.assertEqual("no_exact", outcome)
-                self.assertIsNone(selected)
+                self.assertEqual("single_result", outcome)
+                self.assertEqual(["single_dropdown_result"], selected["sku_match_sources"])
 
     def test_two_exact_candidates_are_ambiguous(self):
         outcome, selected = _classify_exact_dropdown_candidates(
@@ -92,40 +68,10 @@ class Supplier4ProductIdentityTests(unittest.TestCase):
         self.assertEqual("ambiguous", outcome)
         self.assertIsNone(selected)
 
-    def test_dropdown_title_cannot_validate_product_page(self):
-        sources = _product_page_sku_match_sources(
-            "NOW-00105",
-            title="NOW L-Lysine 500 mg",
-            body_text="NOW L-Lysine 500 mg 100 таблеток",
-            url="https://monsterlab.com.ua/l-lysine/",
-        )
-        self.assertEqual([], sources)
-
-    def test_product_page_exact_sku_is_accepted(self):
-        sources = _product_page_sku_match_sources(
-            "NOW-00105",
-            title="NOW Vitamin C",
-            body_text="Артикул: NOW-00105",
-            url="https://monsterlab.com.ua/vitamin-c/",
-            metadata={"data-sku": "NOW-00105"},
-        )
-        self.assertIn("page_text", sources)
-        self.assertIn("metadata", sources)
-
-    def test_orchestrator_keeps_product_title_for_sup4(self):
-        order = {
-            "products": [
-                {"description": "NOW-00105, NOW L-Lysine 500 mg 100 таблеток"},
-                {"description": "SOL-123", "name": "Solgar Vitamin D3"},
-            ]
-        }
-        self.assertEqual(
-            {
-                "NOW-00105": "NOW L-Lysine 500 mg 100 таблеток",
-                "SOL-123": "Solgar Vitamin D3",
-            },
-            build_sup4_item_titles(order),
-        )
+    def test_product_page_article_must_exactly_match_requested_sku(self):
+        self.assertTrue(_article_matches_sku("CEN-27116", "CEN-27116"))
+        self.assertFalse(_article_matches_sku("NOW-00105", "NOW-00100"))
+        self.assertFalse(_article_matches_sku("NOW-00105", ""))
 
 
 if __name__ == "__main__":

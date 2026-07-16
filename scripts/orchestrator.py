@@ -990,23 +990,6 @@ def build_sup4_items(order: Dict[str, Any]) -> str:
     return build_sup2_items(order)
 
 
-def build_sup4_item_titles(order: Dict[str, Any]) -> Dict[str, str]:
-    """Keep the SalesDrive product name for safe Monsterlab result validation."""
-    titles: Dict[str, str] = {}
-    for product in order.get("products") or []:
-        if not isinstance(product, dict):
-            continue
-        description = str(product.get("description") or "").strip()
-        sku, separator, title_from_description = description.partition(",")
-        sku = sku.strip()
-        expected_title = title_from_description.strip() if separator else ""
-        if not expected_title:
-            expected_title = str(product.get("name") or product.get("text") or "").strip()
-        if sku and expected_title:
-            titles[sku] = expected_title
-    return titles
-
-
 def build_sup6_items(order: Dict[str, Any]) -> str:
     # ProteinPlus supplier6 uses the same SKU:QTY format as supplier2/supplier3/supplier4.
     return build_sup2_items(order)
@@ -1726,7 +1709,6 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
     env["SUP4_STAGE"] = "run"
     env["SUP4_STORAGE_STATE_FILE"] = ORCH_SUP4_STORAGE_STATE_FILE
     env["SUP4_ITEMS"] = sup4_items
-    env["SUP4_ITEM_TITLES_JSON"] = json.dumps(build_sup4_item_titles(order), ensure_ascii=False)
     env["SUP4_TTN"] = tracking_number
     env["SUP4_CLEAR_BASKET"] = ORCH_SUP4_CLEAR_BASKET
     env["SUP4_ATTACH_DIR"] = ORCH_SUP4_ATTACH_DIR
