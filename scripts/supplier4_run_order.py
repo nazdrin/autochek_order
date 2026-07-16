@@ -48,6 +48,8 @@ SUP4_ATTACH_DIR = (os.getenv("SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 SUP4_PAUSE_SEC = _to_int(os.getenv("SUP4_PAUSE_SEC", "0"), 0)
 SUP4_STAGE = (os.getenv("SUP4_STAGE") or "run").strip().lower() or "run"
 SUP4_FORCE_LOGIN = _to_bool(os.getenv("SUP4_FORCE_LOGIN", "0"), False)
+SUP4_LOGIN_RECAPTCHA_WAIT_MS = _to_int(os.getenv("SUP4_LOGIN_RECAPTCHA_WAIT_MS", "15000"), 15000)
+SUP4_LOGIN_RECAPTCHA_PAUSE_MS = _to_int(os.getenv("SUP4_LOGIN_RECAPTCHA_PAUSE_MS", "3000"), 3000)
 SUP4_SKIP_SUBMIT = _to_bool(os.getenv("SUP4_SKIP_SUBMIT", "0"), False)
 SUP4_NP_API_KEY = (
     os.getenv("SUP4_NP_API_KEY")
@@ -641,9 +643,11 @@ async def _login(page) -> None:
                     && document.querySelector("#login_form_id textarea[name='g-recaptcha-response']")
                     && document.querySelector("#login_form_id iframe[src*='recaptcha']")
                 )""",
-                timeout=min(8000, SUP4_TIMEOUT_MS),
+                timeout=min(SUP4_LOGIN_RECAPTCHA_WAIT_MS, SUP4_TIMEOUT_MS),
             )
-            await page.wait_for_timeout(800)
+            if SUP4_LOGIN_RECAPTCHA_PAUSE_MS > 0:
+                print(f"[SUP4] login: waiting {SUP4_LOGIN_RECAPTCHA_PAUSE_MS}ms for reCAPTCHA to settle")
+                await page.wait_for_timeout(SUP4_LOGIN_RECAPTCHA_PAUSE_MS)
         except Exception:
             print("[SUP4] login warning: reCAPTCHA widget readiness not confirmed before submit")
         await submit.click(timeout=min(4000, SUP4_TIMEOUT_MS))
