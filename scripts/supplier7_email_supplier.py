@@ -79,7 +79,10 @@ def build_supplier7_body(order: Dict[str, Any], ttn: str, items: List[Dict[str, 
         lines.append(name)
         if sku:
             lines.append(sku)
-        lines.append(f"К-во: {qty}")
+        if qty > 1:
+            lines.append(f"⚠️ КІЛЬКІСТЬ ДО ВІДПРАВКИ: {qty} шт. ⚠️")
+        else:
+            lines.append(f"К-во: {qty}")
         if idx != len(items) - 1:
             lines.append("")
     lines.append("")
