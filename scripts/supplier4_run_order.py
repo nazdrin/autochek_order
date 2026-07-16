@@ -42,6 +42,7 @@ SUP4_HEADLESS = _to_bool(os.getenv("SUP4_HEADLESS", "1"), True)
 SUP4_TIMEOUT_MS = _to_int(os.getenv("SUP4_TIMEOUT_MS", "20000"), 20000)
 SUP4_CLEAR_BASKET = _to_bool(os.getenv("SUP4_CLEAR_BASKET", "1"), True)
 SUP4_ITEMS = (os.getenv("SUP4_ITEMS") or "").strip()
+SUP4_ITEM_TITLES_JSON = (os.getenv("SUP4_ITEM_TITLES_JSON") or "").strip()
 SUP4_TTN = (os.getenv("SUP4_TTN") or "").strip()
 SUP4_ATTACH_DIR = (os.getenv("SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 SUP4_PAUSE_SEC = _to_int(os.getenv("SUP4_PAUSE_SEC", "0"), 0)
@@ -69,6 +70,7 @@ class StageError(RuntimeError):
 class Sup4Item:
     sku: str
     qty: int
+    expected_title: str = ""
 
 
 def _digits_only(value: str) -> str:
@@ -102,9 +104,12 @@ def _exact_sku_sources(sku: str, candidate: dict[str, Any]) -> list[str]:
     return sources
 
 
-def _classify_exact_dropdown_candidates(sku: str, candidates: list[dict[str, Any]]) -> tuple[str, dict[str, Any] | None]:
-    """Classify product links without allowing fuzzy or single-result fallbacks."""
+def _classify_exact_dropdown_candidates(
+    sku: str, candidates: list[dict[str, Any]], *, expected_title: str = ""
+) -> tuple[str, dict[str, Any] | None]:
+    """Choose only a product confirmed by exact SKU or the order's product title."""
     exact_matches: list[dict[str, Any]] = []
+    title_matches: list[dict[str, Any]] = []
     for candidate in candidates:
         if not candidate.get("is_product_link"):
             continue
@@ -113,6 +118,17 @@ def _classify_exact_dropdown_candidates(sku: str, candidates: list[dict[str, Any
             matched = dict(candidate)
             matched["sku_match_sources"] = sources
             exact_matches.append(matched)
+        if expected_title and _title_identity_matches(expected_title, str(candidate.get("text") or "")):
+            matched = dict(candidate)
+            matched["sku_match_sources"] = ["order_title"]
+            title_matches.append(matched)
+
+    if expected_title:
+        if len(title_matches) == 1:
+            return "order_title", title_matches[0]
+        if len(title_matches) > 1:
+            return "ambiguous", None
+        return "no_exact", None
     if len(exact_matches) == 1:
         return "exact", exact_matches[0]
     if len(exact_matches) > 1:
@@ -133,6 +149,18 @@ def _product_page_sku_match_sources(sku: str, *, title: str, body_text: str, url
     if sku_re.search(body_text or ""):
         sources.append("page_text")
     return sources
+
+
+def _title_identity_matches(expected_title: str, actual_title: str) -> bool:
+    expected = _norm_text(expected_title)
+    actual = _norm_text(actual_title)
+    if not expected or not actual:
+        return False
+    if expected in actual or actual in expected:
+        return True
+    expected_tokens = {token for token in re.findall(r"[\wа-яёіїєґ]+", expected) if len(token) >= 3}
+    actual_tokens = {token for token in re.findall(r"[\wа-яёіїєґ]+", actual) if len(token) >= 3}
+    return len(expected_tokens) >= 2 and expected_tokens.issubset(actual_tokens)
 
 
 def _state_path() -> Path:
@@ -199,6 +227,19 @@ def _parse_items() -> list[Sup4Item]:
     raw = SUP4_ITEMS.strip()
     if not raw:
         raise RuntimeError("SUP4_ITEMS is required (format: SKU1:2,SKU2:1)")
+    expected_titles: dict[str, str] = {}
+    if SUP4_ITEM_TITLES_JSON:
+        try:
+            raw_titles = json.loads(SUP4_ITEM_TITLES_JSON)
+            if not isinstance(raw_titles, dict):
+                raise ValueError("must be an object")
+            expected_titles = {
+                str(sku).strip(): str(title).strip()
+                for sku, title in raw_titles.items()
+                if str(sku).strip() and str(title).strip()
+            }
+        except Exception as e:
+            raise RuntimeError(f"Invalid SUP4_ITEM_TITLES_JSON: {e}") from e
     out: list[Sup4Item] = []
     parts = [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
     for idx, part in enumerate(parts, start=1):
@@ -211,7 +252,7 @@ def _parse_items() -> list[Sup4Item]:
             qty = 1
         if not sku:
             raise RuntimeError(f"SUP4_ITEMS part #{idx} has empty sku")
-        out.append(Sup4Item(sku=sku, qty=qty))
+        out.append(Sup4Item(sku=sku, qty=qty, expected_title=expected_titles.get(sku, "")))
     return out
 
 
@@ -969,7 +1010,7 @@ async def _open_search_and_fill(page, sku: str) -> None:
         raise StageError(stage, f"Search fill failed for sku={sku}: {e}") from e
 
 
-async def _open_product_from_dropdown(page, sku: str) -> dict[str, Any]:
+async def _open_product_from_dropdown(page, sku: str, *, expected_title: str = "") -> dict[str, Any]:
     stage = "add_items"
     results, count = await _wait_dropdown_candidates(page, sku)
     if count <= 0:
@@ -1022,9 +1063,9 @@ async def _open_product_from_dropdown(page, sku: str) -> dict[str, Any]:
             continue
 
     candidate_infos = [info for _, info in candidates]
-    outcome, chosen_info = _classify_exact_dropdown_candidates(sku, candidate_infos)
+    outcome, chosen_info = _classify_exact_dropdown_candidates(sku, candidate_infos, expected_title=expected_title)
     print(
-        f"[SUP4] dropdown classify: sku={sku} candidates={len(candidate_infos)} outcome={outcome}"
+        f"[SUP4] dropdown classify: sku={sku} expected_title={expected_title!r} candidates={len(candidate_infos)} outcome={outcome}"
     )
     if outcome == "ambiguous":
         details = await _capture_debug_artifacts(
@@ -1066,6 +1107,7 @@ async def _open_product_from_dropdown(page, sku: str) -> dict[str, Any]:
         "dropdown_text": str(chosen_info.get("text") or ""),
         "dropdown_href": str(chosen_info.get("href") or ""),
         "dropdown_sku_match_sources": list(chosen_info.get("sku_match_sources") or []),
+        "expected_title": expected_title,
     }
 
 
@@ -1164,7 +1206,7 @@ async def _get_product_page_title(page) -> str:
     return ""
 
 
-async def _verify_product_page_identity(page, sku: str) -> tuple[str, list[str]]:
+async def _verify_product_page_identity(page, sku: str, *, expected_title: str = "") -> tuple[str, list[str]]:
     stage = "add_items"
     title = await _get_product_page_title(page)
     body_text = ""
@@ -1185,8 +1227,20 @@ async def _verify_product_page_identity(page, sku: str) -> tuple[str, list[str]]
         url=page.url or "",
         metadata=metadata if isinstance(metadata, dict) else None,
     )
-    print(f"[SUP4] product page identity: sku={sku} title={title!r} page_sources={page_sources}")
-    if not page_sources:
+    title_ok = _title_identity_matches(expected_title, title) if expected_title else False
+    print(
+        f"[SUP4] product page identity: sku={sku} title={title!r} expected_title={expected_title!r} "
+        f"page_sources={page_sources} title_ok={title_ok}"
+    )
+    if expected_title and not title_ok:
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "product_page_title_mismatch",
+            extra={"sku": sku, "title": title, "expected_title": expected_title, "url": page.url},
+        )
+        raise StageError(stage, f"PRODUCT_PAGE_TITLE_MISMATCH: sku={sku}", details)
+    if not expected_title and not page_sources:
         details = await _capture_debug_artifacts(
             page,
             stage,
@@ -1194,7 +1248,7 @@ async def _verify_product_page_identity(page, sku: str) -> tuple[str, list[str]]
             extra={"sku": sku, "title": title, "url": page.url, "metadata": metadata},
         )
         raise StageError(stage, f"PRODUCT_PAGE_SKU_MISMATCH: sku={sku}", details)
-    return title, page_sources
+    return title, (["order_title"] if title_ok else page_sources)
 
 
 async def _cart_rows(page):
@@ -1488,7 +1542,7 @@ async def _continue_or_checkout(page, *, last_item: bool) -> None:
     raise StageError(stage, "Could not click return-to-shopping button")
 
 
-async def _search_open_verify_product(page, sku: str) -> dict[str, Any]:
+async def _search_open_verify_product(page, sku: str, *, expected_title: str = "") -> dict[str, Any]:
     stage = "add_items"
     attempts = (
         {"reload": False, "label": "initial"},
@@ -1502,8 +1556,10 @@ async def _search_open_verify_product(page, sku: str) -> dict[str, Any]:
                 await page.goto(SUP4_BASE_URL, wait_until="domcontentloaded")
                 await _best_effort_close_popups(page)
             await _open_search_and_fill(page, sku)
-            dropdown_info = await _open_product_from_dropdown(page, sku)
-            product_title, product_page_sku_match_sources = await _verify_product_page_identity(page, sku)
+            dropdown_info = await _open_product_from_dropdown(page, sku, expected_title=expected_title)
+            product_title, product_page_sku_match_sources = await _verify_product_page_identity(
+                page, sku, expected_title=expected_title
+            )
             dropdown_info["product_title"] = product_title
             dropdown_info["product_page_sku_match_sources"] = product_page_sku_match_sources
             return dropdown_info
@@ -1529,7 +1585,7 @@ async def _add_items(page, items: list[Sup4Item]) -> dict[str, Any]:
     for idx, item in enumerate(items):
         await page.goto(SUP4_BASE_URL, wait_until="domcontentloaded")
         await _best_effort_close_popups(page)
-        product_info = await _search_open_verify_product(page, item.sku)
+        product_info = await _search_open_verify_product(page, item.sku, expected_title=item.expected_title)
         await _click_buy_on_product(page, item.sku)
         await _wait_cart_modal(page)
         qty_check = await _set_modal_qty(page, item.sku, item.qty, product_title=product_info.get("product_title", ""))
@@ -1538,6 +1594,7 @@ async def _add_items(page, items: list[Sup4Item]) -> dict[str, Any]:
             {
                 "sku": item.sku,
                 "qty": item.qty,
+                "expected_title": item.expected_title,
                 "product_title": product_info.get("product_title", ""),
                 "dropdown_text": product_info.get("dropdown_text", ""),
                 "dropdown_href": product_info.get("dropdown_href", ""),

@@ -9,7 +9,9 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from supplier4_run_order import (  # noqa: E402
     _classify_exact_dropdown_candidates,
     _product_page_sku_match_sources,
+    _title_identity_matches,
 )
+from orchestrator import build_sup4_item_titles  # noqa: E402
 
 
 def candidate(*, text="", href="", metadata=None, is_product_link=True):
@@ -29,6 +31,28 @@ class Supplier4ProductIdentityTests(unittest.TestCase):
         )
         self.assertEqual("no_exact", outcome)
         self.assertIsNone(selected)
+
+    def test_single_result_is_selected_only_when_order_title_matches(self):
+        outcome, selected = _classify_exact_dropdown_candidates(
+            "NOW-00105",
+            [candidate(text="NOW L-Lysine 500 mg 100 таблеток", href="/l-lysine")],
+            expected_title="NOW L-Lysine 500 mg, 100 таблеток",
+        )
+        self.assertEqual("order_title", outcome)
+        self.assertEqual(["order_title"], selected["sku_match_sources"])
+
+    def test_wrong_single_result_is_rejected_when_order_title_is_present(self):
+        outcome, selected = _classify_exact_dropdown_candidates(
+            "NOW-00105",
+            [candidate(text="NOW L-Lysine 500 mg 100 таблеток", href="/l-lysine")],
+            expected_title="NOW Vitamin C 1000 mg 100 tablets",
+        )
+        self.assertEqual("no_exact", outcome)
+        self.assertIsNone(selected)
+
+    def test_title_match_requires_meaningful_product_identity(self):
+        self.assertTrue(_title_identity_matches("NOW L-Lysine 500 mg", "NOW L-Lysine 500 mg 100 таблеток"))
+        self.assertFalse(_title_identity_matches("NOW Vitamin C 1000 mg", "NOW L-Lysine 500 mg 100 таблеток"))
 
     def test_exact_sku_in_dropdown_text_is_selected(self):
         outcome, selected = _classify_exact_dropdown_candidates(
@@ -87,6 +111,21 @@ class Supplier4ProductIdentityTests(unittest.TestCase):
         )
         self.assertIn("page_text", sources)
         self.assertIn("metadata", sources)
+
+    def test_orchestrator_keeps_product_title_for_sup4(self):
+        order = {
+            "products": [
+                {"description": "NOW-00105, NOW L-Lysine 500 mg 100 таблеток"},
+                {"description": "SOL-123", "name": "Solgar Vitamin D3"},
+            ]
+        }
+        self.assertEqual(
+            {
+                "NOW-00105": "NOW L-Lysine 500 mg 100 таблеток",
+                "SOL-123": "Solgar Vitamin D3",
+            },
+            build_sup4_item_titles(order),
+        )
 
 
 if __name__ == "__main__":
