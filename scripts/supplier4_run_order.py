@@ -1712,7 +1712,48 @@ async def _wait_checkout_cart_ready(page) -> None:
     print("[SUP4] checkout cart ready: timeout fallback")
 
 
-async def _find_checkout_row_for_item(page, sku: str, *, product_title: str = ""):
+def _checkout_cart_entry_for_sku(sku: str, entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return one Monsterlab checkout entry by its supplier article, never by title."""
+    matches = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict) and _article_matches_sku(sku, str(entry.get("article") or ""))
+    ]
+    if len(matches) != 1:
+        return None
+    entry = matches[0]
+    cart_hash = str(entry.get("hash") or "").strip()
+    return entry if re.fullmatch(r"[A-Za-z0-9_-]+", cart_hash) else None
+
+
+async def _checkout_cart_entries(page) -> list[dict[str, Any]]:
+    """Read the checkout cart model that binds supplier article to DOM row hash."""
+    try:
+        raw = await page.evaluate(
+            """() => Array.isArray(window.cartProductsData)
+                ? window.cartProductsData.map(({article, hash, quantity, title}) => ({article, hash, quantity, title}))
+                : []"""
+        )
+    except Exception:
+        return []
+    return [entry for entry in raw if isinstance(entry, dict)] if isinstance(raw, list) else []
+
+
+async def _find_checkout_row_for_item(page, sku: str, *, product_title: str = "", cart_entry: dict[str, Any] | None = None):
+    if cart_entry is not None:
+        cart_hash = str(cart_entry.get("hash") or "").strip()
+        if re.fullmatch(r"[A-Za-z0-9_-]+", cart_hash):
+            row = page.locator(f"section#cart.order #product_{cart_hash}").first
+            try:
+                if await row.count() == 1 and await row.is_visible():
+                    print(f"[SUP4] checkout row matched by article: sku={sku} hash={cart_hash}")
+                    return row
+            except Exception:
+                pass
+        # An exact article was found in the cart model, but its DOM row was
+        # not. Do not substitute another product based on its display title.
+        return None
+
     rows = await _checkout_rows(page)
     count = await rows.count()
     sku_re = _sku_regex(sku)
@@ -1785,23 +1826,42 @@ async def _find_checkout_row_for_item(page, sku: str, *, product_title: str = ""
 async def _verify_checkout_items(page, items: list[Sup4Item], *, item_contexts: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     stage = "checkout_ttn"
     await _wait_checkout_cart_ready(page)
+    cart_entries = await _checkout_cart_entries(page)
+    if not cart_entries:
+        details = await _capture_debug_artifacts(
+            page, stage, "checkout_cart_data_unavailable", extra={"items": [{"sku": item.sku, "qty": item.qty} for item in items]}
+        )
+        raise StageError(stage, "CHECKOUT_CART_DATA_UNAVAILABLE", details)
+
     contexts_by_sku = {str(c.get("sku") or ""): c for c in (item_contexts or [])}
     checks: list[dict[str, Any]] = []
     for item in items:
         ctx = contexts_by_sku.get(item.sku) or {}
         title = str(ctx.get("product_title") or "")
-        row = await _find_checkout_row_for_item(page, item.sku, product_title=title)
+        cart_entry = _checkout_cart_entry_for_sku(item.sku, cart_entries)
+        if cart_entry is None:
+            details = await _capture_debug_artifacts(
+                page,
+                stage,
+                "checkout_sku_not_in_cart_data",
+                extra={"sku": item.sku, "expected_qty": item.qty, "cart_entries": cart_entries},
+            )
+            raise StageError(stage, f"CHECKOUT_SKU_NOT_IN_CART_DATA: sku={item.sku}", details)
+
+        row = await _find_checkout_row_for_item(page, item.sku, product_title=title, cart_entry=cart_entry)
         if row is None:
             details = await _capture_debug_artifacts(
                 page,
                 stage,
                 "checkout_qty_row_not_found",
-                extra={"sku": item.sku, "product_title": title, "expected_qty": item.qty},
+                extra={"sku": item.sku, "product_title": title, "expected_qty": item.qty, "cart_entry": cart_entry},
             )
-            raise StageError(stage, f"CHECKOUT_QTY_VERIFY_FAILED: row not found for sku={item.sku}", details)
+            raise StageError(stage, f"CHECKOUT_CART_ROW_NOT_FOUND: sku={item.sku}", details)
         _, actual_qty = await _read_row_qty(row)
         check = {
             "sku": item.sku,
+            "checkout_article": cart_entry.get("article"),
+            "checkout_hash": cart_entry.get("hash"),
             "product_title": title,
             "expected_qty": item.qty,
             "actual_qty": actual_qty,

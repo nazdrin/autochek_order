@@ -8,6 +8,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from supplier4_run_order import (  # noqa: E402
     _article_matches_sku,
+    _checkout_cart_entry_for_sku,
     _classify_exact_dropdown_candidates,
 )
 
@@ -72,6 +73,21 @@ class Supplier4ProductIdentityTests(unittest.TestCase):
         self.assertTrue(_article_matches_sku("CEN-27116", "CEN-27116"))
         self.assertFalse(_article_matches_sku("NOW-00105", "NOW-00100"))
         self.assertFalse(_article_matches_sku("NOW-00105", ""))
+
+    def test_checkout_row_is_resolved_by_supplier_article_and_hash(self):
+        entry = _checkout_cart_entry_for_sku(
+            "21296",
+            [
+                {"article": "21296", "hash": "eb380eb8b03f5cb93cae5994f2cbd510", "quantity": 1},
+                {"article": "SW957", "hash": "28f7d563232032ef3a49114e2480a3da", "quantity": 1},
+            ],
+        )
+        self.assertEqual("21296", entry["article"])
+        self.assertEqual("eb380eb8b03f5cb93cae5994f2cbd510", entry["hash"])
+
+    def test_checkout_article_requires_one_valid_hash(self):
+        self.assertIsNone(_checkout_cart_entry_for_sku("21296", [{"article": "21296", "hash": "bad hash"}]))
+        self.assertIsNone(_checkout_cart_entry_for_sku("21296", [{"article": "21296", "hash": "a"}, {"article": "21296", "hash": "b"}]))
 
 
 if __name__ == "__main__":
