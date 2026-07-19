@@ -3293,9 +3293,78 @@ def _extract_payment_amount(order_payload: dict | None = None) -> Decimal | None
     return None
 
 
-async def _step6_select_payment_cod(page) -> bool:
+def _normalize_payment_method(value: object) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_has_postpay(value: object) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().casefold()
+    if normalized in {"1", "true", "yes"}:
+        return True
+    if normalized in {"0", "false", "no"}:
+        return False
+    return None
+
+
+def determine_payment_scenario(order_payload: dict | None = None) -> dict | None:
+    """Return the ProteinPlus payment scenario. payment_method is authoritative."""
+    payload = order_payload if isinstance(order_payload, dict) else {}
+    payment_method = _normalize_payment_method(payload.get("payment_method"))
+    scenarios = {
+        20: {"code": "cod", "payment_type": "Післяплата", "has_postpay": True},
+        54: {"code": "prepay", "payment_type": "Передплата", "has_postpay": False},
+        16: {"code": "prepay", "payment_type": "Передплата", "has_postpay": False},
+    }
+    scenario = scenarios.get(payment_method)
+    if scenario is None:
+        return None
+
+    delivery = _get_first_delivery_block(payload)
+    actual_has_postpay = _normalize_has_postpay(delivery.get("hasPostpay") if isinstance(delivery, dict) else None)
+    result = {"payment_method": payment_method, **scenario}
+    if actual_has_postpay is not None and actual_has_postpay != scenario["has_postpay"]:
+        result["has_postpay_mismatch"] = {
+            "expected": scenario["has_postpay"],
+            "actual": actual_has_postpay,
+        }
+        print(
+            "[SUP6][WARN] SalesDrive payment mismatch: "
+            f"payment_method={payment_method} expects hasPostpay={int(scenario['has_postpay'])}, "
+            f"received={int(actual_has_postpay)}"
+        )
+    return result
+
+
+def _extract_prepay_total(order_payload: dict | None = None) -> Decimal | None:
+    rows = _extract_order_product_rows(order_payload)
+    if not rows:
+        return None
+    total = Decimal("0")
+    for row in rows:
+        price = row.get("price_dec")
+        if price is None:
+            return None
+        total += price * int(row.get("qty") or 1)
+    return total
+
+
+async def _step6_select_payment(page, payment_type: str) -> bool:
+    is_cod = payment_type == "Післяплата"
+    label_text = "Післяплата" if is_cod else "Передплата"
+    radio_id = "typeOfPayment1" if is_cod else "typeOfPayment0"
+    radio_value = "1" if is_cod else "0"
+
     async def _is_selected() -> bool:
-        for label_sel in ("label[for='typeOfPayment1']", "label:has-text('Післяплата')"):
+        for label_sel in (f"label[for='{radio_id}']", f"label:has-text('{label_text}')"):
             label = page.locator(label_sel).first
             try:
                 if await label.count() > 0:
@@ -3304,7 +3373,7 @@ async def _step6_select_payment_cod(page) -> bool:
                         return True
             except Exception:
                 pass
-        for radio_sel in ("#typeOfPayment1", "input[type='radio'][name='form[typeOfPayment]'][value='1']"):
+        for radio_sel in (f"#{radio_id}", f"input[type='radio'][name='form[typeOfPayment]'][value='{radio_value}']"):
             radio = page.locator(radio_sel).first
             try:
                 if await radio.count() > 0 and await radio.is_checked():
@@ -3314,13 +3383,13 @@ async def _step6_select_payment_cod(page) -> bool:
         return False
 
     if await _is_selected():
-        print("[SUP6] selected payment type: Післяплата")
+        print(f"[SUP6] selected payment type: {label_text}")
         return True
 
     for cand in [
-        page.locator("label[for='typeOfPayment1']").first,
-        page.get_by_text("Післяплата", exact=False).first,
-        page.locator("#typeOfPayment1").first,
+        page.locator(f"label[for='{radio_id}']").first,
+        page.get_by_text(label_text, exact=False).first,
+        page.locator(f"#{radio_id}").first,
     ]:
         try:
             if await cand.count() <= 0:
@@ -3330,11 +3399,15 @@ async def _step6_select_payment_cod(page) -> bool:
                 await cand.first.click(timeout=min(5000, SUP6_TIMEOUT_MS), force=True)
                 await page.wait_for_timeout(240)
                 if await _is_selected():
-                    print("[SUP6] selected payment type: Післяплата")
+                    print(f"[SUP6] selected payment type: {label_text}")
                     return True
         except Exception:
             continue
     return False
+
+
+async def _step6_select_payment_cod(page) -> bool:
+    return await _step6_select_payment(page, "Післяплата")
 
 
 async def _step6_fill_cod_amount(page, amount: Decimal) -> tuple[bool, str]:
@@ -3780,17 +3853,47 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
     except Exception as e:
         return _step6_fail("CHECKOUT_OPEN_FAILED", details={"error": str(e), "url": page.url or ""})
 
-    if not await _step6_select_payment_cod(page):
-        return _step6_fail("PAYMENT_TYPE_NOT_SELECTED", details={"expected": "Післяплата"})
+    payment = determine_payment_scenario(order_payload)
+    if payment is None:
+        return _step6_fail("UNSUPPORTED_PAYMENT_METHOD", details={"payment_method": (order_payload or {}).get("payment_method")})
+    if not await _step6_select_payment(page, payment["payment_type"]):
+        return _step6_fail("PAYMENT_TYPE_NOT_SELECTED", details={"expected": payment["payment_type"]})
 
-    payment_amount_raw = _extract_payment_amount(order_payload)
-    if payment_amount_raw is None:
-        return _step6_fail("PAYMENT_AMOUNT_MISSING")
-    target_total_int = _round_half_up_int(payment_amount_raw)
-    print(f"[SUP6] rounded paymentAmount => {target_total_int}")
-    cod_ok, cod_value = await _step6_fill_cod_amount(page, Decimal(target_total_int))
-    if not cod_ok:
-        return _step6_fail("PAYMENT_AMOUNT_FILL_FAILED", details={"expected": str(target_total_int), "value": cod_value})
+    # ProteinPlus does not expose client-price rows for prepaid orders. Those rows and
+    # cash-on-delivery checksum checks are meaningful only for payment_method=20.
+    if payment["code"] == "prepay":
+        if not await _step6_select_order_format_shipping(page):
+            return _step6_fail("ORDER_FORMAT_NOT_SELECTED", details={"expected": "Відправка"})
+        if not await _step6_check_ack(page):
+            return _step6_fail("ACK_CHECK_FAILED")
+        print("[SUP6] prepayment: client prices and cash-redelivery amount skipped")
+        return {
+            "ok": True,
+            "step": "step6_fill_payment_and_client_prices",
+            "details": {
+                "payment_type": payment["payment_type"],
+                "payment_method": payment["payment_method"],
+                "payment_amount": None,
+                "client_prices_filled": 0,
+                "final_check_sum": None,
+                "format": "Відправка",
+                "ack_checked": True,
+                "client_prices": [],
+                "target_total_int": None,
+                "client_prices_skipped": True,
+            },
+        }
+
+    amount_raw = _extract_payment_amount(order_payload)
+    if amount_raw is None:
+        return _step6_fail("PAYMENT_AMOUNT_MISSING", details={"payment_type": payment["payment_type"]})
+    target_total_int = _round_half_up_int(amount_raw)
+    print(f"[SUP6] rounded checkout total => {target_total_int}")
+    check_sum_target = Decimal(target_total_int)
+    if payment["code"] == "cod":
+        cod_ok, cod_value = await _step6_fill_cod_amount(page, check_sum_target)
+        if not cod_ok:
+            return _step6_fail("PAYMENT_AMOUNT_FILL_FAILED", details={"expected": str(target_total_int), "value": cod_value})
 
     checkout_rows = await _step6_collect_checkout_rows(page)
     if not checkout_rows:
@@ -3857,14 +3960,15 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
             if isinstance(fallback_units, list) and fallback_units and isinstance(fallback_subtotal, int):
                 unit_ints = [int(x) for x in fallback_units]
                 target_total_int = int(fallback_subtotal)
-                print(f"[SUP6] rounded paymentAmount => adjusted to reachable total {target_total_int}")
-                cod_ok2, cod_value2 = await _step6_fill_cod_amount(page, Decimal(target_total_int))
-                if not cod_ok2:
-                    return _step6_fail(
-                        "PAYMENT_AMOUNT_FILL_FAILED",
-                        details={"expected": str(target_total_int), "value": cod_value2, "rounding_meta": calc_meta},
-                    )
-                cod_value = cod_value2
+                print(f"[SUP6] rounded checkout total => adjusted to reachable total {target_total_int}")
+                check_sum_target = Decimal(target_total_int)
+                if payment["code"] == "cod":
+                    cod_ok2, cod_value2 = await _step6_fill_cod_amount(page, check_sum_target)
+                    if not cod_ok2:
+                        return _step6_fail(
+                            "PAYMENT_AMOUNT_FILL_FAILED",
+                            details={"expected": str(target_total_int), "value": cod_value2, "rounding_meta": calc_meta},
+                        )
             else:
                 return _step6_fail("ROUNDING_SUM_MISMATCH", details=calc_meta)
         else:
@@ -3900,7 +4004,6 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
 
     await _step6_trigger_recalc(page)
     await page.wait_for_timeout(280)
-    cod_sum = _to_decimal_number(cod_value)
     final_sum = None
     final_sum_text = ""
     final_sum_candidates: list[Decimal] = []
@@ -3910,27 +4013,26 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
         if current_raw:
             final_sum_text = current_raw
             final_sum_candidates = _extract_money_candidates(current_raw)
-            if cod_sum is not None and final_sum_candidates:
+            if check_sum_target is not None and final_sum_candidates:
                 for cand in final_sum_candidates:
-                    if cand == cod_sum:
+                    if cand == check_sum_target:
                         final_sum = cand
                         break
                 if final_sum is not None:
                     break
         if current_sum is not None:
             final_sum = current_sum
-            if (cod_sum is None) or (final_sum == cod_sum):
+            if (check_sum_target is None) or (final_sum == check_sum_target):
                 break
         await _step6_trigger_recalc(page)
         await page.wait_for_timeout(220)
 
-    cod_sum = _to_decimal_number(cod_value)
     if final_sum is None and final_sum_candidates:
         if len(final_sum_candidates) == 1:
             final_sum = final_sum_candidates[0]
-        elif cod_sum is not None:
+        elif check_sum_target is not None:
             for cand in final_sum_candidates:
-                if cand == cod_sum:
+                if cand == check_sum_target:
                     final_sum = cand
                     break
             if final_sum is None:
@@ -3938,21 +4040,21 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
         else:
             final_sum = final_sum_candidates[-1]
 
-    if final_sum is None or cod_sum is None:
+    if final_sum is None or check_sum_target is None:
         return _step6_fail(
             "CHECK_SUM_READ_FAILED",
             details={
                 "final_sum_text": final_sum_text,
                 "final_sum_candidates": [str(x) for x in final_sum_candidates],
-                "cod_value": cod_value,
+                "expected_sum": str(check_sum_target),
             },
         )
-    if int(final_sum) != int(cod_sum) or int(final_sum) != int(target_total_int):
+    if int(final_sum) != int(check_sum_target) or int(final_sum) != int(target_total_int):
         return _step6_fail(
             "CHECK_SUM_MISMATCH",
             details={
                 "final_sum": str(final_sum),
-                "cod_sum": str(cod_sum),
+                "expected_sum": str(check_sum_target),
                 "target_total_int": target_total_int,
                 "final_sum_text": final_sum_text,
                 "final_sum_candidates": [str(x) for x in final_sum_candidates],
@@ -3969,7 +4071,8 @@ async def step6_fill_payment_and_client_prices(page, order_payload: dict | None 
         "ok": True,
         "step": "step6_fill_payment_and_client_prices",
         "details": {
-            "payment_type": "Післяплата",
+            "payment_type": payment["payment_type"],
+            "payment_method": payment["payment_method"],
             "payment_amount": str(int(target_total_int)),
             "client_prices_filled": filled_count,
             "final_check_sum": str(int(final_sum)),
@@ -4045,12 +4148,48 @@ async def step7_submit_order(page, order_payload: dict | None = None, pricing_de
     except Exception as e:
         return _step7_fail("CHECKOUT_OPEN_FAILED", {"error": str(e)})
 
-    if not await _step6_select_payment_cod(page):
-        return _step7_fail("PRECHECK_PAYMENT_NOT_SELECTED")
+    payment = determine_payment_scenario(order_payload)
+    if payment is None:
+        return _step7_fail("PRECHECK_UNSUPPORTED_PAYMENT_METHOD", {"payment_method": (order_payload or {}).get("payment_method")})
+    if not await _step6_select_payment(page, payment["payment_type"]):
+        return _step7_fail("PRECHECK_PAYMENT_NOT_SELECTED", {"expected": payment["payment_type"]})
     if not await _step6_select_order_format_shipping(page):
         return _step7_fail("PRECHECK_FORMAT_NOT_SELECTED")
     if not await _step6_check_ack(page):
         return _step7_fail("PRECHECK_ACK_NOT_CHECKED")
+
+    if payment["code"] == "prepay":
+        submit_btn = await _step7_get_submit_button(page)
+        if submit_btn is None:
+            return _step7_fail("SUBMIT_BUTTON_NOT_FOUND")
+        start_url = page.url or ""
+        try:
+            await submit_btn.scroll_into_view_if_needed(timeout=min(2500, SUP6_TIMEOUT_MS))
+            print("[SUP6] clicking submit => Підтвердити")
+            await submit_btn.click(timeout=min(5000, SUP6_TIMEOUT_MS))
+        except Exception:
+            return _step7_fail("SUBMIT_CLICK_FAILED")
+        outcome, meta = await _step7_wait_submit_outcome(page, start_url)
+        if outcome == "success":
+            print("[SUP6] submit success")
+            return {
+                "ok": True,
+                "step": "step7_submit_order",
+                "details": {
+                    "payment_amount": None,
+                    "final_check_sum": None,
+                    "client_prices": [],
+                    "client_prices_skipped": True,
+                    "submitted": True,
+                    "url": page.url or "",
+                    "outcome": meta,
+                },
+            }
+        if outcome == "validation":
+            print("[SUP6] submit failed => validation")
+            return _step7_fail("SUBMIT_FAILED_VALIDATION", details=meta)
+        print("[SUP6] submit failed => timeout")
+        return _step7_fail("SUBMIT_TIMEOUT", details=meta)
 
     target_total_int = None
     if isinstance(pricing_details, dict):
@@ -4059,7 +4198,7 @@ async def step7_submit_order(page, order_payload: dict | None = None, pricing_de
         except Exception:
             target_total_int = None
     if target_total_int is None:
-        amount_raw = _extract_payment_amount(order_payload)
+        amount_raw = _extract_payment_amount(order_payload) if payment["code"] == "cod" else _extract_prepay_total(order_payload)
         if amount_raw is None:
             return _step7_fail("PRECHECK_PAYMENT_AMOUNT_MISSING")
         target_total_int = _round_half_up_int(amount_raw)
@@ -4474,7 +4613,9 @@ async def _run_submit_stage(
                 await browser.close()
 
 
-async def _run_full_stage(*, items_override: str = "", order_json_override: str = "") -> dict:
+async def _run_full_stage(
+    *, items_override: str = "", order_json_override: str = "", submit_order: bool = True
+) -> dict:
     items = _parse_sup6_items(items_override)
     order_payload = _parse_order_payload(order_json_override)
     state_path = _state_path()
@@ -4561,6 +4702,22 @@ async def _run_full_stage(*, items_override: str = "", order_json_override: str 
                     "reason": payment_result.get("reason"),
                     "error": str(payment_result.get("reason") or "step6_fill_payment_and_client_prices failed"),
                 }
+            if not submit_order:
+                return {
+                    "ok": True,
+                    "stage": "pre_submit",
+                    "url": page.url or SUP6_CHECKOUT_URL,
+                    "storage_state": str(state_path),
+                    "details": {
+                        "login": login_info,
+                        "clear_cart": clear_result,
+                        "add_items": add_result,
+                        "fill_recipient": fill_result,
+                        "fill_delivery": delivery_result,
+                        "fill_payment": payment_result,
+                        "submit_skipped": True,
+                    },
+                }
             submit_result = await step7_submit_order(page, order_payload, payment_result.get("details") or {})
             if not submit_result.get("ok"):
                 return {
@@ -4622,9 +4779,11 @@ async def _run() -> dict:
         return await _run_submit_stage()
     if SUP6_STAGE == "run":
         return await _run_full_stage()
+    if SUP6_STAGE in {"pre_submit", "pre-submit"}:
+        return await _run_full_stage(submit_order=False)
     raise RuntimeError(
         f"Unsupported SUP6_STAGE={SUP6_STAGE!r}. Expected 'login', 'clear_cart', 'add_items', "
-        "'finish_cart', 'fill_recipient', 'fill_delivery', 'fill_payment', 'submit_order' or 'run'."
+        "'finish_cart', 'fill_recipient', 'fill_delivery', 'fill_payment', 'submit_order', 'pre_submit' or 'run'."
     )
 
 
@@ -4668,6 +4827,12 @@ async def _amain(
                 )
             elif stage in {"run"}:
                 result = await _run_full_stage(items_override=items_override, order_json_override=order_json_override)
+            elif stage in {"pre_submit", "pre-submit", "test_no_submit"}:
+                result = await _run_full_stage(
+                    items_override=items_override,
+                    order_json_override=order_json_override,
+                    submit_order=False,
+                )
             else:
                 raise RuntimeError(f"Unsupported --step value: {stage_override!r}")
         elif submit_only:
@@ -4740,7 +4905,7 @@ def main() -> None:
     parser.add_argument("--fill-delivery-only", action="store_true", help="Open checkout and fill NP pickup delivery fields from order payload")
     parser.add_argument("--fill-payment-only", action="store_true", help="Open checkout and fill payment type/amount/client prices/order format")
     parser.add_argument("--submit-only", action="store_true", help="Open checkout, run payment rounding/verification and click final Підтвердити")
-    parser.add_argument("--step", default="", help="Stage shortcut: 1|2|3|4|5|6|7|login|clear_cart|add_items|finish_cart|fill_recipient|fill_delivery|fill_payment|submit_order|run")
+    parser.add_argument("--step", default="", help="Stage shortcut: 1|2|3|4|5|6|7|login|clear_cart|add_items|finish_cart|fill_recipient|fill_delivery|fill_payment|submit_order|pre_submit|run")
     parser.add_argument("--items", default="", help="Items for add_items stage, format: SKU1:2,SKU2:1")
     parser.add_argument("--order-json", default="", help="Order payload JSON (expects primaryContact with lName/fName/phone)")
     parser.add_argument("--supplier6-item-map-json", default="", help="Optional JSON list with supplier6 item map for step6 standalone test")
