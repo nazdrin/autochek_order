@@ -73,6 +73,7 @@ class Recipient:
     phone_input: str
     phone_source: str
     city_query: str
+    city_geo_hints: tuple[str, ...]
     branch_number: str
     branch_query: str
     branch_address: str
@@ -427,6 +428,31 @@ def _city_hint_terms(city: str) -> list[str]:
     return _unique_nonempty(expanded)
 
 
+def _delivery_city_geo_hints(delivery: dict[str, Any], city_name: str) -> tuple[str, ...]:
+    """Return the non-city parts that disambiguate identically named NP cities.
+
+    SalesDrive commonly keeps a settlement name in ``cityName`` and its district
+    and region in separate fields.  The checkout autocomplete returns several
+    same-name cities, so looking at ``cityName`` alone can silently select a city
+    in another oblast (for example Кам'янка-Бузька instead of Кам'янка).
+    """
+    values = [
+        city_name,
+        str(delivery.get("areaName") or ""),
+        str(delivery.get("regionName") or ""),
+    ]
+    hints: list[str] = []
+    for value in values:
+        hints.extend(_city_hint_terms(value))
+        # Some SalesDrive payloads use a plain oblast name without commas or
+        # parentheses; retain it as a whole autocomplete hint too.
+        clean = re.sub(r"\s+", " ", value).strip()
+        if len(clean) >= 3:
+            hints.append(clean)
+            hints.append(_ru_city_variant(clean))
+    return tuple(_unique_nonempty(hints))
+
+
 def _delivery_match_tokens(text: str, branch_number: str = "", city_name: str = "", extra_city_values: list[str] | None = None) -> list[str]:
     city_tokens = {
         _ru_city_variant(token.lower()).strip("№#")
@@ -596,6 +622,26 @@ def _delivery_number_matches(text: str, branch_number: str) -> bool:
     return bool(re.search(rf"(?:№|#)\s*{re.escape(number)}(?!\d)", str(text or ""), flags=re.IGNORECASE))
 
 
+def _delivery_address_numbers(text: str, branch_number: str) -> list[str]:
+    """Extract building numbers, excluding branch number and weight limits."""
+    value = re.sub(r"\([^)]*\)", " ", str(text or ""))
+    # Delivery labels put the actual address after a colon.  This also avoids
+    # interpreting "Відділення №2" as a house number.
+    if ":" in value:
+        value = value.rsplit(":", 1)[-1]
+    branch = str(branch_number or "").strip()
+    numbers = re.findall(r"(?<!\d)(\d+(?:\s*[-/]\s*[0-9a-zа-яіїєґ]+)?)(?!\d)", value, flags=re.IGNORECASE)
+    return _unique_nonempty(number for number in numbers if re.sub(r"\D", "", number) != branch)
+
+
+def _selected_has_address_number(selected_text: str, wanted_number: str) -> bool:
+    wanted = re.sub(r"\s+", "", str(wanted_number or "")).lower()
+    if not wanted:
+        return False
+    selected_numbers = _delivery_address_numbers(selected_text, "")
+    return wanted in {re.sub(r"\s+", "", value).lower() for value in selected_numbers}
+
+
 def _validate_selected_delivery_text(
     *,
     selected_text: str,
@@ -604,8 +650,29 @@ def _validate_selected_delivery_text(
     np_lookup: dict[str, Any],
     extra_tokens: list[str] | None = None,
 ) -> dict[str, Any]:
-    if _delivery_number_matches(selected_text, recipient.branch_number):
-        return {"valid": True, "reason": "branch_number", "score": None, "hits": []}
+    branch_number_matches = _delivery_number_matches(selected_text, recipient.branch_number)
+    expected_address_numbers = _delivery_address_numbers(recipient.branch_address, recipient.branch_number)
+    matched_address_numbers = [
+        number for number in expected_address_numbers if _selected_has_address_number(selected_text, number)
+    ]
+    # A branch number is only unique inside a city.  When SalesDrive supplied a
+    # house number, require it too: it prevents an equally numbered branch in a
+    # wrongly selected city from passing validation.
+    if branch_number_matches and (not expected_address_numbers or matched_address_numbers):
+        return {
+            "valid": True,
+            "reason": "branch_number_and_address" if expected_address_numbers else "branch_number",
+            "score": len(matched_address_numbers),
+            "hits": matched_address_numbers,
+        }
+    if branch_number_matches and expected_address_numbers:
+        return {
+            "valid": False,
+            "reason": "branch_number_address_mismatch",
+            "score": 0,
+            "hits": [],
+            "expected_address_numbers": expected_address_numbers,
+        }
 
     tokens = list(extra_tokens or [])
     if isinstance(np_lookup, dict) and isinstance(np_lookup.get("tokens"), list):
@@ -667,6 +734,7 @@ def _extract_recipient(order: dict[str, Any]) -> Recipient:
         phone_input=_normalize_dobavki_phone(phone_source),
         phone_source=phone_source,
         city_query=_normalize_city_query(city_raw),
+        city_geo_hints=_delivery_city_geo_hints(delivery, city_raw),
         branch_number=branch_number,
         branch_query=branch_query,
         branch_address=branch_address,
@@ -1180,12 +1248,12 @@ async def _set_item_quantities(page, items: list[Item], added: list[dict]) -> li
     return results
 
 
-async def _select_city(page, city_query: str) -> dict:
+async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = ()) -> dict:
     city_input = page.locator("#checkout-city").first
     await city_input.wait_for(state="visible", timeout=TIMEOUT_MS)
 
     city_terms = _city_search_terms(city_query)
-    city_hints = _city_hint_terms(city_query)
+    city_hints = _unique_nonempty([*_city_hint_terms(city_query), *city_geo_hints])
     api_result = {"ok": False, "reason": "city_api_disabled", "cityTerms": city_terms, "cityHints": city_hints}
     if not DISABLE_CITY_API:
         api_result = await page.evaluate(
@@ -1244,8 +1312,21 @@ async def _select_city(page, city_query: str) -> dict:
                 return {city, score, idx};
             });
             scored.sort((a, b) => (b.score - a.score) || (a.idx - b.idx));
-            const city = scored.length ? scored[0].city : null;
+            const best = scored.length ? scored[0] : null;
+            const ties = best ? scored.filter((row) => row.score === best.score) : [];
+            const city = best ? best.city : null;
             if (!city) return {ok: false, reason: 'city_not_found', responses, cityTerms, cityHints};
+            // Never rely on the provider's result order for an ambiguous name.
+            // When SalesDrive gave geographic context, it must match an option;
+            // otherwise a distinct settlement with the same name could be sent.
+            if (allCities.length > 1 && best.score <= 0) {
+                return {ok: false, reason: 'city_ambiguous_no_geo_match', responses, cityTerms, cityHints,
+                    candidates: scored.slice(0, 10).map((row) => ({label: row.city.label || '', npCity: row.city.NPCityDescription || '', score: row.score}))};
+            }
+            if (ties.length > 1 && best.score > 0) {
+                return {ok: false, reason: 'city_ambiguous_geo_match', responses, cityTerms, cityHints,
+                    candidates: ties.slice(0, 10).map((row) => ({label: row.city.label || '', npCity: row.city.NPCityDescription || '', score: row.score}))};
+            }
             recipient.setCity(city.label || city.NPCityDescription || city.value || cityQuery, String(city.id), city.NPCityDescription || '');
             return {
                 ok: true,
@@ -1323,6 +1404,16 @@ async def _select_city(page, city_query: str) -> dict:
                 "attempted_options": attempted_options,
             },
         )
+    # The UI fallback must obey the same ambiguity rule as the API path.
+    selected_option_text = str((attempted_options[-1].get("options") or [])[chosen_idx].get("text") or "") if chosen_idx >= 0 else ""
+    if len((attempted_options[-1].get("options") or [])) > 1:
+        hint_norms = [_norm_match_text(value) for value in city_hints if _norm_match_text(value)]
+        if not any(hint and hint in _norm_match_text(selected_option_text) for hint in hint_norms):
+            raise StageError(
+                "fill_checkout",
+                "City autocomplete is ambiguous and no geographic context matched.",
+                {"city_query": city_query, "city_hints": city_hints, "attempted_options": attempted_options},
+            )
     await option.click(timeout=TIMEOUT_MS)
     await page.wait_for_timeout(1800)
 
@@ -1756,7 +1847,7 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
     await _goto_retry(page, CHECKOUT_URL)
     await _safe_wait_networkidle(page)
 
-    city = await _select_city(page, recipient.city_query)
+    city = await _select_city(page, recipient.city_query, recipient.city_geo_hints)
     payment = await _select_payment_cod(page)
     delivery_method = await _select_delivery_method(page, recipient)
     warehouse = await _select_warehouse(page, recipient)
