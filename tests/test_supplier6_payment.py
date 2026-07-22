@@ -49,6 +49,12 @@ class Supplier6PaymentScenarioTests(unittest.TestCase):
     def test_unknown_method_is_rejected(self):
         self.assertIsNone(determine_payment_scenario(order(999)))
 
+    def test_legacy_missing_method_with_postpay_is_cod(self):
+        legacy = order(None, status_id=21, has_postpay=1)
+        scenario = determine_payment_scenario(legacy)
+        self.assertEqual("cod", scenario["code"])
+        self.assertEqual("hasPostpay_fallback", scenario["payment_source"])
+
     def test_prepay_total_comes_from_product_prices(self):
         self.assertEqual("209.00", str(_extract_prepay_total(order(54))))
 
@@ -60,6 +66,10 @@ class Supplier6QueueTests(unittest.TestCase):
         self.assertTrue(orchestrator.sup6_order_matches_payment_queue(order(16, status_id=22)))
         self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(20, status_id=22, has_postpay=1)))
         self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(54, status_id=18)))
+
+    def test_queue_accepts_legacy_cod_in_status_21(self):
+        self.assertTrue(orchestrator.sup6_order_matches_payment_queue(order(None, status_id=21, has_postpay=1)))
+        self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(None, status_id=21, has_postpay=0)))
 
     def test_filter_keeps_other_suppliers_and_drops_invalid_sup6(self):
         other = {"id": 2002, "supplierlist": 39, "statusId": 21}
