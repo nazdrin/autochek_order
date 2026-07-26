@@ -3316,9 +3316,10 @@ def _normalize_has_postpay(value: object) -> bool | None:
 
 
 def determine_payment_scenario(order_payload: dict | None = None) -> dict | None:
-    """Return the ProteinPlus payment scenario, with COD fallback for legacy SalesDrive rows."""
+    """Return the ProteinPlus payment scenario from payment_method only."""
     payload = order_payload if isinstance(order_payload, dict) else {}
-    payment_method = _normalize_payment_method(payload.get("payment_method"))
+    raw_payment_method = payload.get("payment_method")
+    payment_method = _normalize_payment_method(raw_payment_method)
     scenarios = {
         20: {"code": "cod", "payment_type": "Післяплата", "has_postpay": True},
         54: {"code": "prepay", "payment_type": "Передплата", "has_postpay": False},
@@ -3327,20 +3328,14 @@ def determine_payment_scenario(order_payload: dict | None = None) -> dict | None
     scenario = scenarios.get(payment_method)
     delivery = _get_first_delivery_block(payload)
     actual_has_postpay = _normalize_has_postpay(delivery.get("hasPostpay") if isinstance(delivery, dict) else None)
-    # Legacy SUP6 orders in SalesDrive can have no payment_method, while hasPostpay
-    # remains the only available payment signal. Treat that exact combination as COD.
-    if scenario is None and payment_method is None and actual_has_postpay is True:
-        return {
-            "payment_method": None,
-            "code": "cod",
-            "payment_type": "Післяплата",
-            "has_postpay": True,
-            "payment_source": "hasPostpay_fallback",
-        }
+    if scenario is None and (raw_payment_method is None or not str(raw_payment_method).strip()):
+        scenario = {"code": "cod", "payment_type": "Післяплата", "has_postpay": True}
     if scenario is None:
         return None
 
     result = {"payment_method": payment_method, **scenario}
+    if raw_payment_method is None or not str(raw_payment_method).strip():
+        result["payment_source"] = "payment_method_default"
     if actual_has_postpay is not None and actual_has_postpay != scenario["has_postpay"]:
         result["has_postpay_mismatch"] = {
             "expected": scenario["has_postpay"],

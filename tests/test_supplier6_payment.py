@@ -10,7 +10,7 @@ import orchestrator  # noqa: E402
 from supplier6_run_order import _extract_prepay_total, _step6_select_payment, determine_payment_scenario  # noqa: E402
 
 
-def order(payment_method, status_id=22, has_postpay=0):
+def order(payment_method, status_id=21, has_postpay=0):
     return {
         "id": 1001,
         "supplierlist": orchestrator.ORCH_SUP6_SUPPLIERLIST,
@@ -47,33 +47,37 @@ class Supplier6PaymentScenarioTests(unittest.TestCase):
         self.assertEqual({"expected": False, "actual": True}, scenario["has_postpay_mismatch"])
 
     def test_unknown_method_is_rejected(self):
-        self.assertIsNone(determine_payment_scenario(order(999)))
+        for payment_method in (999, "not-a-number"):
+            with self.subTest(payment_method=payment_method):
+                self.assertIsNone(determine_payment_scenario(order(payment_method)))
 
-    def test_legacy_missing_method_with_postpay_is_cod(self):
-        legacy = order(None, status_id=21, has_postpay=1)
-        scenario = determine_payment_scenario(legacy)
-        self.assertEqual("cod", scenario["code"])
-        self.assertEqual("hasPostpay_fallback", scenario["payment_source"])
+    def test_missing_method_is_cod_regardless_of_has_postpay(self):
+        for has_postpay in (0, 1, None):
+            with self.subTest(has_postpay=has_postpay):
+                scenario = determine_payment_scenario(order(None, has_postpay=has_postpay))
+                self.assertEqual("cod", scenario["code"])
+                self.assertEqual("payment_method_default", scenario["payment_source"])
 
     def test_prepay_total_comes_from_product_prices(self):
         self.assertEqual("209.00", str(_extract_prepay_total(order(54))))
 
 
 class Supplier6QueueTests(unittest.TestCase):
-    def test_queue_accepts_only_declared_status_payment_pairs(self):
-        self.assertTrue(orchestrator.sup6_order_matches_payment_queue(order(20, status_id=1, has_postpay=1)))
-        self.assertTrue(orchestrator.sup6_order_matches_payment_queue(order(54, status_id=22)))
-        self.assertTrue(orchestrator.sup6_order_matches_payment_queue(order(16, status_id=22)))
-        self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(20, status_id=22, has_postpay=1)))
+    def test_queue_accepts_all_supported_methods_only_in_status_21(self):
+        for payment_method in (None, 20, 54, 16):
+            with self.subTest(payment_method=payment_method):
+                self.assertTrue(orchestrator.sup6_order_matches_payment_queue(order(payment_method)))
+        self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(20, status_id=1, has_postpay=1)))
+        self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(54, status_id=22)))
         self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(54, status_id=18)))
 
-    def test_queue_accepts_legacy_cod_in_status_21(self):
-        self.assertTrue(orchestrator.sup6_order_matches_payment_queue(order(None, status_id=21, has_postpay=1)))
-        self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(None, status_id=21, has_postpay=0)))
+    def test_queue_rejects_unknown_or_invalid_method(self):
+        self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order(999)))
+        self.assertFalse(orchestrator.sup6_order_matches_payment_queue(order("not-a-number")))
 
     def test_filter_keeps_other_suppliers_and_drops_invalid_sup6(self):
         other = {"id": 2002, "supplierlist": 39, "statusId": 21}
-        accepted, skipped = orchestrator.filter_sup6_payment_queue([order(54, status_id=18), order(20, status_id=1, has_postpay=1), other])
+        accepted, skipped = orchestrator.filter_sup6_payment_queue([order(54), order(999), other])
         self.assertEqual(1, skipped)
         self.assertEqual([1001, 2002], [item["id"] for item in accepted])
 

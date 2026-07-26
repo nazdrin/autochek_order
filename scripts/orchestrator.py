@@ -243,7 +243,8 @@ ORCH_SUP4_CLEAR_BASKET = (os.getenv("ORCH_SUP4_CLEAR_BASKET") or "1").strip()
 ORCH_SUP4_ATTACH_DIR = (os.getenv("ORCH_SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 ORCH_SUP4_PAUSE_SEC = (os.getenv("ORCH_SUP4_PAUSE_SEC") or "0").strip()
 ORCH_SUP6_SUPPLIERLIST = int(os.getenv("ORCH_SUP6_SUPPLIERLIST", "40"))
-ORCH_SUP6_STATUS_PAYMENT_METHODS = {1: {20}, 22: {16, 54}}
+ORCH_SUP6_QUEUE_STATUS = 21
+ORCH_SUP6_PAYMENT_METHODS = {20, 54, 16}
 ORCH_SUP6_HEADLESS = (os.getenv("ORCH_SUP6_HEADLESS") or ORCH_HEADLESS or "1").strip()
 ORCH_SUP6_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP6_STORAGE_STATE_FILE") or ".state_supplier6.json").strip()
 ORCH_SUP5_SUPPLIERLIST = int(os.getenv("ORCH_SUP5_SUPPLIERLIST", "47"))
@@ -420,7 +421,7 @@ def filter_orders_by_supplierlist(orders: List[Dict[str, Any]], allowed_supplier
 
 
 def sup6_order_matches_payment_queue(order: Dict[str, Any], queue_status: int | None = None) -> bool:
-    """Allow normal SUP6 COD orders and prepaid orders only after payment confirmation."""
+    """Accept SUP6 orders from status 21 with a supported payment method."""
     supplierlist, _ = parse_order_supplierlist(order)
     if supplierlist != ORCH_SUP6_SUPPLIERLIST:
         return False
@@ -430,18 +431,17 @@ def sup6_order_matches_payment_queue(order: Dict[str, Any], queue_status: int | 
         return False
     if queue_status is not None and order_status != queue_status:
         return False
-    try:
-        payment_method = int(str(order.get("payment_method")).strip())
-    except (TypeError, ValueError):
+    raw_payment_method = order.get("payment_method")
+    if raw_payment_method is None or not str(raw_payment_method).strip():
         payment_method = None
-    if order_status == 21 and payment_method == 20:
-        return True
-    if order_status == 21 and payment_method is None:
-        delivery = order.get("ord_delivery_data") or []
-        first_delivery = delivery[0] if isinstance(delivery, list) and delivery else delivery
-        has_postpay = first_delivery.get("hasPostpay") if isinstance(first_delivery, dict) else None
-        return str(has_postpay).strip().casefold() in {"1", "true"}
-    return payment_method in ORCH_SUP6_STATUS_PAYMENT_METHODS.get(order_status, set())
+    else:
+        try:
+            payment_method = int(str(raw_payment_method).strip())
+        except (TypeError, ValueError):
+            return False
+    return order_status == ORCH_SUP6_QUEUE_STATUS and (
+        payment_method is None or payment_method in ORCH_SUP6_PAYMENT_METHODS
+    )
 
 
 def filter_sup6_payment_queue(orders: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], int]:
@@ -460,7 +460,7 @@ def filter_sup6_payment_queue(orders: List[Dict[str, Any]]) -> tuple[List[Dict[s
         print(
             f"[ORCH] SUP6 safe skip: order_id={order_id_for_log(order)} "
             f"statusId={order.get('statusId')!r} payment_method={order.get('payment_method')!r}; "
-            "expected COD@1/21 or 16/54@22"
+            "expected statusId=21 with payment_method empty/20/16/54"
         )
     return accepted, skipped
 
@@ -1849,7 +1849,8 @@ def process_one_supplier6_order(order: Dict[str, Any]) -> None:
     if not sup6_order_matches_payment_queue(order):
         raise RuntimeError(
             "SUP6 payment/status queue mismatch: "
-            f"statusId={order.get('statusId')!r} payment_method={order.get('payment_method')!r}; expected COD@1/21 or 16/54@22"
+            f"statusId={order.get('statusId')!r} payment_method={order.get('payment_method')!r}; "
+            "expected statusId=21 with payment_method empty/20/16/54"
         )
     order_id = order.get("id")
     try:
@@ -2347,7 +2348,8 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
         if not sup6_order_matches_payment_queue(order):
             print(
                 f"[ORCH] SUP6 safe skip: order_id={order_id} statusId={order.get('statusId')!r} "
-                f"payment_method={order.get('payment_method')!r}; expected COD@1/21 or 16/54@22"
+                f"payment_method={order.get('payment_method')!r}; "
+                "expected statusId=21 with payment_method empty/20/16/54"
             )
             return False
         process_one_supplier6_order(order)
@@ -2522,38 +2524,12 @@ def main() -> int:
                 raise RuntimeError("Fetch failed")
 
             fetched_orders = parse_orders_from_fetch_output(out)
-            # SUP6 has payment-specific queues: COD starts at 1, prepayment is released at 22.
-            # Keep the legacy status=21 fetch untouched for every other supplier.
-            sup6_extra_orders: List[Dict[str, Any]] = []
-            for sup6_status in sorted(ORCH_SUP6_STATUS_PAYMENT_METHODS):
-                try:
-                    extra_rc, extra_out, extra_err = run_python(
-                        FETCH_SCRIPT,
-                        env=env,
-                        timeout_sec=_timeout_for_step("FETCH"),
-                        args=["--raw", "--status", str(sup6_status)],
-                    )
-                    if extra_rc != 0:
-                        print(
-                            f"[ORCH][WARN] SUP6 status={sup6_status} fetch failed rc={extra_rc}: {extra_err.strip()}",
-                            file=sys.stderr,
-                        )
-                        continue
-                    status_orders = parse_orders_from_fetch_output(extra_out)
-                    matched = [o for o in status_orders if sup6_order_matches_payment_queue(o, queue_status=sup6_status)]
-                    rejected = len(status_orders) - len(matched)
-                    if rejected:
-                        print(f"[ORCH] SUP6 queue status={sup6_status}: accepted={len(matched)} skipped={rejected}")
-                    sup6_extra_orders.extend(matched)
-                except Exception as e:
-                    print(f"[ORCH][WARN] SUP6 status={sup6_status} fetch failed: {e}", file=sys.stderr)
-
             filtered_orders, supplier_filtered_skipped = filter_orders_by_supplierlist(
-                fetched_orders + sup6_extra_orders, allowed_suppliers
+                fetched_orders, allowed_suppliers
             )
             filtered_orders, sup6_payment_skipped = filter_sup6_payment_queue(filtered_orders)
             print(
-                f"[ORCH] Orders received: base21={len(fetched_orders)} / sup6_extra={len(sup6_extra_orders)} "
+                f"[ORCH] Orders received: base21={len(fetched_orders)} "
                 f"/ allowed={len(filtered_orders)} / skipped={supplier_filtered_skipped + sup6_payment_skipped}"
             )
 
