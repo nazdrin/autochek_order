@@ -50,6 +50,16 @@ HEADLESS = _to_bool(os.getenv("SUP2_HEADLESS", "0"), False)
 CLEAR_BASKET = _to_bool(os.getenv("SUP2_CLEAR_BASKET", "1"), True)
 DEBUG_PAUSE_SECONDS = _to_int(os.getenv("SUP2_DEBUG_PAUSE_SECONDS", "0"), 0)
 DRY_RUN = _to_bool(os.getenv("SUP2_DRY_RUN", "0"), False)
+# In a dry run the page is specifically being inspected, so keep a local
+# record by default. Production runs stay opt-in because these files contain
+# checkout data.
+DEBUG_ARTIFACTS = _to_bool(os.getenv("SUP2_DEBUG_ARTIFACTS", "1" if DRY_RUN else "0"), DRY_RUN)
+DEBUG_ARTIFACT_DIR = (os.getenv("SUP2_DEBUG_ARTIFACT_DIR") or "tmp/supplier2_debug").strip()
+MANUAL_SUBMIT_WAIT_SECONDS = _to_int(os.getenv("SUP2_MANUAL_SUBMIT_WAIT_SECONDS", "0"), 0)
+# Do not move focus from the last recipient field to the city autocomplete
+# before submit. The old behaviour opened the city suggestions immediately
+# before the order button was pressed.
+SKIP_FINAL_FIELD_TAB = _to_bool(os.getenv("SUP2_SKIP_FINAL_FIELD_TAB", "1"), True)
 PROMO_CODE = (os.getenv("SUP2_PROMO_CODE") or "SALE15").strip()
 DISABLE_CITY_API = _to_bool(os.getenv("SUP2_DISABLE_CITY_API", "0"), False)
 NP_API_KEY = (
@@ -107,6 +117,75 @@ def _write_submit_checkpoint(url: str, submitted: bool, order_number: str = "", 
 async def _debug_pause_if_needed() -> None:
     if DEBUG_PAUSE_SECONDS > 0:
         await asyncio.sleep(DEBUG_PAUSE_SECONDS)
+
+
+def _debug_dir_path() -> Path:
+    path = Path(DEBUG_ARTIFACT_DIR)
+    if not path.is_absolute():
+        path = ROOT / path
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+async def _capture_debug_artifacts(page, stage: str, label: str, *, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Persist the exact rendered checkout state before a debug pause/close."""
+    details: dict[str, Any] = dict(extra or {})
+    details["url"] = page.url if page is not None else CHECKOUT_URL
+    if not DEBUG_ARTIFACTS or page is None:
+        return details
+
+    # The checkout uses both hidden native selects and SelectBoxIt widgets.
+    # Persist the actual delivery payload as well as the visible UI, so a
+    # later server-side reset can be compared without submitting another order.
+    try:
+        details["checkout_delivery_payload"] = await page.evaluate(
+            """() => {
+                const checkout = document.querySelector('section.checkout') || document;
+                const form = checkout.querySelector('form');
+                const controls = Array.from(checkout.querySelectorAll('input, select, textarea'));
+                const relevant = controls.filter((el) => /^(Delivery|Payment)\[/.test(el.name || ''));
+                const valueOf = (el) => el.tagName === 'SELECT'
+                    ? {value: el.value, text: el.options[el.selectedIndex]?.text || ''}
+                    : {value: el.value || '', type: el.type || ''};
+                const selectWidget = (select) => {
+                    const id = select.id || '';
+                    const text = document.querySelector(`#${CSS.escape(id)}SelectBoxItText`);
+                    return text ? {value: text.dataset.val || '', text: text.textContent?.trim() || ''} : null;
+                };
+                return {
+                    form_action: form?.getAttribute('action') || '',
+                    delivery_type: Array.from(document.querySelectorAll('select')).filter((el) => el.name === 'Delivery[delivery_type]').map((el) => ({native: valueOf(el), widget: selectWidget(el)})),
+                    warehouse: Array.from(document.querySelectorAll('select')).filter((el) => (el.name || '').includes('warehouse.id')).map((el) => ({native: valueOf(el), widget: selectWidget(el)})),
+                    fields: relevant.map((el) => ({name: el.name, ...valueOf(el)})),
+                };
+            }"""
+        )
+    except Exception as exc:
+        details["checkout_delivery_payload_error"] = str(exc)
+
+    safe_stage = re.sub(r"[^a-zA-Z0-9._-]+", "_", stage or "stage").strip("_") or "stage"
+    safe_label = re.sub(r"[^a-zA-Z0-9._-]+", "_", label or "artifact").strip("_") or "artifact"
+    base = _debug_dir_path() / f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}_{safe_stage}_{safe_label}"
+    screenshot_path = base.with_suffix(".png")
+    html_path = base.with_suffix(".html")
+    meta_path = base.with_suffix(".json")
+
+    try:
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        details["screenshot"] = str(screenshot_path)
+    except Exception as exc:
+        details["screenshot_error"] = str(exc)
+    try:
+        html_path.write_text(await page.content(), encoding="utf-8")
+        details["html"] = str(html_path)
+    except Exception as exc:
+        details["html_error"] = str(exc)
+    try:
+        meta_path.write_text(json.dumps(details, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        details["meta"] = str(meta_path)
+    except Exception as exc:
+        details["meta_error"] = str(exc)
+    return details
 
 
 async def _dismiss_known_overlays(page) -> None:
@@ -1428,26 +1507,104 @@ async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = 
     return {"city_query": city_query, "city_value": city_value, "city_id": city_id, "selection": "ui"}
 
 
+async def _wait_for_checkout_idle(page, *, timeout_ms: int | None = None) -> dict[str, Any]:
+    """Wait for CheckoutModule/cart AJAX to finish before the next action."""
+    timeout = int(timeout_ms or TIMEOUT_MS)
+    deadline = asyncio.get_running_loop().time() + (timeout / 1000.0)
+    latest: dict[str, Any] = {}
+    while asyncio.get_running_loop().time() < deadline:
+        latest = await page.evaluate(
+            """() => {
+                const module = window.CheckoutModule && CheckoutModule.getInstance ? CheckoutModule.getInstance() : null;
+                const submit = document.querySelector('#checkout-container button.j-submit');
+                const loaders = Array.from(document.querySelectorAll('#checkout-container .j-loader'));
+                const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+                return {
+                    moduleSubmitting: !!(module && module.submitting),
+                    postponeSubmit: !!(module && module.isPostponeSubmit),
+                    submitDisabled: !!(submit && submit.disabled),
+                    loaderVisible: loaders.some(visible),
+                };
+            }"""
+        )
+        if isinstance(latest, dict) and not latest.get("moduleSubmitting") and not latest.get("loaderVisible"):
+            return latest
+        await page.wait_for_timeout(250)
+    raise StageError("fill_checkout", "Checkout AJAX did not settle in time.", {"state": latest})
+
+
+async def _click_selectboxit_option(page, select_id: str, value: str, expected_text: str) -> dict[str, Any]:
+    """Select an option through the site's visible SelectBoxIt widget."""
+    if not select_id:
+        raise StageError("fill_checkout", "Visible select widget id is missing.", {"value": value, "text": expected_text})
+    widget = page.locator(f"#{select_id}SelectBoxIt").first
+    if await widget.count() != 1:
+        raise StageError(
+            "fill_checkout",
+            "Visible select widget was not found.",
+            {"select_id": select_id, "value": value, "text": expected_text},
+        )
+    await widget.wait_for(state="visible", timeout=TIMEOUT_MS)
+    await widget.click(timeout=TIMEOUT_MS)
+    await page.wait_for_timeout(250)
+
+    safe_value = str(value).replace('\\', '\\\\').replace('"', '\\"')
+    option = page.locator(f'#{select_id}SelectBoxItOptions li[data-val="{safe_value}"]').first
+    if await option.count() != 1:
+        raise StageError(
+            "fill_checkout",
+            "Visible select option was not found.",
+            {"select_id": select_id, "value": value, "text": expected_text},
+        )
+    if not await option.is_visible():
+        # Large cities render only a filtered subset of warehouse options.
+        # Use the widget's own search field instead of clicking a hidden LI.
+        search = page.locator(f"#{select_id}SelectBoxItSearchField").first
+        if await search.count() == 1 and await search.is_visible():
+            branch_match = re.search(r"(?:№|#)\s*(\d+)", str(expected_text or ""))
+            query = branch_match.group(1) if branch_match else str(expected_text or "")[:80]
+            await search.fill(query, timeout=TIMEOUT_MS)
+            await page.wait_for_timeout(500)
+    await option.wait_for(state="visible", timeout=TIMEOUT_MS)
+    await option.click(timeout=TIMEOUT_MS)
+    await page.wait_for_timeout(250)
+    await _wait_for_checkout_idle(page)
+
+    state = await page.evaluate(
+        """([selectId, expectedValue]) => {
+            const sel = document.getElementById(selectId);
+            const widgetText = document.getElementById(`${selectId}SelectBoxItText`);
+            return {
+                native: {
+                    value: sel ? sel.value : '',
+                    text: sel && sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '',
+                },
+                widget: {
+                    value: widgetText ? widgetText.getAttribute('data-val') || '' : '',
+                    text: widgetText ? (widgetText.textContent || '').trim() : '',
+                },
+                expectedValue: String(expectedValue || ''),
+            };
+        }""",
+        [select_id, str(value)],
+    )
+    return state if isinstance(state, dict) else {}
+
+
 async def _select_payment_cod(page) -> dict:
     payment = page.locator("#checkout-payment-type").first
     await payment.wait_for(state="attached", timeout=TIMEOUT_MS)
-    await page.evaluate(
+    option_text = await page.evaluate(
         """(value) => {
             const sel = document.querySelector('#checkout-payment-type');
-            if (!sel) throw new Error('payment select not found');
-            sel.value = value;
-            sel.dispatchEvent(new Event('change', {bubbles: true}));
+            const option = sel && Array.from(sel.options).find((item) => String(item.value) === String(value));
+            return option ? option.text : '';
         }""",
         PAYMENT_COD_VALUE,
     )
-    await page.wait_for_timeout(700)
-    value = await payment.input_value(timeout=TIMEOUT_MS)
-    text = await page.evaluate(
-        """() => {
-            const sel = document.querySelector('#checkout-payment-type');
-            return sel && sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
-        }"""
-    )
+    state = await _click_selectboxit_option(page, "checkout-payment-type", PAYMENT_COD_VALUE, str(option_text or ""))
+    value = str((state.get("native") or {}).get("value") or "")
+    text = str((state.get("native") or {}).get("text") or "")
     if value != PAYMENT_COD_VALUE:
         raise StageError("fill_checkout", "Payment type was not selected.", {"value": value, "expected": PAYMENT_COD_VALUE, "text": text})
     return {"value": value, "text": text}
@@ -1490,46 +1647,33 @@ async def _select_delivery_method(page, recipient: Recipient) -> dict:
             {"delivery_kind": recipient.delivery_kind, "branch_query": recipient.branch_query, "meta": meta},
         )
 
-    await page.evaluate(
-        """([name, value]) => {
-            const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
-            if (!sel) throw new Error('delivery method select not found');
-            sel.value = value;
-            sel.dispatchEvent(new Event('change', {bubbles: true}));
-        }""",
-        [meta["name"], str(option["value"])],
+    widget_state = await _click_selectboxit_option(
+        page,
+        str(meta.get("id") or ""),
+        str(option.get("value") or ""),
+        str(option.get("text") or ""),
     )
-    await page.wait_for_timeout(1800)
-
-    selected = await page.evaluate(
-        """(name) => {
-            const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
-            if (!sel) return {value: '', text: ''};
-            return {
-                value: sel.value,
-                text: sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : ''
-            };
-        }""",
-        meta["name"],
-    )
+    selected = widget_state.get("native") if isinstance(widget_state, dict) else {}
     selected_text = str((selected or {}).get("text") or "")
-    if str((selected or {}).get("value") or "") != str(option.get("value") or ""):
+    selected_value = str((selected or {}).get("value") or "")
+    widget_selected = widget_state.get("widget") if isinstance(widget_state, dict) else {}
+    if selected_value != str(option.get("value") or "") or str((widget_selected or {}).get("value") or "") != str(option.get("value") or ""):
         raise StageError(
             "fill_checkout",
             "Delivery method selection did not stick.",
-            {"expected": option, "selected": selected, "meta": meta},
+            {"expected": option, "selected": widget_state, "meta": meta},
         )
     if not any(word in selected_text.lower() for word in target_words):
         raise StageError(
             "fill_checkout",
             "Delivery method final validation failed.",
-            {"delivery_kind": recipient.delivery_kind, "expected_words": target_words, "selected": selected, "meta": meta},
+            {"delivery_kind": recipient.delivery_kind, "expected_words": target_words, "selected": widget_state, "meta": meta},
         )
 
     return {
         "kind": recipient.delivery_kind,
         "selected": True,
-        "value": (selected or {}).get("value", ""),
+        "value": selected_value,
         "text": selected_text,
         "name": meta.get("name", ""),
     }
@@ -1636,25 +1780,20 @@ async def _select_warehouse(page, recipient: Recipient) -> dict:
 
     warehouse = page.locator(f'select[name="{meta["name"]}"]').first
     await warehouse.wait_for(state="attached", timeout=TIMEOUT_MS)
-    await page.evaluate(
-        """([name, value]) => {
-            const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
-            if (!sel) throw new Error('warehouse select not found');
-            sel.value = value;
-            sel.dispatchEvent(new Event('change', {bubbles: true}));
-        }""",
-        [meta["name"], str(option["value"])],
+    widget_state = await _click_selectboxit_option(
+        page,
+        str(meta.get("id") or ""),
+        str(option.get("value") or ""),
+        str(option.get("text") or ""),
     )
-    await page.wait_for_timeout(900)
-    selected_text = await page.evaluate(
-        """(name) => {
-            const sel = Array.from(document.querySelectorAll('select')).find((s) => s.name === name);
-            return sel && sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
-        }""",
-        meta["name"],
-    )
+    selected = widget_state.get("native") if isinstance(widget_state, dict) else {}
+    selected_text = str((selected or {}).get("text") or "")
+    selected_value = str((selected or {}).get("value") or "")
+    widget_selected = widget_state.get("widget") if isinstance(widget_state, dict) else {}
+    if selected_value != str(option.get("value") or "") or str((widget_selected or {}).get("value") or "") != str(option.get("value") or ""):
+        raise StageError("fill_checkout", "Warehouse selection did not stick.", {"expected": option, "selected": widget_state})
     if str(option["text"]) != str(selected_text):
-        raise StageError("fill_checkout", "Warehouse selection did not stick.", {"expected": option, "selected_text": selected_text})
+        raise StageError("fill_checkout", "Warehouse selection did not stick.", {"expected": option, "selected": widget_state})
     validation = _validate_selected_delivery_text(
         selected_text=selected_text,
         recipient=recipient,
@@ -1798,7 +1937,38 @@ async def _read_success_page(page) -> dict:
     )
 
 
-async def _fill_text_field(page, selector: str, value: str, *, clear: bool = True) -> str:
+async def _wait_for_manual_submit(page) -> dict[str, Any]:
+    """Wait for a human to click checkout submit; this function never clicks it."""
+    if MANUAL_SUBMIT_WAIT_SECONDS <= 0:
+        return {"enabled": False, "click_detected": False}
+
+    await page.evaluate(
+        """() => {
+            window.__sup2ManualSubmit = {clicked: false, at: 0};
+            document.addEventListener('click', (event) => {
+                const button = event.target && event.target.closest && event.target.closest('button.j-submit');
+                if (button) window.__sup2ManualSubmit = {clicked: true, at: Date.now()};
+            }, true);
+        }"""
+    )
+    deadline = asyncio.get_running_loop().time() + MANUAL_SUBMIT_WAIT_SECONDS
+    while asyncio.get_running_loop().time() < deadline:
+        state = await page.evaluate("""() => window.__sup2ManualSubmit || {clicked: false, at: 0}""")
+        if isinstance(state, dict) and state.get("clicked"):
+            # Let the site's AJAX/navigation handler settle before recording it.
+            await page.wait_for_timeout(4000)
+            success = await _read_success_page(page)
+            return {
+                "enabled": True,
+                "click_detected": True,
+                "wait_seconds": MANUAL_SUBMIT_WAIT_SECONDS,
+                "success": success,
+            }
+        await page.wait_for_timeout(250)
+    return {"enabled": True, "click_detected": False, "wait_seconds": MANUAL_SUBMIT_WAIT_SECONDS}
+
+
+async def _fill_text_field(page, selector: str, value: str, *, clear: bool = True, tab_after: bool = True) -> str:
     loc = page.locator(selector).first
     await loc.wait_for(state="visible", timeout=TIMEOUT_MS)
     await loc.click(timeout=TIMEOUT_MS)
@@ -1806,17 +1976,37 @@ async def _fill_text_field(page, selector: str, value: str, *, clear: bool = Tru
         await loc.press("ControlOrMeta+A", timeout=TIMEOUT_MS)
         await loc.press("Backspace", timeout=TIMEOUT_MS)
     await loc.type(value, delay=25, timeout=TIMEOUT_MS)
-    await loc.press("Tab", timeout=TIMEOUT_MS)
+    if tab_after:
+        await loc.press("Tab", timeout=TIMEOUT_MS)
     await page.wait_for_timeout(200)
     return (await loc.input_value(timeout=TIMEOUT_MS)).strip()
 
 
 async def _fill_recipient_fields(page, recipient: Recipient) -> dict:
     name_value = await _fill_text_field(page, "#checkout-name", recipient.name)
-    phone_value = await _fill_text_field(page, "#checkout-phone", recipient.phone_input)
+    if DEBUG_ARTIFACTS:
+        await _capture_debug_artifacts(
+            page,
+            "fill_checkout",
+            "after_name",
+            extra={"field": "name", "value_present": bool(name_value)},
+        )
+    phone_value = await _fill_text_field(
+        page,
+        "#checkout-phone",
+        recipient.phone_input,
+        tab_after=not SKIP_FINAL_FIELD_TAB or bool(recipient.email),
+    )
+    if DEBUG_ARTIFACTS:
+        await _capture_debug_artifacts(
+            page,
+            "fill_checkout",
+            "after_phone",
+            extra={"field": "phone", "value_present": bool(phone_value)},
+        )
     email_value = ""
     if recipient.email:
-        email_value = await _fill_text_field(page, "#checkout-email", recipient.email)
+        email_value = await _fill_text_field(page, "#checkout-email", recipient.email, tab_after=not SKIP_FINAL_FIELD_TAB)
 
     expected_phone_tail = recipient.phone_input[-7:]
     if not name_value:
@@ -1847,12 +2037,17 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
     await _goto_retry(page, CHECKOUT_URL)
     await _safe_wait_networkidle(page)
 
+    # Applying a coupon reloads the cart totals via AJAX. Do it before the
+    # delivery controls so that the final warehouse choice is made last and
+    # cannot be replaced by the first option during that reload.
+    coupon = await _apply_coupon(page)
+    await _wait_for_checkout_idle(page)
     city = await _select_city(page, recipient.city_query, recipient.city_geo_hints)
     payment = await _select_payment_cod(page)
     delivery_method = await _select_delivery_method(page, recipient)
     warehouse = await _select_warehouse(page, recipient)
-    coupon = await _apply_coupon(page)
     customer = await _fill_recipient_fields(page, recipient)
+    await _wait_for_checkout_idle(page)
 
     submit = page.locator("button.j-submit").first
     await submit.wait_for(state="visible", timeout=TIMEOUT_MS)
@@ -2001,12 +2196,56 @@ async def _run() -> tuple[bool, dict]:
             stage = "fill_checkout"
             checkout_result = await _fill_checkout(page, recipient)
 
-            if DRY_RUN:
+            if MANUAL_SUBMIT_WAIT_SECONDS > 0:
+                stage = "manual_submit_wait"
+                checkout_result["debug_artifacts"] = await _capture_debug_artifacts(
+                    page,
+                    "fill_checkout",
+                    "ready_for_manual_submit",
+                    extra={
+                        "manual_submit": True,
+                        "submitted": False,
+                        "message": "Checkout is filled. Waiting for a human to click submit; automation will not click it.",
+                    },
+                )
+                manual_submit = await _wait_for_manual_submit(page)
+                checkout_result["manual_submit"] = manual_submit
+                checkout_result["manual_submit_artifacts"] = await _capture_debug_artifacts(
+                    page,
+                    stage,
+                    "after_manual_submit" if manual_submit.get("click_detected") else "manual_submit_timeout",
+                    extra=manual_submit,
+                )
+                success = manual_submit.get("success") if isinstance(manual_submit.get("success"), dict) else {}
+                supplier_order_number = str(success.get("orderNumber") or "") if manual_submit.get("click_detected") else ""
+                submitted = bool(supplier_order_number)
+            elif DRY_RUN:
+                checkout_result["debug_artifacts"] = await _capture_debug_artifacts(
+                    page,
+                    stage,
+                    "ready_for_submit",
+                    extra={
+                        "dry_run": True,
+                        "submitted": False,
+                        "message": "Checkout is filled and the submit button was deliberately not clicked.",
+                    },
+                )
                 supplier_order_number = "DRY_RUN"
             else:
                 stage = "submit_order"
                 supplier_order_number = await _submit_order(page)
                 submitted = True
+                checkout_result["debug_artifacts"] = await _capture_debug_artifacts(
+                    page,
+                    "post_submit_order_number",
+                    "supplier_order_confirmed",
+                    extra={
+                        "dry_run": False,
+                        "submitted": True,
+                        "supplier_order_number": supplier_order_number,
+                        "message": "Supplier confirmation page after submit.",
+                    },
+                )
 
             return True, {
                 "ok": True,
@@ -2020,6 +2259,7 @@ async def _run() -> tuple[bool, dict]:
                 **checkout_result,
             }
     except StageError as e:
+        details = await _capture_debug_artifacts(page, e.stage or stage, "stage_error", extra=e.details or {})
         await _debug_pause_if_needed()
         paused_for_error = True
         return False, {
@@ -2027,10 +2267,16 @@ async def _run() -> tuple[bool, dict]:
             "error": str(e),
             "stage": e.stage or stage,
             "url": page.url if page is not None else CHECKOUT_URL,
-            "submitted": bool((e.details or {}).get("submitted")) or submitted,
-            "details": e.details or {},
+            "submitted": bool(details.get("submitted")) or submitted,
+            "details": details,
         }
     except Exception as e:
+        details = await _capture_debug_artifacts(
+            page,
+            stage,
+            "unexpected_error",
+            extra={"exception_type": type(e).__name__},
+        )
         await _debug_pause_if_needed()
         paused_for_error = True
         return False, {
@@ -2039,7 +2285,7 @@ async def _run() -> tuple[bool, dict]:
             "stage": stage,
             "url": page.url if page is not None else CHECKOUT_URL,
             "submitted": submitted,
-            "details": {},
+            "details": details,
         }
     finally:
         try:
