@@ -109,12 +109,8 @@ def build_zoohub_subject(items: List[Dict[str, Any]]) -> str:
     return f"{prefix}: {sku_part}"
 
 
-def build_zoohub_body(order_id: int, ttn: str, items: List[Dict[str, Any]]) -> str:
-    intro = _env("ZOOHUB_EMAIL_BODY_INTRO")
+def build_zoohub_body(ttn: str, items: List[Dict[str, Any]]) -> str:
     lines: List[str] = []
-    if intro:
-        lines.append(intro)
-        lines.append("")
     lines.append(f"TTN: {ttn}")
     lines.append("")
     lines.append("Товари:")
@@ -123,8 +119,6 @@ def build_zoohub_body(order_id: int, ttn: str, items: List[Dict[str, Any]]) -> s
         qty = int(it.get("qty") or 1)
         name = str(it.get("name") or "").strip()
         lines.append(f"- {sku} x{qty} ({name})")
-    lines.append("")
-    lines.append(f"SalesDrive orderId: {order_id}")
     return "\n".join(lines)
 
 

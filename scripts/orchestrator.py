@@ -1954,7 +1954,7 @@ def process_one_zoohub_order(order: Dict[str, Any], state: Dict[str, Any]) -> No
     products_payload = build_zoohub_salesdrive_products(order)
     recipients = parse_to_emails()
     subject = build_zoohub_subject(items)
-    body = build_zoohub_body(order_id_int, tracking_number, items)
+    body = build_zoohub_body(tracking_number, items)
     dry_run = zoohub_dry_run_enabled()
     number_sup_value = zoohub_number_sup_value()
 
