@@ -2746,13 +2746,20 @@ def main() -> int:
                                         red_reason = f"{red_reason}\nВНИМАНИЕ:{suffix} Не перезапускайте автоматически, проверьте вручную."
                                 if force_terminal and "submitted=true" in reason:
                                     red_reason = f"{red_reason}\nВНИМАНИЕ: отправка поставщику 2, вероятно, уже прошла; перед повтором проверьте сайт поставщика вручную."
-                                # Try to set SalesDrive status to FAIL status with a short red comment.
-                                try:
-                                    salesdrive_update_status(int(order_id), ORCH_FAIL_STATUS_ID, comment=red_reason)
-                                    print(f"[ORCH] SalesDrive status updated: order_id={order_id} -> statusId={ORCH_FAIL_STATUS_ID}")
-                                except Exception as se:
-                                    # Include SalesDrive error in notify, but keep going
-                                    red_reason = f"{red_reason}\nОшибка обновления SalesDrive: {se}"
+                                # Once SUP4's submit button was clicked, lack of a UI
+                                # confirmation is ambiguous: the supplier may already
+                                # have accepted the order.  Never mark SalesDrive as a
+                                # failure automatically in that case.
+                                ambiguous_sup4_submit = is_supplier4_order(order) and step == "submit_checkout_order"
+                                if ambiguous_sup4_submit:
+                                    red_reason = f"{red_reason}\nВНИМАНИЕ: отправка SUP4 могла пройти. SalesDrive не менялся; проверьте Мої замовлення по ТТН."
+                                else:
+                                    try:
+                                        salesdrive_update_status(int(order_id), ORCH_FAIL_STATUS_ID, comment=red_reason)
+                                        print(f"[ORCH] SalesDrive status updated: order_id={order_id} -> statusId={ORCH_FAIL_STATUS_ID}")
+                                    except Exception as se:
+                                        # Include SalesDrive error in notify, but keep going
+                                        red_reason = f"{red_reason}\nОшибка обновления SalesDrive: {se}"
                                 notify_stub(red_reason)
 
                             # continue with next order

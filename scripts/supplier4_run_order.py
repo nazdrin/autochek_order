@@ -395,8 +395,16 @@ def _keycrm_order_number(text: str) -> str:
     return match.group(1) if match else ""
 
 
-async def _submit_and_confirm(page) -> dict[str, Any]:
-    """Submit once and accept success only from the supplier's KeyCRM modal."""
+def _history_order_number(text: str, ttn: str) -> str:
+    """Extract Monsterlab Drop's D-number only from a row containing this TTN."""
+    if _digits(ttn) not in _digits(text):
+        return ""
+    match = re.search(r"\b(D\d{4,})\b", str(text or ""), re.I)
+    return match.group(1).upper() if match else ""
+
+
+async def _submit_and_confirm(page, ttn: str) -> dict[str, Any]:
+    """Submit once and confirm through KeyCRM modal or the supplier order history."""
     stage = "submit_checkout_order"
     button = page.get_by_role("button", name="Оформити замовлення", exact=True)
     try:
@@ -408,11 +416,28 @@ async def _submit_and_confirm(page) -> dict[str, Any]:
         except Exception:
             pass
         modal = page.get_by_text(re.compile(r"Замовлення\s+\d+\s+у\s+KeyCRM", re.I)).first
-        await modal.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
-        text = await modal.inner_text()
+        try:
+            await modal.wait_for(state="visible", timeout=5000)
+            text = await modal.inner_text()
+            number = _keycrm_order_number(text)
+            if number:
+                return {"submitted": True, "supplier_order_number": number, "confirmation_text": text}
+        except Exception:
+            pass
+
+        # Some Monsterlab accounts show no KeyCRM modal.  Their authoritative
+        # confirmation is a newly created D-number in “Мої замовлення”, on the
+        # same row as the submitted TTN.
+        await page.get_by_role("button", name="Мої замовлення", exact=True).click()
+        ttn_node = page.get_by_text(re.compile(re.escape(ttn))).first
+        await ttn_node.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
+        row = ttn_node.locator(
+            "xpath=ancestor::*[self::tr or contains(concat(' ', normalize-space(@class), ' '), ' orow ') or contains(concat(' ', normalize-space(@class), ' '), ' order-row ')][1]"
+        )
+        text = await row.inner_text() if await row.count() else await page.locator("body").inner_text()
     except Exception as exc:
         raise StageError(stage, "SUBMIT_CONFIRMATION_NOT_FOUND", await _debug(page, stage, "confirmation_not_found")) from exc
-    number = _keycrm_order_number(text)
+    number = _history_order_number(text, ttn)
     if not number:
         raise StageError(stage, "SUPPLIER_ORDER_NUMBER_NOT_FOUND", await _debug(page, stage, "number_not_found", {"modal_text": text}))
     return {"submitted": True, "supplier_order_number": number, "confirmation_text": text}
@@ -462,7 +487,7 @@ async def _run() -> dict[str, Any]:
             if not comparison_after["verified"]:
                 raise StageError("checkout_ttn", "CART_ORDER_MISMATCH", await _debug(page, "checkout_ttn", "post_label_order_mismatch", {"comparison": comparison_after, "actual": actual_after}))
             if SUP4_ALLOW_SUBMIT:
-                confirmation = await _submit_and_confirm(page)
+                confirmation = await _submit_and_confirm(page, SUP4_TTN)
                 return {"ok": True, "stage": "submitted", "url": page.url,
                         "cart_qty_checks": checks, "cart": actual_after, "cart_comparison": comparison_after,
                         "ttn": label, "label": label, **confirmation}
