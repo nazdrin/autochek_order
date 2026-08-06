@@ -242,6 +242,7 @@ ORCH_SUP4_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP4_STORAGE_STATE_FILE") or ".s
 ORCH_SUP4_CLEAR_BASKET = (os.getenv("ORCH_SUP4_CLEAR_BASKET") or "1").strip()
 ORCH_SUP4_ATTACH_DIR = (os.getenv("ORCH_SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 ORCH_SUP4_PAUSE_SEC = (os.getenv("ORCH_SUP4_PAUSE_SEC") or "0").strip()
+ORCH_SUP4_ALLOW_SUBMIT = (os.getenv("ORCH_SUP4_ALLOW_SUBMIT") or "0").strip()
 ORCH_SUP6_SUPPLIERLIST = int(os.getenv("ORCH_SUP6_SUPPLIERLIST", "40"))
 ORCH_SUP6_QUEUE_STATUS = 21
 ORCH_SUP6_PAYMENT_METHODS = {20, 54, 16}
@@ -1033,8 +1034,23 @@ def build_sup3_items(order: Dict[str, Any]) -> str:
 
 
 def build_sup4_items(order: Dict[str, Any]) -> str:
-    # Monsterlab supplier4 uses the same SKU:QTY format as supplier2/supplier3.
-    return build_sup2_items(order)
+    # Monsterlab Drop exposes the supplier article in description (for example
+    # ``SOL-00947``).  ``sku``/``parameter`` are SalesDrive's internal product
+    # IDs and must never be sent to the supplier's catalogue search.
+    products = order.get("products") or []
+    items: List[str] = []
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        article = str(product.get("description") or "").split(",", 1)[0].strip()
+        if not article:
+            continue
+        try:
+            qty = max(1, int(product.get("amount") or 1))
+        except (TypeError, ValueError):
+            qty = 1
+        items.append(f"{article}:{qty}")
+    return ",".join(items)
 
 
 def build_sup6_items(order: Dict[str, Any]) -> str:
@@ -1760,6 +1776,7 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
     env["SUP4_CLEAR_BASKET"] = ORCH_SUP4_CLEAR_BASKET
     env["SUP4_ATTACH_DIR"] = ORCH_SUP4_ATTACH_DIR
     env["SUP4_PAUSE_SEC"] = ORCH_SUP4_PAUSE_SEC
+    env["SUP4_ALLOW_SUBMIT"] = ORCH_SUP4_ALLOW_SUBMIT
     inject_np_api_key_env(env, order)
 
     print(f"[ORCH] Monsterlab SUP4_ITEMS => {sup4_items}")
@@ -1829,19 +1846,22 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
     else:
         print("[ORCH] WARNING: Supplier4 response has no structured qty verification")
 
-    supplier_order_number = str(payload.get("numberSup") or "").strip()
-    if not supplier_order_number:
-        supplier_order_number = str(payload.get("supplier_order_number") or "").strip()
-    if not supplier_order_number:
-        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
-        checkout_info = details.get("checkout_ttn") if isinstance(details.get("checkout_ttn"), dict) else {}
-        supplier_order_number = str(checkout_info.get("supplier_order_number") or "").strip()
-    if not supplier_order_number:
-        raise StepError(step_name, "supplier_order_number is empty in supplier4_run_order response.")
+    # Monsterlab Drop v1 deliberately stops before the final supplier submit.
+    # A prepared basket must never advance SalesDrive to the completed state.
+    if not bool(payload.get("submitted")):
+        print(
+            f"[ORCH] Supplier4 order prepared but not submitted: order_id={order_id_int}; "
+            "SalesDrive status was left unchanged"
+        )
+        return
 
+    supplier_order_number = str(payload.get("supplier_order_number") or "").strip()
+    if not supplier_order_number:
+        raise StepError(step_name, "SUPPLIER_ORDER_NUMBER_NOT_FOUND after submitted SUP4 response")
     salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
     print(
-        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number}"
+        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> "
+        f"statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number}"
     )
 
 

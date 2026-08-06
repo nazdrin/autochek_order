@@ -1,93 +1,67 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from supplier4_run_order import (  # noqa: E402
-    _article_matches_sku,
-    _checkout_cart_entry_for_sku,
-    _classify_exact_dropdown_candidates,
-)
+from supplier4_run_order import Sup4Item, _cart_qty_checks, _compare_order, _keycrm_order_number, _label_matches_ttn, _parse_items  # noqa: E402
+from orchestrator import build_sup4_items  # noqa: E402
 
 
-def candidate(*, text="", href="", metadata=None, is_product_link=True):
-    return {
-        "text": text,
-        "href": href,
-        "metadata": metadata or {},
-        "is_product_link": is_product_link,
-    }
+class Supplier4DropValidationTests(unittest.TestCase):
+    def test_parse_items_normalizes_valid_input(self):
+        self.assertEqual(_parse_items(" SOL-00947:2 ; GAV-0157 "), [Sup4Item("SOL-00947", 2), Sup4Item("GAV-0157", 1)])
 
+    def test_invalid_or_duplicate_supplier_items_are_rejected(self):
+        for raw in ("", "SOL-00947:0", "SOL-00947:1,SOL-00947:2"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(RuntimeError):
+                    _parse_items(raw)
 
-class Supplier4ProductIdentityTests(unittest.TestCase):
-    def test_single_result_is_opened_for_product_page_article_check(self):
-        outcome, selected = _classify_exact_dropdown_candidates(
-            "NOW-00105",
-            [candidate(text="NOW L-Lysine 500 mg 100 таблеток", href="/l-lysine")],
-        )
-        self.assertEqual("single_result", outcome)
-        self.assertEqual(["single_dropdown_result"], selected["sku_match_sources"])
+    def test_compare_order_accepts_exact_skus_and_quantities(self):
+        result = _compare_order([Sup4Item("SOL-00947", 2)], [{"sku": "sol-00947", "qty": 2, "price": 735}])
+        self.assertTrue(result["verified"])
 
-    def test_exact_sku_in_dropdown_text_is_selected(self):
-        outcome, selected = _classify_exact_dropdown_candidates(
-            "NOW-00105",
-            [candidate(text="NOW-00105 Vitamin C", href="/vitamin-c")],
-        )
-        self.assertEqual("exact", outcome)
-        self.assertEqual(["dropdown_text"], selected["sku_match_sources"])
+    def test_compare_order_reports_missing_extra_and_wrong_quantity(self):
+        result = _compare_order([Sup4Item("SOL-00947", 2)], [{"sku": "SOL-00947", "qty": 1}, {"sku": "GAV-0157", "qty": 1}])
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["extra"], ["gav-0157"])
+        self.assertEqual(result["qty_mismatches"][0]["actual_qty"], 1)
 
-    def test_exact_sku_in_href_or_metadata_is_selected(self):
-        for item, expected_source in (
-            (candidate(text="Vitamin C", href="/product/now-00105"), "href"),
-            (candidate(text="Vitamin C", href="/product/vitamin-c", metadata={"data-sku": "NOW-00105"}), "metadata"),
-        ):
-            with self.subTest(expected_source=expected_source):
-                outcome, selected = _classify_exact_dropdown_candidates("NOW-00105", [item])
-                self.assertEqual("exact", outcome)
-                self.assertIn(expected_source, selected["sku_match_sources"])
+    def test_compare_order_fails_when_cart_has_an_unordered_item(self):
+        result = _compare_order([Sup4Item("SOL-00947", 1)], [{"sku": "SOL-00947", "qty": 1}, {"sku": "GAV-0157", "qty": 1}])
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["extra"], ["gav-0157"])
 
-    def test_partial_skus_are_not_accepted_without_product_page_check(self):
-        for value in ("NOW-0010", "NOW-00100"):
-            with self.subTest(value=value):
-                outcome, selected = _classify_exact_dropdown_candidates(
-                    "NOW-00105", [candidate(text=f"Product {value}", href=f"/product/{value}")]
-                )
-                self.assertEqual("single_result", outcome)
-                self.assertEqual(["single_dropdown_result"], selected["sku_match_sources"])
+    def test_cart_qty_checks_include_expected_and_actual_values(self):
+        checks = _cart_qty_checks([Sup4Item("SOL-00947", 2)], [{"sku": "sol-00947", "qty": 2}])
+        self.assertEqual(checks, [{"sku": "SOL-00947", "expected_qty": 2, "actual_qty": 2, "verified": True, "verified_stage": "cart"}])
 
-    def test_two_exact_candidates_are_ambiguous(self):
-        outcome, selected = _classify_exact_dropdown_candidates(
-            "NOW-00105",
-            [
-                candidate(text="NOW-00105, 100 tablets", href="/product/a"),
-                candidate(text="NOW-00105, 50 tablets", href="/product/b"),
-            ],
-        )
-        self.assertEqual("ambiguous", outcome)
-        self.assertIsNone(selected)
+    def test_label_ttn_is_verified_from_name_or_pdf_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            named = Path(directory) / "label-20450398117642.pdf"
+            named.write_bytes(b"%PDF test")
+            self.assertTrue(_label_matches_ttn(named, "20450398117642"))
+            content = Path(directory) / "label.pdf"
+            content.write_bytes(b"%PDF 20450398117642")
+            self.assertTrue(_label_matches_ttn(content, "20450398117642"))
+            self.assertFalse(_label_matches_ttn(content, "20450398117643"))
 
-    def test_product_page_article_must_exactly_match_requested_sku(self):
-        self.assertTrue(_article_matches_sku("CEN-27116", "CEN-27116"))
-        self.assertFalse(_article_matches_sku("NOW-00105", "NOW-00100"))
-        self.assertFalse(_article_matches_sku("NOW-00105", ""))
+    def test_empty_pdf_cannot_be_accepted_by_filename_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            empty = Path(directory) / "label-20450398117642.pdf"
+            empty.write_bytes(b"")
+            self.assertFalse(_label_matches_ttn(empty, "20450398117642"))
 
-    def test_checkout_row_is_resolved_by_supplier_article_and_hash(self):
-        entry = _checkout_cart_entry_for_sku(
-            "21296",
-            [
-                {"article": "21296", "hash": "eb380eb8b03f5cb93cae5994f2cbd510", "quantity": 1},
-                {"article": "SW957", "hash": "28f7d563232032ef3a49114e2480a3da", "quantity": 1},
-            ],
-        )
-        self.assertEqual("21296", entry["article"])
-        self.assertEqual("eb380eb8b03f5cb93cae5994f2cbd510", entry["hash"])
+    def test_keycrm_number_is_accepted_only_from_success_message(self):
+        self.assertEqual("20225", _keycrm_order_number("Замовлення 20225 у KeyCRM"))
+        self.assertEqual("", _keycrm_order_number("Замовлення передаю"))
 
-    def test_checkout_article_requires_one_valid_hash(self):
-        self.assertIsNone(_checkout_cart_entry_for_sku("21296", [{"article": "21296", "hash": "bad hash"}]))
-        self.assertIsNone(_checkout_cart_entry_for_sku("21296", [{"article": "21296", "hash": "a"}, {"article": "21296", "hash": "b"}]))
+    def test_salesdrive_description_is_the_supplier_article(self):
+        order = {"products": [{"description": "SOL-00947", "sku": "1016545", "amount": 2}]}
+        self.assertEqual("SOL-00947:2", build_sup4_items(order))
 
 
 if __name__ == "__main__":
