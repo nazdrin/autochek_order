@@ -6,7 +6,7 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from supplier4_run_order import Sup4Item, _cart_qty_checks, _compare_order, _history_order_number, _keycrm_order_number, _label_matches_ttn, _parse_items  # noqa: E402
+from supplier4_run_order import Sup4Item, _cart_qty_checks, _compare_order, _history_api_order_number, _history_order_number, _keycrm_order_number, _label_matches_ttn, _parse_items  # noqa: E402
 from orchestrator import build_sup4_items  # noqa: E402
 
 
@@ -63,6 +63,11 @@ class Supplier4DropValidationTests(unittest.TestCase):
         row = "D20250 06.08.2026 ТТН: 20451504851422"
         self.assertEqual("D20250", _history_order_number(row, "20451504851422"))
         self.assertEqual("", _history_order_number(row, "20451504750956"))
+
+    def test_history_api_d_number_requires_exact_ttn(self):
+        rows = [{"id": "D20253", "ttn": "20451504695822"}]
+        self.assertEqual("D20253", _history_api_order_number(rows, "20451504695822"))
+        self.assertEqual("", _history_api_order_number(rows, "20451504695821"))
 
     def test_salesdrive_description_is_the_supplier_article(self):
         order = {"products": [{"description": "SOL-00947", "sku": "1016545", "amount": 2}]}

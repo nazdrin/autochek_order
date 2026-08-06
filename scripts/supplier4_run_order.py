@@ -1,9 +1,4 @@
-"""Prepare, validate and label SUP4 Monsterlab Drop orders.
-
-This supplier intentionally never sends an order.  It stops after the site has
-accepted the goods, TTN and PDF label, leaving final dispatch for a later,
-explicitly approved version.
-"""
+"""Prepare, validate and (when explicitly enabled) submit SUP4 Monsterlab Drop orders."""
 import asyncio
 import json
 import os
@@ -403,6 +398,51 @@ def _history_order_number(text: str, ttn: str) -> str:
     return match.group(1).upper() if match else ""
 
 
+def _history_api_order_number(rows: object, ttn: str) -> str:
+    """Return the supplier D-number only from an API order with the exact TTN.
+
+    Monsterlab's order-history React view can render after the Playwright timeout,
+    even though the server has already created the order.  The same authenticated
+    browser session can query its authoritative ``/api/orders`` endpoint without
+    exposing its bearer token to logs or result payloads.
+    """
+    if not isinstance(rows, list):
+        return ""
+    wanted_ttn = _digits(ttn)
+    for row in rows:
+        if not isinstance(row, dict) or _digits(row.get("ttn")) != wanted_ttn:
+            continue
+        number = str(row.get("id") or "").strip().upper()
+        if re.fullmatch(r"D\d{4,}", number):
+            return number
+    return ""
+
+
+async def _history_api_confirmation(page, ttn: str) -> str:
+    """Poll the authenticated supplier API for the just-submitted TTN."""
+    script = """async () => {
+        const token = localStorage.getItem('ml_token');
+        const response = await fetch('/api/orders', {
+          headers: token ? {Authorization: `Bearer ${token}`} : {}
+        });
+        if (!response.ok) throw new Error(`orders API ${response.status}`);
+        const payload = await response.json();
+        return Array.isArray(payload) ? payload : (payload.orders || payload.data || []);
+    }"""
+    deadline = asyncio.get_running_loop().time() + (SUP4_TIMEOUT_MS / 1000)
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            number = _history_api_order_number(await page.evaluate(script), ttn)
+            if number:
+                return number
+        except Exception:
+            # The supplier may still be committing the transaction; the DOM
+            # fallback below retains a screenshot if it never becomes visible.
+            pass
+        await page.wait_for_timeout(750)
+    return ""
+
+
 async def _submit_and_confirm(page, ttn: str) -> dict[str, Any]:
     """Submit once and confirm through KeyCRM modal or the supplier order history."""
     stage = "submit_checkout_order"
@@ -425,9 +465,14 @@ async def _submit_and_confirm(page, ttn: str) -> dict[str, Any]:
         except Exception:
             pass
 
-        # Some Monsterlab accounts show no KeyCRM modal.  Their authoritative
-        # confirmation is a newly created D-number in “Мої замовлення”, on the
-        # same row as the submitted TTN.
+        # Some accounts have no KeyCRM modal.  First use the authoritative
+        # history API; unlike the UI it is not subject to slow React rendering.
+        number = await _history_api_confirmation(page, ttn)
+        if number:
+            return {"submitted": True, "supplier_order_number": number,
+                    "confirmation_text": f"Monsterlab API order {number}, TTN {ttn}"}
+
+        # Keep a UI fallback for future supplier API changes.
         await page.get_by_role("button", name="Мої замовлення", exact=True).click()
         ttn_node = page.get_by_text(re.compile(re.escape(ttn))).first
         await ttn_node.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
