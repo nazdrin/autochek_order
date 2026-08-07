@@ -2456,12 +2456,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="Сделать один цикл и выйти (для теста)")
     ap.add_argument("--dry-run", action="store_true", help="Не запускать step2_3, только вывести BIOTUS_ITEMS")
-    ap.add_argument("--inspect-order", type=int, metavar="ORDER_ID", help="Показать состояние заказа в очереди без обработки")
     args = ap.parse_args()
-    # Inspection is always a single, read-only fetch.  In particular, do not
-    # leave a diagnostic invocation looping after a temporary API/DNS failure.
-    if args.inspect_order is not None:
-        args.once = True
 
     if not FETCH_SCRIPT.exists():
         print(f"Fetch script not found: {FETCH_SCRIPT}", file=sys.stderr)
@@ -2561,28 +2556,6 @@ def main() -> int:
             orders = filtered_orders
             for o in orders:
                 print(f"[ORCH] fetched order_id={order_id_for_log(o)} supplierlist={o.get('supplierlist')!r}", flush=True)
-            if args.inspect_order is not None:
-                inspect_id = int(args.inspect_order)
-                raw_order = next((o for o in fetched_orders if order_id_for_log(o) == inspect_id), None)
-                allowed_order = next((o for o in orders if order_id_for_log(o) == inspect_id), None)
-                in_progress, in_progress_left = is_in_progress_active(state, inspect_id)
-                in_backoff, backoff_left = is_backoff_active(state, inspect_id)
-                result = {
-                    "order_id": inspect_id,
-                    "in_status_21": raw_order is not None,
-                    "allowed_by_supplier": allowed_order is not None,
-                    "supplierlist": raw_order.get("supplierlist") if isinstance(raw_order, dict) else None,
-                    "processed": inspect_id in processed_ids,
-                    "terminal_failed": is_terminal_failed(state, inspect_id),
-                    "fail_count": get_fail_count(state, inspect_id),
-                    "in_progress": in_progress,
-                    "in_progress_seconds_left": in_progress_left,
-                    "backoff": in_backoff,
-                    "backoff_seconds_left": backoff_left,
-                    "eligible": bool(allowed_order) and inspect_id not in processed_ids and not is_terminal_failed(state, inspect_id) and not in_progress and not in_backoff,
-                }
-                print("[ORCH] inspect " + json.dumps(result, ensure_ascii=False), flush=True)
-                return 0
             if not orders:
                 print("[ORCH] No orders in status=21. Sleeping...")
             else:
