@@ -372,15 +372,24 @@ async def _fill_ttn_and_attach(page, ttn: str) -> dict[str, Any]:
     label = _resolve_label(ttn)
     if not _label_matches_ttn(label, ttn):
         raise StageError(stage, "LABEL_TTN_MISMATCH", {"file": str(label), "ttn": ttn})
-    file_input = page.locator("input[type='file']").first
+    # The page has two file inputs: ``#tpPdfInput`` is for a deposit receipt,
+    # while only ``#pdfInput`` binds the TTN PDF to the order.  A generic first
+    # file input silently attached the label to the top-up form and left the
+    # actual order button disabled.
+    file_input = page.locator("#pdfInput")
     try:
         await file_input.set_input_files(str(label))
         files = await file_input.evaluate("el => el.files ? el.files.length : 0")
-        body = _norm(await page.locator("body").inner_text())
+        order_attachment = page.locator("#slip .doc").first
+        await order_attachment.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
+        attachment_text = _norm(await order_attachment.inner_text())
+        current_ttn = await page.locator("#ttnNum").input_value()
     except Exception as exc:
         raise StageError(stage, "LABEL_ATTACH_VERIFY_FAILED", await _debug(page, stage, "attach_failed")) from exc
-    if int(files or 0) != 1 or (label.name.casefold() not in body and "прикріп" not in body):
+    if int(files or 0) != 1 or label.name.casefold() not in attachment_text:
         raise StageError(stage, "LABEL_ATTACH_VERIFY_FAILED", await _debug(page, stage, "attach_not_visible", {"file": label.name}))
+    if _digits(current_ttn) != _digits(ttn):
+        raise StageError(stage, "TTN_VALUE_MISMATCH", await _debug(page, stage, "value_changed_after_attach", {"expected": ttn, "actual": current_ttn}))
     return {"ttn": ttn, "ttn_verified": True, "file": str(label), "file_name": label.name, "attached": True}
 
 
@@ -416,6 +425,30 @@ def _history_api_order_number(rows: object, ttn: str) -> str:
         if re.fullmatch(r"D\d{4,}", number):
             return number
     return ""
+
+
+def _submit_not_ready_reason(page_text: str) -> str:
+    """Classify a disabled final button without guessing that an order was sent."""
+    text = _norm(page_text)
+    if "не вистачає" in text or "поповніть баланс" in text or "недостатньо коштів" in text:
+        return "INSUFFICIENT_DEPOSIT"
+    return "SUBMIT_NOT_READY"
+
+
+async def _verify_submit_ready(page) -> dict[str, Any]:
+    """Require that the final order button is actually enabled before any submit."""
+    stage = "checkout_ready"
+    button = page.get_by_role("button", name="Оформити замовлення", exact=True)
+    try:
+        await button.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
+        enabled = await button.is_enabled()
+        body = await page.locator("body").inner_text()
+    except Exception as exc:
+        raise StageError(stage, "SUBMIT_NOT_READY", await _debug(page, stage, "button_not_ready")) from exc
+    if not enabled:
+        reason = _submit_not_ready_reason(body)
+        raise StageError(stage, reason, await _debug(page, stage, "button_disabled", {"reason": reason}))
+    return {"submit_ready": True}
 
 
 async def _history_api_confirmation(page, ttn: str) -> str:
@@ -531,15 +564,16 @@ async def _run() -> dict[str, Any]:
             comparison_after = _compare_order(items, actual_after)
             if not comparison_after["verified"]:
                 raise StageError("checkout_ttn", "CART_ORDER_MISMATCH", await _debug(page, "checkout_ttn", "post_label_order_mismatch", {"comparison": comparison_after, "actual": actual_after}))
+            readiness = await _verify_submit_ready(page)
             if SUP4_ALLOW_SUBMIT:
                 confirmation = await _submit_and_confirm(page, SUP4_TTN)
                 return {"ok": True, "stage": "submitted", "url": page.url,
                         "cart_qty_checks": checks, "cart": actual_after, "cart_comparison": comparison_after,
-                        "ttn": label, "label": label, **confirmation}
+                        "ttn": label, "label": label, **readiness, **confirmation}
             return {"ok": True, "stage": "prepared", "submitted": False, "submit_blocked": True,
                     "submit_block_reason": "SUBMIT_BLOCKED", "supplier_order_number": "", "url": page.url,
                     "cart_qty_checks": checks, "cart": actual_after, "cart_comparison": comparison_after,
-                    "ttn": label, "label": label}
+                    "ttn": label, "label": label, **readiness}
         finally:
             await context.close()
             await browser.close()
