@@ -154,10 +154,11 @@ async def _login(page) -> None:
         await page.get_by_label("Email", exact=True).fill(SUP4_LOGIN_EMAIL)
         await page.get_by_label("Пароль", exact=True).fill(SUP4_LOGIN_PASSWORD)
         await page.get_by_role("button", name="Увійти", exact=True).click()
-        await page.get_by_role("button", name="Вийти", exact=True).wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
-        await page.get_by_placeholder("Пошук за назвою або артикулом…", exact=True).wait_for(
-            state="visible", timeout=SUP4_TIMEOUT_MS
-        )
+        # The page has three buttons named "Вийти" (desktop, mobile and
+        # admin).  A role/text locator therefore becomes ambiguous even after
+        # a successful login.  These IDs belong only to the drop cabinet.
+        await page.locator("#logout").wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
+        await page.locator("#q").wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
     except Exception as exc:
         raise StageError(stage, "LOGIN_VERIFICATION_FAILED", await _debug(page, stage, "verification_failed")) from exc
 
@@ -222,7 +223,9 @@ async def _clear_cart(page) -> None:
 
 async def _search_card(page, sku: str):
     stage = "add_items"
-    search = page.get_by_placeholder("Пошук за назвою або артикулом…", exact=True)
+    # The same placeholder is also present in the catalogue-feed tab.  The
+    # cabinet search field is the uniquely identified ``#q`` input.
+    search = page.locator("#q")
     await search.fill(sku)
     # Catalogue filtering is asynchronous.  The add button carries the exact
     # supplier article, so wait for that authoritative DOM signal instead of
