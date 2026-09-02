@@ -43,6 +43,14 @@ def main() -> int:
         assert org1["login_password"] == "", org1
         print("organizationId=1 keeps current SUP3 account")
 
+        org3 = orchestrator.resolve_sup3_account_config({"organizationId": 3})
+        assert org3["organization_id"] == "3", org3
+        assert org3["storage_state_file"] == org1["storage_state_file"], org3
+        assert org3["use_cdp"] == org1["use_cdp"], org3
+        assert org3["login_email"] == "", org3
+        assert org3["login_password"] == "", org3
+        print("organizationId=3 reuses current SUP3 account")
+
         default_org = orchestrator.resolve_sup3_account_config({})
         assert default_org["organization_id"] == "default", default_org
         assert default_org["storage_state_file"] == ".state_supplier3.json", default_org
@@ -76,7 +84,7 @@ def main() -> int:
         orchestrator.ORCH_SUP3_USE_CDP = "0"
         _expect_runtime_error(
             "unknown organizationId",
-            lambda: orchestrator.resolve_sup3_account_config({"organizationId": 3}),
+            lambda: orchestrator.resolve_sup3_account_config({"organizationId": 4}),
             "Unsupported SUP3 organizationId",
         )
 

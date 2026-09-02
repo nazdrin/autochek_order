@@ -1152,12 +1152,14 @@ def resolve_sup3_account_config(order: Dict[str, Any]) -> Dict[str, str]:
     raw_organization_id = order.get("organizationId")
     organization_id = extract_organization_id(order)
     if raw_organization_id not in (None, "") and organization_id is None:
-        raise RuntimeError(f"Invalid SUP3 organizationId={raw_organization_id!r}. Expected 1, 2, or missing.")
-    if organization_id in (None, 1):
+        raise RuntimeError(f"Invalid SUP3 organizationId={raw_organization_id!r}. Expected 1, 2, 3, or missing.")
+    # Organization 3 has its own Nova Poshta cabinet, but intentionally uses the
+    # same DSN account/session as organization 1.
+    if organization_id in (None, 1, 3):
         if not ORCH_SUP3_STORAGE_STATE_FILE:
             raise RuntimeError("ORCH_SUP3_STORAGE_STATE_FILE is empty.")
         return {
-            "organization_id": "1" if organization_id == 1 else "default",
+            "organization_id": str(organization_id) if organization_id in {1, 3} else "default",
             "storage_state_file": ORCH_SUP3_STORAGE_STATE_FILE,
             "use_cdp": ORCH_SUP3_USE_CDP,
             "login_email": "",
@@ -1183,17 +1185,30 @@ def resolve_sup3_account_config(order: Dict[str, Any]) -> Dict[str, str]:
             "login_password": ORCH_SUP3_ORG2_LOGIN_PASSWORD,
         }
 
-    raise RuntimeError(f"Unsupported SUP3 organizationId={organization_id!r}. Expected 1, 2, or missing.")
+    raise RuntimeError(f"Unsupported SUP3 organizationId={organization_id!r}. Expected 1, 2, 3, or missing.")
 
 
 def resolve_np_api_key_for_order(order: Dict[str, Any]) -> tuple[str, str]:
     """Return (api_key, source_env_name) for the NP cabinet that owns the TTN."""
+    raw_organization_id = order.get("organizationId")
     organization_id = extract_organization_id(order)
+    if raw_organization_id not in (None, "") and organization_id is None:
+        raise RuntimeError(f"Invalid organizationId={raw_organization_id!r}. Expected 1, 2, 3, or missing.")
+
     if organization_id == 2:
         key = (os.getenv("BIOTUS_NP_API_KEY_ORG_2") or os.getenv("NP_API_KEY_ORG_2") or "").strip()
         if not key:
             raise RuntimeError("organizationId=2 requires BIOTUS_NP_API_KEY_ORG_2 (or NP_API_KEY_ORG_2).")
         return key, "BIOTUS_NP_API_KEY_ORG_2"
+
+    if organization_id == 3:
+        key = (os.getenv("BIOTUS_NP_API_KEY_ORG_3") or os.getenv("NP_API_KEY_ORG_3") or "").strip()
+        if not key:
+            raise RuntimeError("organizationId=3 requires BIOTUS_NP_API_KEY_ORG_3 (or NP_API_KEY_ORG_3).")
+        return key, "BIOTUS_NP_API_KEY_ORG_3"
+
+    if organization_id not in (None, 1):
+        raise RuntimeError(f"Unsupported organizationId={organization_id!r}. Expected 1, 2, 3, or missing.")
 
     key = (os.getenv("BIOTUS_NP_API_KEY") or os.getenv("NP_API_KEY") or "").strip()
     if not key:
@@ -1208,7 +1223,10 @@ def inject_np_api_key_env(env: Dict[str, str], order: Dict[str, Any]) -> None:
         env[key_name] = api_key
     organization_id = extract_organization_id(order)
     org_label = organization_id if organization_id is not None else "default"
-    print(f"[ORCH] NP API key source => organizationId={org_label}, env={source}", flush=True)
+    print(
+        f"[ORCH] NP API key source => order_id={order_id_for_log(order)} organizationId={org_label} env={source}",
+        flush=True,
+    )
 
 
 @contextmanager
@@ -1220,7 +1238,10 @@ def np_api_key_env_for_order(order: Dict[str, Any]):
             os.environ[key_name] = api_key
         organization_id = extract_organization_id(order)
         org_label = organization_id if organization_id is not None else "default"
-        print(f"[ORCH] NP API key source => organizationId={org_label}, env={source}", flush=True)
+        print(
+            f"[ORCH] NP API key source => order_id={order_id_for_log(order)} organizationId={org_label} env={source}",
+            flush=True,
+        )
         yield
     finally:
         for key_name, old_value in old_values.items():
