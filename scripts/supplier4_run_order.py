@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -438,6 +438,69 @@ def _submit_not_ready_reason(page_text: str) -> str:
     return "SUBMIT_NOT_READY"
 
 
+def _supplier_error_text(payload: object) -> str:
+    """Extract a short human-readable error from Monsterlab's JSON response."""
+    if isinstance(payload, dict):
+        for key in ("error", "message", "detail", "description"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return " ".join(_supplier_error_text(value) for value in payload.values()).strip()
+    if isinstance(payload, list):
+        return " ".join(_supplier_error_text(value) for value in payload).strip()
+    return str(payload or "").strip()
+
+
+def _available_qty_from_supplier_error(message: str) -> int | None:
+    """Return an explicitly reported available quantity, never a guessed one."""
+    text = str(message or "")
+    patterns = (
+        r"(?:лише|только|only)\s+(\d+)\s*(?:шт\.?|pcs?|items?)?\s*(?:в\s+наявності|в\s+наличии|available|left)",
+        r"(\d+)\s*(?:шт\.?|pcs?|items?)\s*(?:в\s+наявності|в\s+наличии|available|left)",
+        r"(?:в\s+наявності|в\s+наличии|available|left)\D{0,20}(\d+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _classify_submit_rejection(status: int, payload: object, items: list[Sup4Item]) -> dict[str, Any] | None:
+    """Recognize a definitive stock rejection from POST /api/orders.
+
+    Only a client-side rejection with an explicit stock signal is safe to mark
+    failed in SalesDrive. Network errors, 5xx responses and unknown validation
+    errors remain ambiguous after the submit click.
+    """
+    if not 400 <= int(status) < 500:
+        return None
+    supplier_message = re.sub(r"\s+", " ", _supplier_error_text(payload)).strip()
+    normalized = _norm(supplier_message)
+    stock_signals = (
+        "немає в наявності", "більше немає в наявності", "недостатньо товар",
+        "недостатня кількість", "недостатньо залиш", "нет в наличии",
+        "недостаточно товара", "недостаточное количество", "недостаточно остат",
+        "out of stock", "insufficient stock", "insufficient quantity",
+        "not enough stock", "not enough items",
+    )
+    if not supplier_message or not any(signal in normalized for signal in stock_signals):
+        return None
+
+    requested = ", ".join(f"{item.sku}:{item.qty}" for item in items)
+    available_qty = _available_qty_from_supplier_error(supplier_message)
+    message = f"INSUFFICIENT_STOCK: requested={requested}; supplier={supplier_message[:300]}"
+    if available_qty is not None:
+        message += f"; available={available_qty}"
+    return {
+        "message": message,
+        "status": int(status),
+        "supplier_message": supplier_message[:300],
+        "requested": requested,
+        "available_qty": available_qty,
+    }
+
+
 async def _verify_submit_ready(page) -> dict[str, Any]:
     """Require that the final order button is actually enabled before any submit."""
     stage = "checkout_ready"
@@ -479,13 +542,52 @@ async def _history_api_confirmation(page, ttn: str) -> str:
     return ""
 
 
-async def _submit_and_confirm(page, ttn: str) -> dict[str, Any]:
+async def _submit_and_confirm(page, ttn: str, items: list[Sup4Item]) -> dict[str, Any]:
     """Submit once and confirm through KeyCRM modal or the supplier order history."""
     stage = "submit_checkout_order"
     button = page.get_by_role("button", name="Оформити замовлення", exact=True)
     try:
         await button.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
-        await button.click()
+        # The cabinet submits through POST /api/orders. Its 4xx stock
+        # rejection is conclusive (no order was created), unlike a later
+        # missing UI confirmation after a successful request.
+        response_task = asyncio.create_task(
+            page.wait_for_response(
+                lambda response: response.request.method == "POST"
+                and re.search(r"/api/orders(?:[/?#]|$)", response.url) is not None,
+                timeout=5000,
+            )
+        )
+        # Let the waiter subscribe before the click can trigger a very fast
+        # validation response from the supplier.
+        await asyncio.sleep(0)
+        try:
+            await button.click()
+        except Exception:
+            response_task.cancel()
+            try:
+                await response_task
+            except asyncio.CancelledError:
+                pass
+            raise
+        try:
+            submit_response = await response_task
+        except PlaywrightTimeoutError:
+            submit_response = None
+
+        if submit_response is not None and not submit_response.ok:
+            response_text = await submit_response.text()
+            try:
+                response_payload: object = json.loads(response_text)
+            except json.JSONDecodeError:
+                response_payload = response_text
+            rejection = _classify_submit_rejection(submit_response.status, response_payload, items)
+            if rejection:
+                raise StageError(
+                    stage,
+                    rejection["message"],
+                    await _debug(page, stage, "insufficient_stock", rejection),
+                )
         # The button briefly becomes "Передаю" while Monsterlab sends the order.
         try:
             await page.get_by_role("button", name="Передаю", exact=True).wait_for(state="visible", timeout=3000)
@@ -516,6 +618,8 @@ async def _submit_and_confirm(page, ttn: str) -> dict[str, Any]:
             "xpath=ancestor::*[self::tr or contains(concat(' ', normalize-space(@class), ' '), ' orow ') or contains(concat(' ', normalize-space(@class), ' '), ' order-row ')][1]"
         )
         text = await row.inner_text() if await row.count() else await page.locator("body").inner_text()
+    except StageError:
+        raise
     except Exception as exc:
         raise StageError(stage, "SUBMIT_CONFIRMATION_NOT_FOUND", await _debug(page, stage, "confirmation_not_found")) from exc
     number = _history_order_number(text, ttn)
@@ -569,7 +673,7 @@ async def _run() -> dict[str, Any]:
                 raise StageError("checkout_ttn", "CART_ORDER_MISMATCH", await _debug(page, "checkout_ttn", "post_label_order_mismatch", {"comparison": comparison_after, "actual": actual_after}))
             readiness = await _verify_submit_ready(page)
             if SUP4_ALLOW_SUBMIT:
-                confirmation = await _submit_and_confirm(page, SUP4_TTN)
+                confirmation = await _submit_and_confirm(page, SUP4_TTN, items)
                 return {"ok": True, "stage": "submitted", "url": page.url,
                         "cart_qty_checks": checks, "cart": actual_after, "cart_comparison": comparison_after,
                         "ttn": label, "label": label, **readiness, **confirmation}

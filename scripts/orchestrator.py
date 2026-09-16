@@ -839,6 +839,11 @@ def is_supplier4_order(order: Dict[str, Any]) -> bool:
     return supplierlist == ORCH_SUP4_SUPPLIERLIST
 
 
+def is_ambiguous_sup4_submit_failure(step: str, reason: str) -> bool:
+    """Only unknown post-click SUP4 failures require a manual order check."""
+    return step == "submit_checkout_order" and not str(reason or "").startswith("INSUFFICIENT_STOCK:")
+
+
 def is_supplier5_order(order: Dict[str, Any]) -> bool:
     supplierlist, _ = parse_order_supplierlist(order)
     return supplierlist == ORCH_SUP5_SUPPLIERLIST
@@ -2771,7 +2776,7 @@ def main() -> int:
                                 # confirmation is ambiguous: the supplier may already
                                 # have accepted the order.  Never mark SalesDrive as a
                                 # failure automatically in that case.
-                                ambiguous_sup4_submit = is_supplier4_order(order) and step == "submit_checkout_order"
+                                ambiguous_sup4_submit = is_supplier4_order(order) and is_ambiguous_sup4_submit_failure(step, reason)
                                 if ambiguous_sup4_submit:
                                     red_reason = f"{red_reason}\nВНИМАНИЕ: отправка SUP4 могла пройти. SalesDrive не менялся; проверьте Мої замовлення по ТТН."
                                 else:

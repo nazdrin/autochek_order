@@ -6,8 +6,8 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from supplier4_run_order import Sup4Item, _cart_qty_checks, _compare_order, _history_api_order_number, _history_order_number, _keycrm_order_number, _label_matches_ttn, _parse_items, _submit_not_ready_reason  # noqa: E402
-from orchestrator import build_sup4_items  # noqa: E402
+from supplier4_run_order import Sup4Item, _cart_qty_checks, _classify_submit_rejection, _compare_order, _history_api_order_number, _history_order_number, _keycrm_order_number, _label_matches_ttn, _parse_items, _submit_not_ready_reason  # noqa: E402
+from orchestrator import build_sup4_items, is_ambiguous_sup4_submit_failure  # noqa: E402
 
 
 class Supplier4DropValidationTests(unittest.TestCase):
@@ -72,6 +72,34 @@ class Supplier4DropValidationTests(unittest.TestCase):
     def test_disabled_submit_classifies_deposit_error(self):
         self.assertEqual("INSUFFICIENT_DEPOSIT", _submit_not_ready_reason("Не вистачає 633 ₴ на депозиті. Поповніть баланс."))
         self.assertEqual("SUBMIT_NOT_READY", _submit_not_ready_reason("Номер ТТН ще не введено"))
+
+    def test_submit_rejection_classifies_ukrainian_stock_shortage(self):
+        result = _classify_submit_rejection(
+            409,
+            {"error": "Недостатньо товару: лише 2 шт в наявності"},
+            [Sup4Item("SOL-00947", 4)],
+        )
+        self.assertIsNotNone(result)
+        self.assertIn("INSUFFICIENT_STOCK", result["message"])
+        self.assertIn("requested=SOL-00947:4", result["message"])
+        self.assertEqual(2, result["available_qty"])
+
+    def test_submit_rejection_classifies_russian_and_english_stock_shortages(self):
+        for message in ("Недостаточно товара на складе", "Product is out of stock"):
+            with self.subTest(message=message):
+                result = _classify_submit_rejection(422, {"message": message}, [Sup4Item("GAV-0157", 2)])
+                self.assertIsNotNone(result)
+                self.assertIn("requested=GAV-0157:2", result["message"])
+
+    def test_submit_rejection_keeps_unknown_or_server_errors_ambiguous(self):
+        items = [Sup4Item("SOL-00947", 4)]
+        self.assertIsNone(_classify_submit_rejection(400, {"error": "Номер ТТН не заповнений"}, items))
+        self.assertIsNone(_classify_submit_rejection(500, {"error": "Недостатньо товару"}, items))
+
+    def test_only_unknown_submit_failures_are_ambiguous_for_salesdrive(self):
+        self.assertFalse(is_ambiguous_sup4_submit_failure("submit_checkout_order", "INSUFFICIENT_STOCK: requested=SOL-00947:4"))
+        self.assertTrue(is_ambiguous_sup4_submit_failure("submit_checkout_order", "SUBMIT_CONFIRMATION_NOT_FOUND"))
+        self.assertFalse(is_ambiguous_sup4_submit_failure("add_items", "INSUFFICIENT_STOCK: requested=SOL-00947:4"))
 
     def test_salesdrive_description_is_the_supplier_article(self):
         order = {"products": [{"description": "SOL-00947", "sku": "1016545", "amount": 2}]}
