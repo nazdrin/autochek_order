@@ -551,27 +551,16 @@ async def _submit_and_confirm(page, ttn: str, items: list[Sup4Item]) -> dict[str
         # The cabinet submits through POST /api/orders. Its 4xx stock
         # rejection is conclusive (no order was created), unlike a later
         # missing UI confirmation after a successful request.
-        response_task = asyncio.create_task(
-            page.wait_for_response(
+        # Python Playwright subscribes through expect_response;
+        # Page has no wait_for_response method, so it fails before the click.
+        try:
+            async with page.expect_response(
                 lambda response: response.request.method == "POST"
                 and re.search(r"/api/orders(?:[/?#]|$)", response.url) is not None,
                 timeout=5000,
-            )
-        )
-        # Let the waiter subscribe before the click can trigger a very fast
-        # validation response from the supplier.
-        await asyncio.sleep(0)
-        try:
-            await button.click()
-        except Exception:
-            response_task.cancel()
-            try:
-                await response_task
-            except asyncio.CancelledError:
-                pass
-            raise
-        try:
-            submit_response = await response_task
+            ) as response_info:
+                await button.click()
+            submit_response = await response_info.value
         except PlaywrightTimeoutError:
             submit_response = None
 
