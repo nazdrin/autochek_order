@@ -18,22 +18,42 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def latest_sup2_order(status: int | None = None, order_id: int | None = None) -> dict:
+def list_sup2_orders(status: int | None = None) -> list[dict]:
     session = requests.Session()
     session.headers.update({"accept": "application/json", "X-Api-Key": os.environ["SALESDRIVE_API_KEY"]})
     params = {"limit": 100, "page": 1}
     if status is not None:
         params["filter[statusId]"] = status
-    response = session.get(
-        os.environ["SALESDRIVE_BASE_URL"].rstrip("/") + "/api/order/list/",
-        params=params,
-        timeout=30,
-    )
-    response.raise_for_status()
-    orders = [order for order in response.json().get("data", []) if str(order.get("supplierlist")) == "41"]
+    orders = []
+    seen = set()
+    while True:
+        response = session.get(
+            os.environ["SALESDRIVE_BASE_URL"].rstrip("/") + "/api/order/list/",
+            params=params,
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json().get("data", [])
+        fresh = [order for order in data if order.get("id") not in seen]
+        if data and not fresh:
+            raise RuntimeError("SalesDrive repeated a page; complete order inventory is unverified.")
+        seen.update(order.get("id") for order in fresh)
+        orders.extend(order for order in fresh if str(order.get("supplierlist")) == "41")
+        if len(data) < params["limit"]:
+            return orders
+        params["page"] += 1
+
+
+def latest_sup2_order(status: int | None = None, order_id: int | None = None) -> dict:
+    orders = list_sup2_orders(status)
     if order_id is not None:
-        return next(order for order in orders if int(order.get("id") or 0) == order_id)
-    return next(iter(orders))
+        match = next((order for order in orders if int(order.get("id") or 0) == order_id), None)
+        if match is None:
+            raise RuntimeError(f"SUP2 order {order_id} was not found in the requested status.")
+        return match
+    if not orders:
+        raise RuntimeError("No SUP2 orders found in the requested status.")
+    return orders[0]
 
 
 def sup2_items(order: dict) -> str:
@@ -71,6 +91,7 @@ def main() -> int:
     parser.add_argument("--status", type=int, help="Use a SUP2 order from this SalesDrive status.")
     parser.add_argument("--order-id", type=int, help="Run one exact SalesDrive order ID (must be a SUP2 order).")
     parser.add_argument("--visible", action="store_true", help="Show the supplier browser window.")
+    parser.add_argument("--list-only", action="store_true", help="List all matching SUP2 orders without opening checkout.")
     parser.add_argument("--pause-seconds", type=int, default=0, help="Keep the checkout window open after dry-run.")
     parser.add_argument(
         "--manual-submit-wait-seconds",
@@ -80,6 +101,13 @@ def main() -> int:
     )
     args = parser.parse_args()
     load_dotenv(ROOT / ".env")
+    if args.list_only:
+        orders = list_sup2_orders(args.status)
+        print(json.dumps({"count": len(orders), "orders": [{
+            "id": order.get("id"), "statusId": order.get("statusId"),
+            "items": sup2_items(order), "numberSup": order.get("numberSup") or "",
+        } for order in orders]}, ensure_ascii=False))
+        return 0
     source = latest_sup2_order(args.status, args.order_id)
     order = virtual_kamianka_order(source) if args.virtual else source
     env = os.environ.copy()
@@ -102,7 +130,7 @@ def main() -> int:
     marker = next((line for line in run.stdout.splitlines() if line.startswith("SUPPLIER_RESULT_JSON=")), "")
     payload = json.loads(marker.split("=", 1)[1]) if marker else {"ok": False, "error": "result marker missing"}
     delivery = payload.get("delivery") or {}
-    print(json.dumps({
+    summary = {
         "source_order_id": source.get("id"),
         "scenario": "virtual_kamianka" if args.virtual else "real_salesdrive_order",
         "returncode": run.returncode,
@@ -113,7 +141,16 @@ def main() -> int:
         "dry_run": payload.get("dry_run"),
         "city": delivery.get("city"),
         "warehouse": delivery.get("warehouse"),
-    }, ensure_ascii=False))
+        "quantities": payload.get("quantities"),
+        "coupon": payload.get("coupon"),
+        "phone_payload_verified": bool((payload.get("customer") or {}).get("phone_payload")),
+    }
+    artifact_dir = ROOT / "tmp" / "supplier2_debug"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / f"dry_run_{source.get('id')}.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(json.dumps(summary, ensure_ascii=False))
     return 0 if payload.get("ok") else 2
 
 

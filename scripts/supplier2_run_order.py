@@ -89,6 +89,7 @@ class Recipient:
     branch_address: str
     delivery_kind: str
     email: str = ""
+    city_type: str = ""
 
 
 class StageError(RuntimeError):
@@ -409,6 +410,35 @@ def _normalize_city_query(city: str) -> str:
 
 def _norm_match_text(value: str) -> str:
     return re.sub(r"[^0-9a-zа-яіїєґ]+", "", str(value or "").lower())
+
+
+def _city_name_key(value: str) -> str:
+    name = re.split(r"[,(]", str(value or ""), maxsplit=1)[0].strip()
+    name = re.sub(r"^(?:м\.|г\.|с\.|смт\.?|пгт\.?|місто|город|село|селище)\s+", "", name, flags=re.I)
+    return _norm_match_text(name)
+
+
+def _city_type_key(value: str) -> str:
+    return {"м": "city", "г": "city", "місто": "city", "город": "city",
+            "с": "village", "село": "village", "смт": "town", "пгт": "town",
+            "селище": "town", "сще": "town"}.get(_norm_match_text(value), "")
+
+
+def _choose_city_option(options: list[dict], terms: list[str], hints: list[str], city_type: str = "") -> int:
+    names = {_city_name_key(term) for term in terms if _city_name_key(term)}
+    wanted_type = _city_type_key(city_type)
+    matches = [(idx, item) for idx, item in enumerate(options)
+               if not item.get("disabled") and _city_name_key(item.get("text", "")) in names
+               and (not wanted_type or _city_type_key(item.get("text", "").split()[0]) == wanted_type)]
+    if len(matches) == 1:
+        return matches[0][0]
+    scored = [(sum(bool(_norm_match_text(hint)) and _norm_match_text(hint) in
+                   _norm_match_text(item.get("text", "")) for hint in hints), idx)
+              for idx, item in matches]
+    scored.sort(reverse=True)
+    if scored and scored[0][0] > 0 and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+        return scored[0][1]
+    return -1
 
 
 def _ru_city_variant(value: str) -> str:
@@ -819,6 +849,7 @@ def _extract_recipient(order: dict[str, Any]) -> Recipient:
         branch_address=branch_address,
         delivery_kind=delivery_kind,
         email=email,
+        city_type="" if env_city else str(delivery.get("cityType") or ""),
     )
 
 
@@ -1321,13 +1352,14 @@ async def _set_item_quantities(page, items: list[Item], added: list[dict]) -> li
             await btn.wait_for(state="visible", timeout=TIMEOUT_MS)
             await btn.click(timeout=TIMEOUT_MS)
             await page.wait_for_timeout(900)
+            await _wait_for_checkout_idle(page)
         else:
             raise StageError("set_quantities", f"Could not set qty for sku={item.sku}", {"sku": item.sku, "target": item.qty})
 
     return results
 
 
-async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = ()) -> dict:
+async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = (), city_type: str = "") -> dict:
     city_input = page.locator("#checkout-city").first
     await city_input.wait_for(state="visible", timeout=TIMEOUT_MS)
 
@@ -1336,7 +1368,7 @@ async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = 
     api_result = {"ok": False, "reason": "city_api_disabled", "cityTerms": city_terms, "cityHints": city_hints}
     if not DISABLE_CITY_API:
         api_result = await page.evaluate(
-            """async ([cityQuery, cityTerms, cityHints, timeoutMs]) => {
+            """async ([cityQuery, cityTerms, cityHints, timeoutMs, cityType]) => {
             const mod = window.CheckoutModule && CheckoutModule.getInstance && CheckoutModule.getInstance();
             const recipient = mod && mod.getComponentByName && mod.getComponentByName('Recipient');
             if (!recipient || !recipient.performAction || !recipient.setCity) {
@@ -1382,7 +1414,13 @@ async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = 
                 }
             }
 
-            const scored = allCities.map((city, idx) => {
+            const nameKey = (value) => normalize(String(value || '').split(/[,(]/)[0].trim()
+                .replace(/^(?:м\\.|г\\.|с\\.|смт\\.?|пгт\\.?|місто|город|село|селище)\\s+/i, ''));
+            const wantedNames = new Set((cityTerms || [cityQuery]).map(nameKey));
+            const typeKey = (label) => ({м:'city',г:'city',місто:'city',город:'city',с:'village',село:'village',смт:'town',пгт:'town',селище:'town',сще:'town'})[normalize(String(label || '').split(/\\s+/)[0])] || '';
+            const exactCities = allCities.filter(city => wantedNames.has(nameKey(city.label || city.NPCityDescription || city.value))
+                && (!cityType || typeKey(city.label) === cityType));
+            const scored = exactCities.map((city, idx) => {
                 const text = normalize([city.label, city.NPCityDescription].filter(Boolean).join(' '));
                 let score = 0;
                 for (const hint of hintsNorm) {
@@ -1398,7 +1436,7 @@ async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = 
             // Never rely on the provider's result order for an ambiguous name.
             // When SalesDrive gave geographic context, it must match an option;
             // otherwise a distinct settlement with the same name could be sent.
-            if (allCities.length > 1 && best.score <= 0) {
+            if (exactCities.length > 1 && best.score <= 0) {
                 return {ok: false, reason: 'city_ambiguous_no_geo_match', responses, cityTerms, cityHints,
                     candidates: scored.slice(0, 10).map((row) => ({label: row.city.label || '', npCity: row.city.NPCityDescription || '', score: row.score}))};
             }
@@ -1420,7 +1458,7 @@ async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = 
                 selectedScore: scored.length ? scored[0].score : 0
             };
         }""",
-            [city_query, city_terms, city_hints, TIMEOUT_MS],
+            [city_query, city_terms, city_hints, TIMEOUT_MS, _city_type_key(city_type)],
         )
     if isinstance(api_result, dict) and api_result.get("ok"):
         await page.wait_for_timeout(1800)
@@ -1456,18 +1494,9 @@ async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = 
             })).filter((item) => item.text)"""
         )
         attempted_options.append({"term": term, "options": options[:10] if isinstance(options, list) else []})
-        query_norms = [_norm_match_text(x) for x in _unique_nonempty([term, city_query, *city_terms]) if _norm_match_text(x)]
         chosen_idx = -1
         if isinstance(options, list):
-            for idx, item in enumerate(options):
-                if not isinstance(item, dict) or item.get("disabled"):
-                    continue
-                text_norm = _norm_match_text(str(item.get("text") or ""))
-                if any(query_norm and query_norm in text_norm for query_norm in query_norms):
-                    chosen_idx = idx
-                    break
-            if chosen_idx < 0 and len(options) == 1 and isinstance(options[0], dict) and not options[0].get("disabled"):
-                chosen_idx = 0
+            chosen_idx = _choose_city_option(options, [term, city_query, *city_terms], city_hints, city_type)
         if chosen_idx >= 0:
             option = page.locator(".ui-autocomplete.ui-menu .ui-menu-item").nth(chosen_idx)
             break
@@ -1485,7 +1514,10 @@ async def _select_city(page, city_query: str, city_geo_hints: tuple[str, ...] = 
         )
     # The UI fallback must obey the same ambiguity rule as the API path.
     selected_option_text = str((attempted_options[-1].get("options") or [])[chosen_idx].get("text") or "") if chosen_idx >= 0 else ""
-    if len((attempted_options[-1].get("options") or [])) > 1:
+    matching_options = [item for item in (attempted_options[-1].get("options") or [])
+                        if _city_name_key(item.get("text", "")) in {_city_name_key(term) for term in city_terms}
+                        and (not _city_type_key(city_type) or _city_type_key(item.get("text", "").split()[0]) == _city_type_key(city_type))]
+    if len(matching_options) > 1:
         hint_norms = [_norm_match_text(value) for value in city_hints if _norm_match_text(value)]
         if not any(hint and hint in _norm_match_text(selected_option_text) for hint in hint_norms):
             raise StageError(
@@ -1516,6 +1548,7 @@ async def _wait_for_checkout_idle(page, *, timeout_ms: int | None = None) -> dic
         latest = await page.evaluate(
             """() => {
                 const module = window.CheckoutModule && CheckoutModule.getInstance ? CheckoutModule.getInstance() : null;
+                const cart = window.AjaxCart && AjaxCart.getInstance ? AjaxCart.getInstance() : null;
                 const submit = document.querySelector('#checkout-container button.j-submit');
                 const loaders = Array.from(document.querySelectorAll('#checkout-container .j-loader'));
                 const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
@@ -1524,10 +1557,11 @@ async def _wait_for_checkout_idle(page, *, timeout_ms: int | None = None) -> dic
                     postponeSubmit: !!(module && module.isPostponeSubmit),
                     submitDisabled: !!(submit && submit.disabled),
                     loaderVisible: loaders.some(visible),
+                    cartAjaxProcessing: Number(cart && cart.Cart ? cart.Cart.ajaxProcessing || 0 : 0),
                 };
             }"""
         )
-        if isinstance(latest, dict) and not latest.get("moduleSubmitting") and not latest.get("loaderVisible"):
+        if isinstance(latest, dict) and not latest.get("moduleSubmitting") and not latest.get("loaderVisible") and not latest.get("cartAjaxProcessing"):
             return latest
         await page.wait_for_timeout(250)
     raise StageError("fill_checkout", "Checkout AJAX did not settle in time.", {"state": latest})
@@ -1991,12 +2025,41 @@ async def _fill_recipient_fields(page, recipient: Recipient) -> dict:
             "after_name",
             extra={"field": "name", "value_present": bool(name_value)},
         )
+    # The international phone widget has a visible, unnamed input and a
+    # separate hidden field used by the checkout model. Scope the selector to
+    # Recipient: callback and quick-checkout widgets share the same input type.
+    phone_selector = (
+        'input[type="tel"][data-relation-input="Recipient[delivery_phone]"]:visible, '
+        '#checkout-phone:visible'
+    )
     phone_value = await _fill_text_field(
         page,
-        "#checkout-phone",
+        phone_selector,
         recipient.phone_input,
-        tab_after=not SKIP_FINAL_FIELD_TAB or bool(recipient.email),
+        tab_after=False,
     )
+    # Commit blur/change without opening the city autocomplete before submit.
+    await page.locator("#checkout-name").click(timeout=TIMEOUT_MS)
+    phone_payload = ""
+    hidden_phone = page.locator('input[type="hidden"][name="Recipient[delivery_phone]"]')
+    if await hidden_phone.count():
+        expected_phone_digits = "380" + recipient.phone_input
+        try:
+            await page.wait_for_function(
+                """(expected) => {
+                    const field = document.querySelector('input[type="hidden"][name="Recipient[delivery_phone]"]');
+                    return field && field.value.replace(/\\D/g, '') === expected;
+                }""",
+                arg=expected_phone_digits,
+                timeout=TIMEOUT_MS,
+            )
+        except PWTimeoutError as exc:
+            raise StageError(
+                "fill_checkout",
+                "Recipient phone widget did not synchronize the full checkout number.",
+                {"field": "Recipient[delivery_phone]"},
+            ) from exc
+        phone_payload = (await hidden_phone.first.input_value(timeout=TIMEOUT_MS)).strip()
     if DEBUG_ARTIFACTS:
         await _capture_debug_artifacts(
             page,
@@ -2008,16 +2071,15 @@ async def _fill_recipient_fields(page, recipient: Recipient) -> dict:
     if recipient.email:
         email_value = await _fill_text_field(page, "#checkout-email", recipient.email, tab_after=not SKIP_FINAL_FIELD_TAB)
 
-    expected_phone_tail = recipient.phone_input[-7:]
     if not name_value:
         raise StageError("fill_checkout", "Recipient name is empty after fill.", {"expected": recipient.name})
-    if expected_phone_tail not in "".join(ch for ch in phone_value if ch.isdigit()):
+    if _normalize_dobavki_phone(phone_value) != recipient.phone_input:
         raise StageError(
             "fill_checkout",
             "Recipient phone did not match after fill.",
             {"source": recipient.phone_source, "input": recipient.phone_input, "value": phone_value},
         )
-    return {"name": name_value, "phone": phone_value, "email": email_value}
+    return {"name": name_value, "phone": phone_value, "phone_payload": phone_payload, "email": email_value}
 
 
 async def _read_totals(page) -> dict:
@@ -2042,7 +2104,7 @@ async def _fill_checkout(page, recipient: Recipient) -> dict:
     # cannot be replaced by the first option during that reload.
     coupon = await _apply_coupon(page)
     await _wait_for_checkout_idle(page)
-    city = await _select_city(page, recipient.city_query, recipient.city_geo_hints)
+    city = await _select_city(page, recipient.city_query, recipient.city_geo_hints, recipient.city_type)
     payment = await _select_payment_cod(page)
     delivery_method = await _select_delivery_method(page, recipient)
     warehouse = await _select_warehouse(page, recipient)
@@ -2195,6 +2257,15 @@ async def _run() -> tuple[bool, dict]:
 
             stage = "fill_checkout"
             checkout_result = await _fill_checkout(page, recipient)
+            for item, added_item in zip(items, added):
+                rows = checkout_result.get("rows") or []
+                row_idx = _match_row_for_item(rows, added_item, item.sku)
+                row = next((row for row in rows if row.get("idx") == row_idx), None)
+                if row is None or str(row.get("qty")) != str(item.qty):
+                    raise StageError(
+                        "fill_checkout", "Checkout quantity changed before submit.",
+                        {"sku": item.sku, "expected": item.qty, "actual": row.get("qty") if row else None},
+                    )
 
             if MANUAL_SUBMIT_WAIT_SECONDS > 0:
                 stage = "manual_submit_wait"

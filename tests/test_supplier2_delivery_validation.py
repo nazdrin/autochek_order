@@ -13,6 +13,23 @@ SPEC.loader.exec_module(sup2)
 
 
 class Supplier2DeliveryValidationTests(unittest.TestCase):
+    def test_bucha_does_not_select_buchach(self):
+        options = [{"text": "м. Бучач (Тернопільська обл.)"}, {"text": "м. Буча (Київська обл.)"}]
+        self.assertEqual(sup2._choose_city_option(options, ["Буча"], []), 1)
+
+    def test_city_prefix_alone_is_not_a_match(self):
+        self.assertEqual(sup2._choose_city_option([{"text": "м. Бучач (Тернопільська обл.)"}], ["Буча"], []), -1)
+
+    def test_city_type_distinguishes_bucha_city_from_village(self):
+        options = [{"text": "с. Буча (Київська обл.)"}, {"text": "м. Буча (Київська обл.)"}]
+        self.assertEqual(sup2._choose_city_option(options, ["Буча"], ["Київська"], "м."), 1)
+        self.assertEqual(sup2._choose_city_option(options, ["Буча"], ["Київська"], "с."), 0)
+
+    def test_same_city_name_uses_region_hint(self):
+        options = [{"text": "с. Кам’янка (Харківська обл.)"}, {"text": "м. Кам'янка (Черкаська обл.)"}]
+        self.assertEqual(sup2._choose_city_option(options, ["Кам'янка"], ["Черкаська"]), 1)
+        self.assertEqual(sup2._choose_city_option(options, ["Кам'янка"], []), -1)
+
     def recipient(self, *, branch_address: str) -> object:
         return sup2.Recipient(
             name="Тестовий Одержувач",
