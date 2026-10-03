@@ -17,7 +17,14 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def fetch_orders(base_url: str, api_key: str, status_id: int, limit: int, max_pages: int) -> List[Dict[str, Any]]:
+def fetch_orders(
+    base_url: str,
+    api_key: str,
+    status_id: int,
+    limit: int,
+    max_pages: int,
+    order_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """
     Тянем /api/order/list/ постранично.
     На скрине видно page/limit, поэтому поддерживаем пагинацию.
@@ -38,6 +45,8 @@ def fetch_orders(base_url: str, api_key: str, status_id: int, limit: int, max_pa
             "limit": limit,
             "page": page,
         }
+        if order_id is not None:
+            params["filter[id]"] = int(order_id)
         url = base_url.rstrip("/") + "/api/order/list/"
         r = session.get(url, params=params, timeout=30)
         if r.status_code != 200:
@@ -106,6 +115,7 @@ def main():
     parser.add_argument("--status", type=int, default=_env_int("SALESDRIVE_STATUS_ID", 21))
     parser.add_argument("--limit", type=int, default=_env_int("SALESDRIVE_LIMIT", 100))
     parser.add_argument("--max-pages", type=int, default=10)
+    parser.add_argument("--order-id", type=int, help="Fetch one exact SalesDrive order ID.")
     parser.add_argument("--raw", action="store_true", help="Печатать весь JSON ответа (может быть очень большим)")
     args = parser.parse_args()
 
@@ -119,7 +129,7 @@ def main():
     if not api_key:
         raise SystemExit("Missing env SALESDRIVE_API_KEY")
 
-    orders = fetch_orders(base_url, api_key, args.status, args.limit, args.max_pages)
+    orders = fetch_orders(base_url, api_key, args.status, args.limit, args.max_pages, args.order_id)
 
     if args.raw:
         print(json.dumps({"data": orders}, ensure_ascii=False, indent=2))

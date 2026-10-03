@@ -18,6 +18,8 @@ class NovaPoshtaOrganizationConfigTests(unittest.TestCase):
         "NP_API_KEY_ORG_2",
         "BIOTUS_NP_API_KEY_ORG_3",
         "NP_API_KEY_ORG_3",
+        "BIOTUS_NP_API_KEY_ORG_4",
+        "NP_API_KEY_ORG_4",
     )
 
     def setUp(self):
@@ -25,7 +27,8 @@ class NovaPoshtaOrganizationConfigTests(unittest.TestCase):
         os.environ["BIOTUS_NP_API_KEY"] = "org1-key"
         os.environ["BIOTUS_NP_API_KEY_ORG_2"] = "org2-key"
         os.environ["BIOTUS_NP_API_KEY_ORG_3"] = "org3-key"
-        for key in ("NP_API_KEY", "NP_API_KEY_ORG_2", "NP_API_KEY_ORG_3"):
+        os.environ["BIOTUS_NP_API_KEY_ORG_4"] = "org4-key"
+        for key in ("NP_API_KEY", "NP_API_KEY_ORG_2", "NP_API_KEY_ORG_3", "NP_API_KEY_ORG_4"):
             os.environ.pop(key, None)
 
     def tearDown(self):
@@ -40,6 +43,7 @@ class NovaPoshtaOrganizationConfigTests(unittest.TestCase):
             (1, "org1-key", "BIOTUS_NP_API_KEY"),
             (2, "org2-key", "BIOTUS_NP_API_KEY_ORG_2"),
             (3, "org3-key", "BIOTUS_NP_API_KEY_ORG_3"),
+            (4, "org4-key", "BIOTUS_NP_API_KEY_ORG_4"),
         ):
             with self.subTest(organization_id=organization_id):
                 key, source = orchestrator.resolve_np_api_key_for_order({"organizationId": organization_id})
@@ -59,8 +63,8 @@ class NovaPoshtaOrganizationConfigTests(unittest.TestCase):
         self.assertEqual("BIOTUS_NP_API_KEY_ORG_3", source)
 
     def test_unknown_and_invalid_organization_are_rejected(self):
-        with self.assertRaisesRegex(RuntimeError, "Unsupported organizationId=4"):
-            orchestrator.resolve_np_api_key_for_order({"organizationId": 4})
+        with self.assertRaisesRegex(RuntimeError, "Unsupported organizationId=5"):
+            orchestrator.resolve_np_api_key_for_order({"organizationId": 5})
         with self.assertRaisesRegex(RuntimeError, "Invalid organizationId='abc'"):
             orchestrator.resolve_np_api_key_for_order({"organizationId": "abc"})
 
@@ -69,6 +73,11 @@ class NovaPoshtaOrganizationConfigTests(unittest.TestCase):
         orchestrator.inject_np_api_key_env(env, {"id": 26192, "organizationId": 3})
         for key_name in orchestrator.NP_API_KEY_ENV_KEYS:
             self.assertEqual("org3-key", env[key_name])
+
+    def test_org4_without_its_key_does_not_fall_back_to_org1(self):
+        os.environ.pop("BIOTUS_NP_API_KEY_ORG_4")
+        with self.assertRaisesRegex(RuntimeError, "organizationId=4 requires BIOTUS_NP_API_KEY_ORG_4"):
+            orchestrator.resolve_np_api_key_for_order({"organizationId": 4})
 
 
 if __name__ == "__main__":

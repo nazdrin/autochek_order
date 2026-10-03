@@ -421,6 +421,15 @@ def filter_orders_by_supplierlist(orders: List[Dict[str, Any]], allowed_supplier
     return allowed_orders, skipped
 
 
+def filter_orders_by_id(orders: List[Dict[str, Any]], order_id: int) -> List[Dict[str, Any]]:
+    """Keep only one explicitly requested SalesDrive order.
+
+    The SalesDrive API is asked for ``filter[id]`` too, but retaining this local
+    guard means an ignored/changed remote filter can never process another order.
+    """
+    return [order for order in orders if order_id_for_log(order) == str(order_id)]
+
+
 def sup6_order_matches_payment_queue(order: Dict[str, Any], queue_status: int | None = None) -> bool:
     """Accept SUP6 orders from status 21 with a supported payment method."""
     supplierlist, _ = parse_order_supplierlist(order)
@@ -1157,14 +1166,14 @@ def resolve_sup3_account_config(order: Dict[str, Any]) -> Dict[str, str]:
     raw_organization_id = order.get("organizationId")
     organization_id = extract_organization_id(order)
     if raw_organization_id not in (None, "") and organization_id is None:
-        raise RuntimeError(f"Invalid SUP3 organizationId={raw_organization_id!r}. Expected 1, 2, 3, or missing.")
-    # Organization 3 has its own Nova Poshta cabinet, but intentionally uses the
-    # same DSN account/session as organization 1.
-    if organization_id in (None, 1, 3):
+        raise RuntimeError(f"Invalid SUP3 organizationId={raw_organization_id!r}. Expected 1, 2, 3, 4, or missing.")
+    # Organizations 3 and 4 have their own Nova Poshta cabinets, but intentionally
+    # use the same DSN account/session as organization 1.
+    if organization_id in (None, 1, 3, 4):
         if not ORCH_SUP3_STORAGE_STATE_FILE:
             raise RuntimeError("ORCH_SUP3_STORAGE_STATE_FILE is empty.")
         return {
-            "organization_id": str(organization_id) if organization_id in {1, 3} else "default",
+            "organization_id": str(organization_id) if organization_id in {1, 3, 4} else "default",
             "storage_state_file": ORCH_SUP3_STORAGE_STATE_FILE,
             "use_cdp": ORCH_SUP3_USE_CDP,
             "login_email": "",
@@ -1190,7 +1199,7 @@ def resolve_sup3_account_config(order: Dict[str, Any]) -> Dict[str, str]:
             "login_password": ORCH_SUP3_ORG2_LOGIN_PASSWORD,
         }
 
-    raise RuntimeError(f"Unsupported SUP3 organizationId={organization_id!r}. Expected 1, 2, 3, or missing.")
+    raise RuntimeError(f"Unsupported SUP3 organizationId={organization_id!r}. Expected 1, 2, 3, 4, or missing.")
 
 
 def resolve_np_api_key_for_order(order: Dict[str, Any]) -> tuple[str, str]:
@@ -1198,7 +1207,7 @@ def resolve_np_api_key_for_order(order: Dict[str, Any]) -> tuple[str, str]:
     raw_organization_id = order.get("organizationId")
     organization_id = extract_organization_id(order)
     if raw_organization_id not in (None, "") and organization_id is None:
-        raise RuntimeError(f"Invalid organizationId={raw_organization_id!r}. Expected 1, 2, 3, or missing.")
+        raise RuntimeError(f"Invalid organizationId={raw_organization_id!r}. Expected 1, 2, 3, 4, or missing.")
 
     if organization_id == 2:
         key = (os.getenv("BIOTUS_NP_API_KEY_ORG_2") or os.getenv("NP_API_KEY_ORG_2") or "").strip()
@@ -1212,8 +1221,14 @@ def resolve_np_api_key_for_order(order: Dict[str, Any]) -> tuple[str, str]:
             raise RuntimeError("organizationId=3 requires BIOTUS_NP_API_KEY_ORG_3 (or NP_API_KEY_ORG_3).")
         return key, "BIOTUS_NP_API_KEY_ORG_3"
 
+    if organization_id == 4:
+        key = (os.getenv("BIOTUS_NP_API_KEY_ORG_4") or os.getenv("NP_API_KEY_ORG_4") or "").strip()
+        if not key:
+            raise RuntimeError("organizationId=4 requires BIOTUS_NP_API_KEY_ORG_4 (or NP_API_KEY_ORG_4).")
+        return key, "BIOTUS_NP_API_KEY_ORG_4"
+
     if organization_id not in (None, 1):
-        raise RuntimeError(f"Unsupported organizationId={organization_id!r}. Expected 1, 2, 3, or missing.")
+        raise RuntimeError(f"Unsupported organizationId={organization_id!r}. Expected 1, 2, 3, 4, or missing.")
 
     key = (os.getenv("BIOTUS_NP_API_KEY") or os.getenv("NP_API_KEY") or "").strip()
     if not key:
@@ -2482,7 +2497,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--once", action="store_true", help="Сделать один цикл и выйти (для теста)")
     ap.add_argument("--dry-run", action="store_true", help="Не запускать step2_3, только вывести BIOTUS_ITEMS")
+    ap.add_argument(
+        "--order-id",
+        type=int,
+        help="Безопасно обработать только одну заявку из очереди statusId=21; другие заявки не затрагиваются.",
+    )
     args = ap.parse_args()
+    if args.order_id is not None:
+        # A targeted recovery must not turn into a polling worker after it finishes.
+        args.once = True
 
     if not FETCH_SCRIPT.exists():
         print(f"Fetch script not found: {FETCH_SCRIPT}", file=sys.stderr)
@@ -2564,7 +2587,10 @@ def main() -> int:
 
         try:
             env = os.environ.copy()
-            rc, out, err = run_python(FETCH_SCRIPT, env=env, timeout_sec=_timeout_for_step("FETCH"), args=["--raw"])
+            fetch_args = ["--raw"]
+            if args.order_id is not None:
+                fetch_args += ["--order-id", str(args.order_id)]
+            rc, out, err = run_python(FETCH_SCRIPT, env=env, timeout_sec=_timeout_for_step("FETCH"), args=fetch_args)
             if rc != 0:
                 notify_stub(f"salesdrive_fetch_status21.py error rc={rc}: {err.strip()}")
                 raise RuntimeError("Fetch failed")
@@ -2574,6 +2600,8 @@ def main() -> int:
                 fetched_orders, allowed_suppliers
             )
             filtered_orders, sup6_payment_skipped = filter_sup6_payment_queue(filtered_orders)
+            if args.order_id is not None:
+                filtered_orders = filter_orders_by_id(filtered_orders, args.order_id)
             print(
                 f"[ORCH] Orders received: base21={len(fetched_orders)} "
                 f"/ allowed={len(filtered_orders)} / skipped={supplier_filtered_skipped + sup6_payment_skipped}"
@@ -2818,7 +2846,8 @@ def main() -> int:
             notify_stub(f"[ORCH] Orchestrator error: {type(e).__name__}: {e}")
 
         try:
-            maybe_run_dobavki_export(state)
+            if args.order_id is None:
+                maybe_run_dobavki_export(state)
         except Exception as e:
             notify_stub(f"[ORCH] Dobavki export wrapper error: {type(e).__name__}: {e}")
 
