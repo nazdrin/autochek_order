@@ -267,19 +267,7 @@ def _checkpoint_path(expected: Dict[str, int]) -> Path:
 
 
 def save_cart_checkpoint(expected: Dict[str, int], found: Dict[str, int], *, source: str, url: str) -> Path:
-    payload = {
-        "ok": True,
-        "ts": int(time.time()),
-        "order_id": ORDER_ID,
-        "expected_key": _expected_key(expected),
-        "expected": expected,
-        "found": found,
-        "source": source,
-        "url": url,
-    }
-    path = _checkpoint_path(expected)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
+    return _checkpoint_path(expected)
 
 
 def load_valid_cart_checkpoint(expected: Dict[str, int]) -> dict | None:
@@ -736,9 +724,7 @@ async def _goto_cart_page(page):
 
 
 async def _save_cart_html(page, filename: str):
-    html = await page.content()
-    path = ART / filename
-    path.write_text(html, encoding="utf-8")
+    return None
 
 
 async def verify_cart_or_raise(

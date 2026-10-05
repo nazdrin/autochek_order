@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 load_dotenv(ROOT / ".env")
+from services.runtime_cleanup import cleanup_startup
 
 
 def _env(name: str, default: str = "") -> str:
@@ -242,6 +243,7 @@ def run_vitaworld_telegram_flow(order: Dict[str, Any], ttn: str) -> Dict[str, An
     print(f"[VITAWORLD] sending Telegram => chat_id={chat_id}")
     send_vitaworld_telegram(token=token, chat_id=chat_id, text=message, pdf_path=pdf_path)
     print(f"[VITAWORLD] Telegram sent => chat_id={chat_id}")
+    pdf_path.unlink(missing_ok=True)
 
     return {
         "ok": True,
@@ -277,6 +279,7 @@ def _load_order_payload(order_json_arg: str, order_json_file: str) -> Dict[str, 
 
 
 def main() -> int:
+    cleanup_startup(ROOT)
     ap = argparse.ArgumentParser(description="Vitaworld supplier 63 Telegram flow")
     ap.add_argument("--order-json", default="", help="Order JSON string or path to JSON file")
     ap.add_argument("--order-json-file", default="", help="Path to order JSON file")

@@ -16,7 +16,10 @@ from playwright.async_api import TimeoutError as PWTimeoutError
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
+from services.runtime_cleanup import cleanup_startup
 
 BASE_URL = (os.getenv("SUP2_BASE_URL") or "https://dobavki.ua/ua").strip().rstrip("/")
 HOME_URL = f"{BASE_URL}/"
@@ -50,10 +53,7 @@ HEADLESS = _to_bool(os.getenv("SUP2_HEADLESS", "0"), False)
 CLEAR_BASKET = _to_bool(os.getenv("SUP2_CLEAR_BASKET", "1"), True)
 DEBUG_PAUSE_SECONDS = _to_int(os.getenv("SUP2_DEBUG_PAUSE_SECONDS", "0"), 0)
 DRY_RUN = _to_bool(os.getenv("SUP2_DRY_RUN", "0"), False)
-# In a dry run the page is specifically being inspected, so keep a local
-# record by default. Production runs stay opt-in because these files contain
-# checkout data.
-DEBUG_ARTIFACTS = _to_bool(os.getenv("SUP2_DEBUG_ARTIFACTS", "1" if DRY_RUN else "0"), DRY_RUN)
+DEBUG_ARTIFACTS = False  # Runtime processing must not persist checkout data.
 DEBUG_ARTIFACT_DIR = (os.getenv("SUP2_DEBUG_ARTIFACT_DIR") or "tmp/supplier2_debug").strip()
 MANUAL_SUBMIT_WAIT_SECONDS = _to_int(os.getenv("SUP2_MANUAL_SUBMIT_WAIT_SECONDS", "0"), 0)
 # Do not move focus from the last recipient field to the city autocomplete
@@ -2390,6 +2390,7 @@ def sup2_confirm_order(*args, **kwargs):
 
 
 def main() -> int:
+    cleanup_startup(ROOT)
     try:
         ok, payload = asyncio.run(_run())
     except Exception as e:

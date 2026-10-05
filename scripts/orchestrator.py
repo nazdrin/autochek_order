@@ -65,6 +65,9 @@ from supplier43_sportatlet_telegram import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from services.runtime_cleanup import cleanup_startup
 load_dotenv(ROOT / ".env")
 
 
@@ -2087,14 +2090,8 @@ def process_one_zoohub_order(order: Dict[str, Any], state: Dict[str, Any]) -> No
         f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={ORCH_DONE_STATUS_ID}, numberSup={number_sup_value}"
     )
 
-    # Optional cleanup for sent PDF
-    delete_label = (os.getenv("ZOOHUB_DELETE_LABEL_AFTER_SEND") or "").strip() in {"1", "true", "yes", "on"}
-    if delete_label:
-        try:
-            Path(str(pdf_path)).unlink(missing_ok=True)
-            print(f"[ORCH] Zoohub label deleted after send: {pdf_path}")
-        except Exception:
-            pass
+    Path(str(pdf_path)).unlink(missing_ok=True)
+    print(f"[ORCH] Zoohub label deleted after send: {pdf_path}")
 
 
 def process_one_supplier7_order(order: Dict[str, Any], state: Dict[str, Any]) -> None:
@@ -2248,14 +2245,8 @@ def process_one_vitaworld_order(order: Dict[str, Any], state: Dict[str, Any]) ->
         f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> statusId={done_status_id}, numberSup={number_sup_value}"
     )
 
-    delete_label = (os.getenv("VITAWORLD_DELETE_LABEL_AFTER_SEND") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
     pdf_path_str = str(pdf_path)
-    if delete_label and pdf_path_str:
+    if pdf_path_str:
         try:
             Path(pdf_path_str).unlink(missing_ok=True)
             print(f"[ORCH] Vitaworld label deleted after send: {pdf_path_str}")
@@ -2487,6 +2478,7 @@ def maybe_run_dobavki_export(state: Dict[str, Any]) -> None:
 
 
 def main() -> int:
+    cleanup_startup(ROOT, include_exports=True)
     try:
         acquire_single_instance_lock()
     except Exception as e:

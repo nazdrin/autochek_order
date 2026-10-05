@@ -15,7 +15,10 @@ from dotenv import load_dotenv
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
+from services.runtime_cleanup import cleanup_startup
 SUP4_BASE_URL = (os.getenv("SUP4_BASE_URL") or "https://monsterlabdrop.com.ua").rstrip("/")
 SUP4_LOGIN_EMAIL = (os.getenv("SUP4_LOGIN_EMAIL") or "").strip()
 SUP4_LOGIN_PASSWORD = (os.getenv("SUP4_LOGIN_PASSWORD") or "").strip()
@@ -132,17 +135,7 @@ def _debug_dir() -> Path:
 
 
 async def _debug(page, stage: str, label: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-    base = _debug_dir() / f"{stamp}_{stage}_{label}"
-    details = {"url": page.url, **(extra or {})}
-    try:
-        await page.screenshot(path=str(base.with_suffix('.png')), full_page=True)
-        details["screenshot"] = str(base.with_suffix('.png'))
-        base.with_suffix('.html').write_text(await page.content(), encoding="utf-8")
-        details["html"] = str(base.with_suffix('.html'))
-    except Exception:
-        pass
-    return details
+    return {"url": page.url, **(extra or {})}
 
 
 async def _login(page) -> None:
@@ -663,6 +656,7 @@ async def _run() -> dict[str, Any]:
             readiness = await _verify_submit_ready(page)
             if SUP4_ALLOW_SUBMIT:
                 confirmation = await _submit_and_confirm(page, SUP4_TTN, items)
+                Path(str(label["file"])).unlink(missing_ok=True)
                 return {"ok": True, "stage": "submitted", "url": page.url,
                         "cart_qty_checks": checks, "cart": actual_after, "cart_comparison": comparison_after,
                         "ttn": label, "label": label, **readiness, **confirmation}
@@ -676,6 +670,7 @@ async def _run() -> dict[str, Any]:
 
 
 def main() -> int:
+    cleanup_startup(ROOT)
     try:
         print(json.dumps(asyncio.run(_run()), ensure_ascii=False))
         return 0

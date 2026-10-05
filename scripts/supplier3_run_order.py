@@ -16,7 +16,10 @@ from playwright.async_api import TimeoutError as PWTimeoutError
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
+from services.runtime_cleanup import cleanup_startup
 
 
 def _to_int(value: str, default: int) -> int:
@@ -69,8 +72,8 @@ SUP3_NP_API_KEY = (
     or ""
 ).strip()
 SUP3_LABELS_DIR = ROOT / "supplier3_labels"
-SUP3_LABELS_MAX_FILES = _to_int(os.getenv("SUP3_LABELS_MAX_FILES", "50"), 50)
-SUP3_LABELS_MAX_AGE_DAYS = _to_int(os.getenv("SUP3_LABELS_MAX_AGE_DAYS", "7"), 7)
+SUP3_LABELS_MAX_FILES = 3
+SUP3_LABELS_MAX_AGE_DAYS = 0
 
 
 class StageError(RuntimeError):
@@ -126,28 +129,7 @@ def _add_items_failure_screenshot_path() -> Path:
 
 
 async def _save_checkout_debug_artifacts(page, reason: str, details: dict | None = None) -> dict:
-    out: dict[str, Any] = dict(details or {})
-    try:
-        debug_dir = ROOT / "tmp" / "supplier3_debug"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y%m%d_%H%M%S")
-        safe_reason = re.sub(r"[^a-zA-Z0-9_]+", "_", reason.strip().lower()).strip("_")[:80] or "checkout"
-        base = debug_dir / f"{stamp}_{safe_reason}"
-        html_path = base.with_suffix(".html")
-        png_path = base.with_suffix(".png")
-        try:
-            html_path.write_text(await page.content(), encoding="utf-8")
-            out["debug_html"] = str(html_path)
-        except Exception as e:
-            out["debug_html_error"] = str(e)
-        try:
-            await page.screenshot(path=str(png_path), full_page=True)
-            out["debug_screenshot"] = str(png_path)
-        except Exception as e:
-            out["debug_screenshot_error"] = str(e)
-    except Exception as e:
-        out["debug_artifacts_error"] = str(e)
-    return out
+    return dict(details or {})
 
 
 def _browser_context_options(storage_state: str | None = None) -> dict:
@@ -241,7 +223,7 @@ def _download_np_label_sup3(folder: Path, ttn: str, api_key: str) -> Path:
         raise RuntimeError("Downloaded PDF file size is zero")
     if ttn not in out_path.name:
         raise RuntimeError("Downloaded file name does not contain TTN")
-    _cleanup_labels_dir_sup3(folder, keep_names={out_path.name})
+    _cleanup_labels_dir_sup3(folder)
     return out_path
 
 
@@ -2627,6 +2609,7 @@ async def _checkout_ttn_stage(page) -> dict:
     attach_info = await _attach_invoice_label_file(page, label_path)
     pre_submit_ttn_check = await _ensure_ttn_still_present_before_submit(page, SUP3_TTN)
     supplier_order_number = await _submit_checkout_order_and_get_number(page)
+    label_path.unlink(missing_ok=True)
 
     if (os.getenv("SUP3_DEBUG_PAUSE") or "").strip() == "1":
         await page.wait_for_timeout(25000)
@@ -2644,7 +2627,7 @@ async def _checkout_ttn_stage(page) -> dict:
         "ttn_refilled_before_submit": bool(pre_submit_ttn_check.get("ttn_refilled_before_submit")),
         "ttn_value_before_submit": str(pre_submit_ttn_check.get("ttn_value_before_submit") or ""),
         "label_attached": True,
-        "label_file": str(label_path),
+        "label_file": "",
         "attach_invoice_label": attach_info,
         "number_sup": str(supplier_order_number),
         "supplier_order_number": str(supplier_order_number),
@@ -3355,6 +3338,7 @@ async def _run() -> tuple[bool, dict]:
 
 
 def main() -> int:
+    cleanup_startup(ROOT)
     try:
         ok, payload = asyncio.run(_run())
     except Exception as e:

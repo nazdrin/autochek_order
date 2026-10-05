@@ -13,7 +13,10 @@ from playwright.async_api import TimeoutError as PWTimeoutError
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
+from services.runtime_cleanup import cleanup_startup
 
 
 def _to_int(value: str, default: int) -> int:
@@ -44,7 +47,7 @@ SUP6_CLEAR_CART_PAUSE_SECONDS = _to_int(os.getenv("SUP6_CLEAR_CART_PAUSE_SECONDS
 SUP6_STEP3_DEBUG_PAUSE_MS = _to_int(os.getenv("SUP6_STEP3_DEBUG_PAUSE_MS", "0"), 0)
 SUP6_ITEMS = (os.getenv("SUP6_ITEMS") or "").strip()
 SUP6_ITEMS_JSON = (os.getenv("SUP6_ITEMS_JSON") or "").strip()
-SUP6_STEP3_ARTIFACTS = _to_bool(os.getenv("SUP6_STEP3_ARTIFACTS", "0"), False)
+SUP6_STEP3_ARTIFACTS = False
 SUP6_STEP3_ARTIFACTS_DIR = (os.getenv("SUP6_STEP3_ARTIFACTS_DIR") or "pages").strip() or "pages"
 SUP6_ORDER_JSON = (os.getenv("SUP6_ORDER_JSON") or os.getenv("BIOTUS_ORDER_JSON") or "").strip()
 SUP6_BIOTUS_FULL_NAME = (os.getenv("BIOTUS_FULL_NAME") or "").strip()
@@ -1168,22 +1171,7 @@ async def _step3_debug_pause(page, label: str) -> None:
 
 
 async def _step3_dump_artifact(page, *, sku: str, label: str, force: bool = False) -> None:
-    if not force and not SUP6_STEP3_ARTIFACTS:
-        return
-    try:
-        out_dir = Path(SUP6_STEP3_ARTIFACTS_DIR)
-        if not out_dir.is_absolute():
-            out_dir = ROOT / out_dir
-        out_dir.mkdir(parents=True, exist_ok=True)
-        safe_sku = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(sku or "").strip()) or "no_sku"
-        safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(label or "").strip()) or "state"
-        base = out_dir / f"sup6_step3_{safe_sku}_{safe_label}"
-        await page.screenshot(path=str(base.with_suffix(".png")), full_page=True)
-        html = await page.content()
-        base.with_suffix(".html").write_text(html, encoding="utf-8")
-        print(f"[SUP6] step3 artifact saved => {base.with_suffix('.png')}")
-    except Exception as e:
-        print(f"[SUP6] step3 artifact save failed ({label}, sku={sku}): {e}")
+    return None
 
 
 async def _step3_get_article_input(page):
@@ -4903,6 +4891,7 @@ async def _amain(
 
 
 def main() -> None:
+    cleanup_startup(ROOT)
     parser = argparse.ArgumentParser(description="Supplier6 (proteinplus.pro) runner")
     parser.add_argument("--clear-cart", action="store_true", help="Run clear cart stage and keep browser open for SUP6_CLEAR_CART_PAUSE_SECONDS")
     parser.add_argument("--finish-cart-only", action="store_true", help="Open cart.html from storage_state and finish step 3 (checkout + agreement)")

@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 from services.gdrive_uploader import upload_or_update_json
+from services.runtime_cleanup import cleanup_startup, retain_newest
 
 
 def _env(name: str, default: str = "") -> str:
@@ -457,6 +458,8 @@ def run_export() -> Dict[str, Any]:
     records = parse_export_to_json_records(export_file)
     json_path = export_dir / SUP2_EXPORT_JSON_NAME
     json_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    if export_file != json_path:
+        export_file.unlink(missing_ok=True)
 
     if not json_path.exists() or json_path.stat().st_size <= 0:
         raise RuntimeError("JSON save failed")
@@ -485,6 +488,7 @@ def run_export() -> Dict[str, Any]:
 
 
 def main() -> int:
+    cleanup_startup(ROOT, include_exports=True)
     try:
         summary = run_export()
         print(json.dumps(summary, ensure_ascii=False), flush=True)

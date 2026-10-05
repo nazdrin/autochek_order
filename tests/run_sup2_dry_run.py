@@ -145,11 +145,6 @@ def main() -> int:
         "coupon": payload.get("coupon"),
         "phone_payload_verified": bool((payload.get("customer") or {}).get("phone_payload")),
     }
-    artifact_dir = ROOT / "tmp" / "supplier2_debug"
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / f"dry_run_{source.get('id')}.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
     print(json.dumps(summary, ensure_ascii=False))
     return 0 if payload.get("ok") else 2
 

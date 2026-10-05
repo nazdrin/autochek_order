@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 from services.email_sender.gmail_smtp import send_email
+from services.runtime_cleanup import cleanup_startup
 
 
 def _env(name: str, default: str = "") -> str:

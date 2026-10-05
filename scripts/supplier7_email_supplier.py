@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 load_dotenv(ROOT / ".env")
 
 from services.email_sender.gmail_smtp import send_email
+from services.runtime_cleanup import cleanup_startup, retain_newest
 
 
 def _env(name: str, default: str = "") -> str:
@@ -205,6 +206,7 @@ def run_supplier7_email_flow(order: Dict[str, Any], ttn: str) -> Dict[str, Any]:
     print(f"[SUP7] sending email => {','.join(recipients)}")
     send_supplier7_email(subject=subject, body=body, recipients=recipients, pdf_path=pdf_path)
     print(f"[SUP7] email sent => {','.join(recipients)}")
+    pdf_path.unlink(missing_ok=True)
 
     return {
         "ok": True,
@@ -240,6 +242,7 @@ def _load_order_payload(order_json_arg: str, order_json_file: str) -> Dict[str, 
 
 
 def main() -> int:
+    cleanup_startup(ROOT)
     ap = argparse.ArgumentParser(description="Supplier7 email-only flow")
     ap.add_argument("--order-json", default="", help="Order JSON string or path to JSON file")
     ap.add_argument("--order-json-file", default="", help="Path to order JSON file")

@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 load_dotenv(ROOT / ".env")
+from services.runtime_cleanup import cleanup_startup
 
 
 ARTICLE_HEADER_CANDIDATES = {"Артикул"}
@@ -356,6 +357,8 @@ def run_sportatlet_telegram_flow(order: Dict[str, Any], ttn: str) -> Dict[str, A
         pdf_path=pdf_path,
         caption=str(ttn).strip(),
     )
+    xlsx_path.unlink(missing_ok=True)
+    pdf_path.unlink(missing_ok=True)
     return {
         "ok": True,
         "supplier": "sportatlet",
@@ -389,6 +392,7 @@ def _load_order_payload(order_json_arg: str, order_json_file: str) -> Dict[str, 
 
 
 def main() -> int:
+    cleanup_startup(ROOT)
     ap = argparse.ArgumentParser(description="Sport-atlet supplier 43 Telegram flow")
     ap.add_argument("--order-json", default="", help="Order JSON string or path to JSON file")
     ap.add_argument("--order-json-file", default="", help="Path to order JSON file")
