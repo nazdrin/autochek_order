@@ -62,6 +62,7 @@ SUP3_CLEAR_BASKET = _to_bool(os.getenv("SUP3_CLEAR_BASKET", "0"), False)
 SUP3_USE_CDP = _to_bool(os.getenv("SUP3_USE_CDP", "0"), False)
 SUP3_CDP_URL = (os.getenv("SUP3_CDP_URL") or "").strip()
 SUP3_ITEMS = (os.getenv("SUP3_ITEMS") or "").strip()
+SUP3_DIAGNOSTIC_ORDER_ID = (os.getenv("SUP3_DIAGNOSTIC_ORDER_ID") or "").strip()
 SUP3_TTN = (os.getenv("SUP3_TTN") or "").strip()
 SUP3_CITY_NAME = (os.getenv("SUP3_CITY_NAME") or os.getenv("BIOTUS_CITY_NAME") or "").strip()
 SUP3_NP_API_KEY = (
@@ -893,7 +894,12 @@ async def _read_cart_row_qty(row) -> int | None:
         row_text = (await row.inner_text(timeout=1000)) or ""
     except Exception:
         row_text = ""
-    for pat in (r"\b(\d+)\s*шт\b", r"\bx\s*(\d+)\b", r"\bкількість\D*(\d+)\b"):
+    for pat in (
+        r"\bкількість\D*(\d+)\b",
+        r"\b(\d+)\s*шт\b",
+        r"\bx\s*(\d+)\b",
+        r"[—–]\s*(\d+)\s*$",
+    ):
         m = re.search(pat, row_text, flags=re.IGNORECASE)
         if m:
             try:
@@ -903,7 +909,119 @@ async def _read_cart_row_qty(row) -> int | None:
     return None
 
 
-async def _find_cart_row(page, *, sku: str, product_title: str = ""):
+def _compare_sup3_quantities(expected: list[Sup3Item], actual: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compare expected supplier SKUs/quantities with one observed UI stage."""
+    wanted: dict[str, int] = {}
+    display_skus: dict[str, str] = {}
+    for item in expected:
+        key = item.sku.casefold()
+        wanted[key] = wanted.get(key, 0) + item.qty
+        display_skus.setdefault(key, item.sku)
+
+    got: dict[str, int] = {}
+    for row in actual:
+        sku = str(row.get("sku") or "").strip()
+        if not sku:
+            continue
+        key = sku.casefold()
+        got[key] = got.get(key, 0) + int(row.get("qty") or 0)
+
+    missing = [display_skus[key] for key in wanted if key not in got]
+    extra = [sku for sku in got if sku not in wanted]
+    qty_mismatches = [
+        {"sku": display_skus[key], "expected_qty": qty, "actual_qty": got[key]}
+        for key, qty in wanted.items()
+        if key in got and got[key] != qty
+    ]
+    checks = [
+        {
+            "sku": display_skus[key],
+            "expected_qty": qty,
+            "actual_qty": got.get(key),
+            "verified": got.get(key) == qty,
+        }
+        for key, qty in wanted.items()
+    ]
+    return {
+        "verified": not (missing or extra or qty_mismatches),
+        "missing": missing,
+        "extra": extra,
+        "qty_mismatches": qty_mismatches,
+        "checks": checks,
+    }
+
+
+async def _find_checkout_row(page, *, sku: str, product_title: str = ""):
+    """Find one unambiguous checkout line by supplier SKU or exact product title."""
+    candidates = page.locator(
+        "tr, li, article, .cart-item, .checkout-item, .order-item, "
+        ".checkout__product, .product-item, .basket-item"
+    )
+    sku_key = _normalize_match_text(sku)
+    title_key = _normalize_match_text(product_title)
+    matches: list[tuple[int, Any]] = []
+    try:
+        count = await candidates.count()
+    except Exception:
+        count = 0
+    for index in range(min(count, 500)):
+        row = candidates.nth(index)
+        try:
+            text = re.sub(r"\s+", " ", (await row.inner_text(timeout=700) or "")).strip()
+        except Exception:
+            continue
+        normalized = _normalize_match_text(text)
+        sku_match = bool(sku_key and sku_key in normalized)
+        title_match = bool(title_key and title_key in normalized)
+        if (sku_match or title_match) and await _read_cart_row_qty(row) is not None:
+            matches.append((len(text), row))
+    if not matches:
+        return None
+    min_len = min(length for length, _ in matches)
+    tightest = [row for length, row in matches if length == min_len]
+    if len(tightest) != 1:
+        raise RuntimeError(f"CHECKOUT_ROW_AMBIGUOUS sku={sku} title={product_title!r} matches={len(tightest)}")
+    return tightest[0]
+
+
+async def _read_checkout_quantities(
+    page,
+    expected: list[Sup3Item],
+    product_titles: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Read checkout line quantities; missing or ambiguous lines fail closed."""
+    titles = product_titles or {}
+    actual: list[dict[str, Any]] = []
+    for item in expected:
+        title = str(titles.get(item.sku) or "")
+        try:
+            row = await _find_checkout_row(page, sku=item.sku, product_title=title)
+        except RuntimeError as exc:
+            raise StageError(
+                "checkout_qty_mismatch",
+                str(exc),
+                {"sku": item.sku, "product_title": title, "reason": "ambiguous_checkout_row"},
+            ) from exc
+        if row is None:
+            raise StageError(
+                "checkout_qty_mismatch",
+                f"CHECKOUT_ROW_NOT_FOUND: sku={item.sku}",
+                {"sku": item.sku, "product_title": title, "reason": "checkout_row_not_found"},
+            )
+        qty = await _read_cart_row_qty(row)
+        if qty is None:
+            raise StageError(
+                "checkout_qty_mismatch",
+                f"CHECKOUT_QTY_NOT_READABLE: sku={item.sku}",
+                {"sku": item.sku, "product_title": title, "reason": "checkout_qty_not_readable"},
+            )
+        actual.append({"sku": item.sku, "qty": qty})
+    comparison = _compare_sup3_quantities(expected, actual)
+    comparison["actual"] = actual
+    return comparison
+
+
+async def _find_cart_row(page, *, sku: str, product_title: str = "", allow_single_fallback: bool = True):
     rows = page.locator(
         "section#cart tr.cart-item, section#cart table.cart-items tbody tr, "
         ".popup__cart tr.cart-item, .popup__cart table.cart-items tbody tr"
@@ -999,11 +1117,11 @@ async def _find_cart_row(page, *, sku: str, product_title: str = ""):
         print("[SUP3] add_items: cart row found via qty-input ancestor + title match")
         return title_match_anc
 
-    if visible_qty_inputs == 1 and single_visible_row is not None:
+    if allow_single_fallback and visible_qty_inputs == 1 and single_visible_row is not None:
         print("[SUP3] add_items: cart row found via single visible qty-input ancestor fallback")
         return single_visible_row
 
-    return best_row if count == 1 else None
+    return best_row if allow_single_fallback and count == 1 else None
 
 
 async def _verify_and_fix_cart_modal_qty(page, sku: str, expected_qty: int, *, product_title: str = "") -> dict:
@@ -1641,17 +1759,20 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
 
     async def _raise_add_items_error(message: str, *, error_code: str | None = None, failed_item: dict | None = None) -> None:
         screenshot_path = ""
-        try:
-            shot = _add_items_failure_screenshot_path()
-            await page.screenshot(path=str(shot), full_page=True)
-            screenshot_path = str(shot)
-        except Exception:
-            pass
+        if SUP3_STAGE != "diagnose_quantities":
+            try:
+                shot = _add_items_failure_screenshot_path()
+                await page.screenshot(path=str(shot), full_page=True)
+                screenshot_path = str(shot)
+            except Exception:
+                pass
         details: dict = {}
         if error_code:
             details["error_code"] = error_code
         if failed_item:
             details["failed_item"] = failed_item
+        if items_summary:
+            details["partial_items_summary"] = items_summary
         if screenshot_path:
             details["screenshot"] = screenshot_path
         raise StageError(stage, message, details)
@@ -1685,23 +1806,24 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
     for idx, item in enumerate(items):
         sku = item.sku
         qty = item.qty
+        product_title = ""
         try:
             print(f"[SUP3] add_items: processing sku={sku} qty={qty} ({idx+1}/{len(items)})")
             await _search_open_product_card(page, sku)
             await _wait_product_card_ready(page)
+            product_title = await _get_product_card_title(page)
             unavailable_text = await _detect_product_card_out_of_stock(page)
             if unavailable_text:
                 await _raise_add_items_error(
                     f"OUT_OF_STOCK: sku={sku}, qty={qty}: {unavailable_text}",
                     error_code="OUT_OF_STOCK",
-                    failed_item={"sku": sku, "qty": qty},
+                    failed_item={"sku": sku, "qty": qty, "product_title": product_title},
                 )
             # DSN can visually show changed qty on product card but still add qty=1 to cart.
             # Use cart modal row qty as the source of truth and set/verify there after "buy".
             print(f"[SUP3] add_items: skip product card qty set for sku={sku}; will set qty in cart modal => {qty}")
             await detect_and_fail_unavailable_modal(page, f"add_items.sku={sku}.before_buy")
             buy_btn, buy_sel = await _find_product_card_buy_button(page)
-            product_title = await _get_product_card_title(page)
             if product_title:
                 print(f"[SUP3] add_items: product title for cart match => {product_title}")
             print(f"[SUP3] add_items: click buy sku={sku} via {buy_sel}")
@@ -1727,12 +1849,12 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
                 await _raise_add_items_error(
                     f"OUT_OF_STOCK: sku={sku}, qty={qty}: {e}",
                     error_code="OUT_OF_STOCK",
-                    failed_item={"sku": sku, "qty": qty},
+                    failed_item={"sku": sku, "qty": qty, "product_title": product_title},
                 )
             await _raise_add_items_error(
                 f"SET_QTY_FAILED: sku={sku}, qty={qty}: {e}",
                 error_code="SET_QTY_FAILED",
-                failed_item={"sku": sku, "qty": qty},
+                failed_item={"sku": sku, "qty": qty, "product_title": product_title},
             )
 
         try:
@@ -1741,10 +1863,11 @@ async def _add_items(page, *, verify_auth: bool = True) -> dict:
             await _raise_add_items_error(
                 f"OUT_OF_STOCK: sku={sku}, qty={qty}: {e}",
                 error_code="OUT_OF_STOCK",
-                failed_item={"sku": sku, "qty": qty},
+                failed_item={"sku": sku, "qty": qty, "product_title": product_title},
             )
         items_summary[sku] = {
             "qty": qty,
+            "product_title": product_title,
             "price_uah": None,
             "price_raw": "",
         }
@@ -2570,7 +2693,16 @@ async def _ensure_ttn_still_present_before_submit(page, ttn: str) -> dict:
     }
 
 
-async def _checkout_ttn_stage(page) -> dict:
+async def _checkout_ttn_stage(
+    page,
+    *,
+    expected_items: list[Sup3Item] | None = None,
+    product_titles: dict[str, str] | None = None,
+) -> dict:
+    expected_items = expected_items if expected_items is not None else _parse_sup3_items()
+    if not expected_items:
+        raise StageError("checkout_qty_mismatch", "SUP3_ITEMS is required for checkout quantity verification")
+
     stage = "checkout_ttn"
     if not SUP3_TTN:
         raise StageError(stage, "SUP3_TTN is required")
@@ -2591,6 +2723,14 @@ async def _checkout_ttn_stage(page) -> dict:
             raise StageError(stage, "Did not reach checkout", {"url": page.url or SUP3_BASE_URL})
 
     await _best_effort_close_popups(page)
+    qty_comparison = await _read_checkout_quantities(page, expected_items, product_titles)
+    if not qty_comparison.get("verified"):
+        raise StageError(
+            "checkout_qty_mismatch",
+            "CHECKOUT_QTY_MISMATCH: checkout quantities differ from SalesDrive",
+            qty_comparison,
+        )
+
     await _raise_if_checkout_min_amount_blocked(page)
     city_info = await _ensure_checkout_city_selected(page)
     radio_selected = await _ensure_own_ttn_selected(page)
@@ -2620,6 +2760,7 @@ async def _checkout_ttn_stage(page) -> dict:
         "url": page.url or SUP3_BASE_URL,
         "numberSup": str(supplier_order_number),
         "checkout_clicked": checkout_clicked,
+        "checkout_qty_checks": qty_comparison,
         "city": city_info,
         "radio_selected": bool(pre_submit_ttn_check.get("radio_selected", radio_selected)),
         "ttn_set": bool(ttn_set),
@@ -3177,17 +3318,248 @@ async def _save_state(context, path: Path) -> None:
     await context.storage_state(path=str(path))
 
 
+async def _diagnostic_cart_state(page) -> tuple[str, dict[str, int]]:
+    rows = page.locator(
+        "section#cart tr.cart-item, section#cart table.cart-items tbody tr, "
+        ".popup__cart tr.cart-item, .popup__cart table.cart-items tbody tr, "
+        "section#cart .cart-item, .popup__cart .cart-item"
+    )
+    qty_inputs = page.locator(
+        "section#cart input.counter-field, section#cart input.j-quantity-p, "
+        "section#cart input.j-buy-button-counter-input, .popup__cart input.counter-field, "
+        ".popup__cart input.j-quantity-p, .popup__cart input.j-buy-button-counter-input"
+    )
+    empty_markers = page.locator(
+        "section#cart .cart-empty, section#cart .popup__empty, section#cart .empty, "
+        ".popup__cart .cart-empty, .popup__cart .popup__empty, .popup__cart .empty, "
+        "section#cart text=порож, .popup__cart text=порож"
+    )
+    try:
+        row_total = await rows.count()
+        qty_total = await qty_inputs.count()
+    except Exception as exc:
+        raise RuntimeError("Could not inspect cart rows") from exc
+    row_count = 0
+    for index in range(min(row_total, 100)):
+        try:
+            row_count += int(await rows.nth(index).is_visible())
+        except Exception:
+            continue
+    qty_count = 0
+    for index in range(min(qty_total, 100)):
+        try:
+            qty_count += int(await qty_inputs.nth(index).is_visible())
+        except Exception:
+            continue
+    counts = {"row_count": row_count, "quantity_controls": qty_count}
+    if row_count or qty_count:
+        return "nonempty", counts
+    empty_header = page.locator("div.basket.j-basket-header.is-empty, div.basket.is-empty")
+    try:
+        for index in range(min(await empty_header.count(), 5)):
+            if await empty_header.nth(index).is_visible():
+                counts["empty_header_class"] = 1
+                return "empty", counts
+    except Exception:
+        pass
+    try:
+        for index in range(min(await empty_markers.count(), 10)):
+            if await empty_markers.nth(index).is_visible():
+                return "empty", counts
+    except Exception:
+        pass
+    counters = page.locator(".basket__count, .basket__counter, .cart-count, .j-basket-count, [data-cart-count]")
+    try:
+        counter_count = await counters.count()
+    except Exception:
+        counter_count = 0
+    for index in range(min(counter_count, 10)):
+        counter = counters.nth(index)
+        try:
+            raw = (await counter.inner_text(timeout=500) or "").strip()
+            if not raw:
+                raw = str(await counter.get_attribute("data-cart-count") or "").strip()
+            if raw.isdigit():
+                counts["header_count"] = int(raw)
+                return ("empty" if int(raw) == 0 else "nonempty"), counts
+        except Exception:
+            continue
+    return "unknown", counts
+
+
+async def _diagnostic_cart_preflight(page) -> None:
+    """Allow diagnostic cart mutations only when emptiness is positively observed."""
+    await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
+    await _best_effort_close_popups(page)
+    open_error = ""
+    try:
+        await _open_cart_modal(page, open_timeout_ms=min(5000, SUP3_TIMEOUT_MS))
+    except Exception as exc:
+        open_error = str(exc)[:300]
+    try:
+        cart_state, counts = await _diagnostic_cart_state(page)
+    except Exception as exc:
+        raise StageError("diagnostic_preflight", "DIAGNOSTIC_CART_EMPTY_UNCONFIRMED") from exc
+    if cart_state == "nonempty":
+        raise StageError(
+            "diagnostic_preflight",
+            "DIAGNOSTIC_CART_NOT_EMPTY: work-account cart was left unchanged",
+            counts,
+        )
+    if cart_state != "empty":
+        raise StageError(
+            "diagnostic_preflight",
+            "DIAGNOSTIC_CART_EMPTY_UNCONFIRMED: no explicit empty state was visible",
+            {**counts, "cart_open_error": open_error},
+        )
+    await _ensure_cart_modal_closed(page)
+
+
+async def _cleanup_diagnostic_cart(page, expected: list[Sup3Item], product_titles: dict[str, str]) -> dict[str, Any]:
+    """Remove only rows matching diagnostic SKUs, then positively verify emptiness."""
+    await page.goto(SUP3_BASE_URL, wait_until="domcontentloaded", timeout=SUP3_TIMEOUT_MS)
+    await _best_effort_close_popups(page)
+    try:
+        await _open_cart_modal(page, open_timeout_ms=min(5000, SUP3_TIMEOUT_MS))
+    except Exception as exc:
+        raise RuntimeError(f"Could not reopen cart for diagnostic cleanup: {exc}") from exc
+
+    removed: list[str] = []
+    for item in expected:
+        row = await _find_cart_row(
+            page,
+            sku=item.sku,
+            product_title=product_titles.get(item.sku, ""),
+            allow_single_fallback=False,
+        )
+        if row is None:
+            continue
+        remove_btn, selector = await _find_cart_remove_button(row)
+        if remove_btn is None:
+            raise RuntimeError(f"Diagnostic row could not be safely identified for removal: {item.sku}")
+        await _click_remove_with_optional_confirm(page, remove_btn, selector)
+        deadline = asyncio.get_running_loop().time() + min(4.0, SUP3_TIMEOUT_MS / 1000.0)
+        while asyncio.get_running_loop().time() < deadline:
+            remaining = await _find_cart_row(
+                page,
+                sku=item.sku,
+                product_title=product_titles.get(item.sku, ""),
+                allow_single_fallback=False,
+            )
+            if remaining is None:
+                removed.append(item.sku)
+                break
+            await page.wait_for_timeout(100)
+        else:
+            raise RuntimeError(f"Diagnostic row remains in cart after removal attempt: {item.sku}")
+
+    state, counts = await _diagnostic_cart_state(page)
+    if state != "empty":
+        raise RuntimeError(f"Diagnostic cleanup could not confirm an empty cart: state={state}, counts={counts}")
+    return {"ok": True, "removed_skus": removed, "remaining_rows": 0}
+
+
+async def _diagnose_quantity_stage(page) -> dict[str, Any]:
+    expected = _parse_sup3_items()
+    if not SUP3_DIAGNOSTIC_ORDER_ID.isdigit():
+        raise StageError("diagnostic_preflight", "SUP3_DIAGNOSTIC_ORDER_ID must be a numeric SalesDrive order ID")
+    await _diagnostic_cart_preflight(page)
+
+    primary_error: StageError | None = None
+    result: dict[str, Any] = {
+        "ok": False,
+        "stage": "diagnose_quantities",
+        "diagnostic_only": True,
+        "submitted": False,
+        "salesdrive_updated": False,
+        "order_id": int(SUP3_DIAGNOSTIC_ORDER_ID),
+        "expected_items": [{"sku": item.sku, "qty": item.qty} for item in expected],
+    }
+    product_titles: dict[str, str] = {}
+    try:
+        add_result = await _add_items(page, verify_auth=False)
+        product_titles = {
+            str(sku): str(info.get("product_title") or "")
+            for sku, info in (add_result.get("items_summary") or {}).items()
+            if isinstance(info, dict)
+        }
+        cart_checks = add_result.get("cart_qty_checks") or []
+        if len(cart_checks) != len(expected) or any(
+            check.get("expected_qty") != check.get("actual_qty") for check in cart_checks
+        ):
+            raise StageError(
+                "diagnose_quantities",
+                "Cart quantity verification was incomplete; refusing to continue to checkout",
+                {"cart_qty_checks": cart_checks, "expected_count": len(expected)},
+            )
+        result["cart"] = {
+            "checks": cart_checks,
+            "verified": True,
+        }
+        if "/checkout/" not in (page.url or ""):
+            await _assert_cart_not_empty(page)
+            await _click_checkout_button(page)
+        if "/checkout/" not in (page.url or ""):
+            raise StageError("diagnose_quantities", "Did not reach checkout page")
+        await _best_effort_close_popups(page)
+        checkout_comparison = await _read_checkout_quantities(page, expected, product_titles)
+        result["checkout"] = checkout_comparison
+        result["interpretation"] = (
+            "checkout_quantity_changed" if not checkout_comparison.get("verified")
+            else "no_mismatch_observed_before_submit"
+        )
+        result["ok"] = bool(checkout_comparison.get("verified"))
+        if not result["ok"]:
+            primary_error = StageError(
+                "diagnose_quantities",
+                "Checkout quantities differ from SalesDrive",
+                {"checkout": checkout_comparison},
+            )
+    except StageError as exc:
+        partial = exc.details.get("partial_items_summary") if isinstance(exc.details, dict) else None
+        if isinstance(partial, dict):
+            product_titles.update({
+                str(sku): str(info.get("product_title") or "")
+                for sku, info in partial.items()
+                if isinstance(info, dict)
+            })
+        failed_item = exc.details.get("failed_item") if isinstance(exc.details, dict) else None
+        if isinstance(failed_item, dict) and failed_item.get("sku"):
+            product_titles[str(failed_item["sku"])] = str(failed_item.get("product_title") or "")
+        primary_error = exc
+    except Exception as exc:
+        primary_error = StageError("diagnose_quantities", str(exc)[:500])
+
+    try:
+        result["cleanup"] = await _cleanup_diagnostic_cart(page, expected, product_titles)
+    except Exception as exc:
+        result["cleanup"] = {"ok": False, "manual_cleanup_required": True, "error": str(exc)[:500]}
+        result["ok"] = False
+
+    if primary_error is not None:
+        details = dict(primary_error.details or {})
+        details["diagnostic_result"] = result
+        raise StageError(primary_error.stage, str(primary_error), details) from primary_error
+    if not result.get("cleanup", {}).get("ok"):
+        raise StageError(
+            "diagnostic_cleanup",
+            "Diagnostic finished but cart cleanup was not confirmed; manual review required",
+            {"diagnostic_result": result},
+        )
+    return result
+
+
 async def _run() -> tuple[bool, dict]:
-    if SUP3_STAGE not in {"login", "run", "add_items", "clear_cart", "checkout_ttn"}:
+    if SUP3_STAGE not in {"login", "run", "add_items", "clear_cart", "checkout_ttn", "diagnose_quantities"}:
         raise RuntimeError(
-            f"Unsupported SUP3_STAGE={SUP3_STAGE!r}. Expected 'login', 'run', 'add_items', 'clear_cart' or 'checkout_ttn'."
+            f"Unsupported SUP3_STAGE={SUP3_STAGE!r}. Expected 'login', 'run', 'add_items', 'clear_cart', 'checkout_ttn' or 'diagnose_quantities'."
         )
     if SUP3_STAGE == "login":
         if not SUP3_LOGIN_EMAIL:
             raise RuntimeError("SUP3_LOGIN_EMAIL (or SUP3_EMAIL) is required")
         if not SUP3_LOGIN_PASSWORD:
             raise RuntimeError("SUP3_LOGIN_PASSWORD (or SUP3_PASSWORD) is required")
-    if SUP3_STAGE == "add_items":
+    if SUP3_STAGE in {"add_items", "diagnose_quantities"}:
         _ = _parse_sup3_items()
     if SUP3_STAGE == "checkout_ttn" and not SUP3_TTN:
         raise RuntimeError("SUP3_TTN is required for SUP3_STAGE=checkout_ttn")
@@ -3226,6 +3598,11 @@ async def _run() -> tuple[bool, dict]:
                     context = await browser.new_context(**_browser_context_options())
 
             page = await context.new_page()
+            if SUP3_STAGE == "diagnose_quantities":
+                stage = "diagnostic_preflight"
+                await _ensure_logged_in(page)
+                result = await _diagnose_quantity_stage(page)
+                return bool(result.get("ok")), result
             if SUP3_STAGE == "add_items":
                 stage = "add_items"
                 add_items_result = await _add_items(page)
@@ -3250,7 +3627,17 @@ async def _run() -> tuple[bool, dict]:
                 add_items_result = await _add_items(page, verify_auth=False)
             if SUP3_STAGE == "run" and SUP3_TTN:
                 stage = "checkout_ttn"
-                checkout_ttn_result = await _checkout_ttn_stage(page)
+                items_for_checkout = _parse_sup3_items()
+                product_titles = {
+                    str(sku): str(info.get("product_title") or "")
+                    for sku, info in (add_items_result.get("items_summary") or {}).items()
+                    if isinstance(info, dict)
+                } if isinstance(add_items_result, dict) else {}
+                checkout_ttn_result = await _checkout_ttn_stage(
+                    page,
+                    expected_items=items_for_checkout,
+                    product_titles=product_titles,
+                )
                 stage = "login"
 
             await _save_state(context, state_path)
@@ -3282,7 +3669,7 @@ async def _run() -> tuple[bool, dict]:
                 result["items"] = add_items_result.get("items")
             return True, result
     except StageError as e:
-        if page is not None:
+        if page is not None and SUP3_STAGE != "diagnose_quantities":
             try:
                 shot = _failure_screenshot_path()
                 await page.screenshot(path=str(shot), full_page=True)
@@ -3302,7 +3689,7 @@ async def _run() -> tuple[bool, dict]:
             payload["details"] = e.details
         return False, payload
     except Exception as e:
-        if page is not None:
+        if page is not None and SUP3_STAGE != "diagnose_quantities":
             try:
                 shot = _failure_screenshot_path()
                 await page.screenshot(path=str(shot), full_page=True)
