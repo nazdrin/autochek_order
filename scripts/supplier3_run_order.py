@@ -62,6 +62,7 @@ SUP3_CLEAR_BASKET = _to_bool(os.getenv("SUP3_CLEAR_BASKET", "0"), False)
 SUP3_USE_CDP = _to_bool(os.getenv("SUP3_USE_CDP", "0"), False)
 SUP3_CDP_URL = (os.getenv("SUP3_CDP_URL") or "").strip()
 SUP3_ITEMS = (os.getenv("SUP3_ITEMS") or "").strip()
+SUP3_PROMO_CODE = (os.getenv("SUP3_PROMO_CODE") or "sls7").strip()
 SUP3_DIAGNOSTIC_ORDER_ID = (os.getenv("SUP3_DIAGNOSTIC_ORDER_ID") or "").strip()
 SUP3_TTN = (os.getenv("SUP3_TTN") or "").strip()
 SUP3_CITY_NAME = (os.getenv("SUP3_CITY_NAME") or os.getenv("BIOTUS_CITY_NAME") or "").strip()
@@ -1019,6 +1020,70 @@ async def _read_checkout_quantities(
     comparison = _compare_sup3_quantities(expected, actual)
     comparison["actual"] = actual
     return comparison
+
+
+async def _apply_sup3_coupon(page) -> dict[str, Any]:
+    """Apply the configured DSN coupon and report the site's own result."""
+    code = SUP3_PROMO_CODE
+    if not code:
+        return {"code": "", "status": "technical_error", "message": "Coupon code is empty", "discount_amount": None}
+    try:
+        # Recognize a coupon already attached to the current cart.
+        state = await page.evaluate("""() => {
+            const norm = s => (s || '').replace(/\\s+/g, ' ').trim();
+            const text = norm(document.body.innerText || '');
+            const coupon = text.match(/(?:знижка|скидка)\\s+по\\s+купону[^\\n]*/i);
+            const remove = document.querySelector('a.j-coupon-remove');
+            const input = document.querySelector('.j-coupon-input');
+            return {text, coupon: coupon ? coupon[0] : '', remove: !!remove,
+                value: input ? input.value : ''};
+        }""")
+        if state.get("remove") and code.casefold() in str(state.get("coupon") or state.get("text") or "").casefold():
+            return {"code": code, "status": "applied", "message": state.get("coupon") or "Coupon already applied", "discount_amount": None}
+
+        inp = page.locator(".j-coupon-input").first
+        if await inp.count() == 0 or not await inp.is_visible():
+            toggle = page.locator("a.j-coupon-add").first
+            if await toggle.count():
+                await toggle.click(timeout=min(3000, SUP3_TIMEOUT_MS), force=True)
+        await inp.wait_for(state="visible", timeout=min(5000, SUP3_TIMEOUT_MS))
+        await inp.fill(code, timeout=min(3000, SUP3_TIMEOUT_MS))
+        submit = page.locator("a.j-coupon-submit").first
+        if await submit.count() == 0:
+            submit = page.get_by_role("button", name=re.compile(r"ok|застос|примен", re.I)).first
+        if await submit.count() == 0:
+            return {"code": code, "status": "technical_error", "message": "Coupon submit control not found", "discount_amount": None}
+        before = str(state.get("text") or "")
+        await submit.click(timeout=min(4000, SUP3_TIMEOUT_MS), force=True)
+        deadline = asyncio.get_running_loop().time() + min(10.0, SUP3_TIMEOUT_MS / 1000)
+        last_text = before
+        while asyncio.get_running_loop().time() < deadline:
+            await page.wait_for_timeout(250)
+            last_text = await page.locator("body").inner_text(timeout=min(1500, SUP3_TIMEOUT_MS))
+            if last_text != before and (re.search(r"(?:знижка|скидка)\s+по\s+купону", last_text, re.I)
+                    or re.search(r"не пошир|не распространя|не дійс|не действ|невірн|неверн|купон", last_text, re.I)):
+                break
+        compact = re.sub(r"\s+", " ", last_text).strip()
+        coupon_line = next((line.strip() for line in last_text.splitlines() if re.search(r"(?:знижка|скидка)\s+по\s+купону", line, re.I)), "")
+        amount_match = re.search(r"[−-]\s*([\d ]+(?:[,.]\d+)?)\s*грн", coupon_line, re.I)
+        if amount_match is None:
+            discount_amounts = list(re.finditer(r"[−-]\s*([\d ]+(?:[,.]\d+)?)\s*грн", last_text, re.I))
+            amount_match = discount_amounts[-1] if discount_amounts else None
+        amount = float(amount_match.group(1).replace(" ", "").replace(",", ".")) if amount_match else None
+        status = _classify_sup3_coupon_response(coupon_line, compact)
+        return {"code": code, "status": status, "message": coupon_line or compact[-500:], "discount_amount": amount}
+    except Exception as exc:
+        return {"code": code, "status": "technical_error", "message": str(exc)[:500], "discount_amount": None}
+
+
+def _classify_sup3_coupon_response(coupon_line: str, message: str) -> str:
+    if coupon_line:
+        return "applied"
+    if re.search(r"не пошир|не распространя", message, re.I):
+        return "not_applicable"
+    if re.search(r"недійс|не дійс|не действ|невірн|неверн|відхил|отклон", message, re.I):
+        return "rejected"
+    return "technical_error"
 
 
 async def _find_cart_row(page, *, sku: str, product_title: str = "", allow_single_fallback: bool = True):
@@ -2723,6 +2788,8 @@ async def _checkout_ttn_stage(
             raise StageError(stage, "Did not reach checkout", {"url": page.url or SUP3_BASE_URL})
 
     await _best_effort_close_popups(page)
+    coupon = await _apply_sup3_coupon(page)
+    print(f"[SUP3] coupon: code={coupon.get('code')} status={coupon.get('status')} message={coupon.get('message')}")
     qty_comparison = await _read_checkout_quantities(page, expected_items, product_titles)
     if not qty_comparison.get("verified"):
         raise StageError(
@@ -2761,6 +2828,7 @@ async def _checkout_ttn_stage(
         "numberSup": str(supplier_order_number),
         "checkout_clicked": checkout_clicked,
         "checkout_qty_checks": qty_comparison,
+        "coupon": coupon,
         "city": city_info,
         "radio_selected": bool(pre_submit_ttn_check.get("radio_selected", radio_selected)),
         "ttn_set": bool(ttn_set),
@@ -3502,6 +3570,8 @@ async def _diagnose_quantity_stage(page) -> dict[str, Any]:
         if "/checkout/" not in (page.url or ""):
             raise StageError("diagnose_quantities", "Did not reach checkout page")
         await _best_effort_close_popups(page)
+        coupon = await _apply_sup3_coupon(page)
+        result["coupon"] = coupon
         checkout_comparison = await _read_checkout_quantities(page, expected, product_titles)
         result["checkout"] = checkout_comparison
         result["interpretation"] = (
