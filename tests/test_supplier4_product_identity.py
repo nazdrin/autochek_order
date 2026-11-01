@@ -2,15 +2,34 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from PyPDF2 import PdfWriter
+from PyPDF2.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from supplier4_run_order import Sup4Item, _cart_qty_checks, _classify_submit_rejection, _compare_order, _history_api_order_number, _history_order_number, _keycrm_order_number, _label_matches_ttn, _parse_items, _submit_not_ready_reason  # noqa: E402
+from supplier4_run_order import Sup4Item, _cart_qty_checks, _classify_submit_rejection, _compare_order, _compare_order_details, _detail_order_items, _history_order_number, _keycrm_order_number, _label_matches_ttn, _label_status_received, _parse_items, _parse_money, _submit_not_ready_reason, _success_page_order_number, _supplier_error_text, _validated_ttn  # noqa: E402
 from orchestrator import build_sup4_items, is_ambiguous_sup4_submit_failure  # noqa: E402
 
 
 class Supplier4DropValidationTests(unittest.TestCase):
+    @staticmethod
+    def _write_pdf(path: Path, text: str, width: float = 100 * 72 / 25.4, height: float = 100 * 72 / 25.4):
+        writer = PdfWriter()
+        writer.add_blank_page(width=width, height=height)
+        page = writer.pages[0]
+        font = DictionaryObject({NameObject("/Type"): NameObject("/Font"),
+                                 NameObject("/Subtype"): NameObject("/Type1"),
+                                 NameObject("/BaseFont"): NameObject("/Helvetica")})
+        page[NameObject("/Resources")] = DictionaryObject({
+            NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})
+        })
+        stream = DecodedStreamObject()
+        stream.set_data(f"BT /F1 12 Tf 10 10 Td ({text}) Tj ET".encode("ascii"))
+        page[NameObject("/Contents")] = writer._add_object(stream)
+        with path.open("wb") as output:
+            writer.write(output)
+
     def test_parse_items_normalizes_valid_input(self):
         self.assertEqual(_parse_items(" SOL-00947:2 ; GAV-0157 "), [Sup4Item("SOL-00947", 2), Sup4Item("GAV-0157", 1)])
 
@@ -19,6 +38,44 @@ class Supplier4DropValidationTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 with self.assertRaises(RuntimeError):
                     _parse_items(raw)
+
+    def test_money_is_parsed_as_minor_units_without_losing_decimals(self):
+        self.assertEqual(20000, _parse_money("200,00 ₴"))
+        self.assertEqual(123450, _parse_money("1 234,50 ₴"))
+        self.assertEqual(123450, _parse_money("1.234,50 ₴"))
+
+    def test_nova_poshta_ttn_requires_exactly_fourteen_digits(self):
+        self.assertEqual("20450000000001", _validated_ttn("2045 0000 0000 01"))
+        for value in ("", "1234567890123", "204500000000011"):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                _validated_ttn(value)
+
+    def test_existing_order_is_accepted_only_when_store_carrier_ttn_and_items_match(self):
+        detail = {"store": "Старий кабінет", "carrier": "Нова пошта", "ttn": "20450000000001",
+                  "number": "D23857", "label_received": True, "items": [{"sku": "CEN-21151", "qty": 2}]}
+        expected = [Sup4Item("CEN-21151", 2)]
+        self.assertTrue(_compare_order_details(expected, detail, detail["ttn"])["verified"])
+        detail["items"][0]["qty"] = 1
+        self.assertFalse(_compare_order_details(expected, detail, detail["ttn"])["verified"])
+        detail["items"][0]["qty"] = 2
+        detail["label_received"] = False
+        self.assertFalse(_compare_order_details(expected, detail, detail["ttn"])["verified"])
+
+    def test_detail_quantity_comes_only_from_each_product_row(self):
+        rows = [("CEN-21151", "21st Century B-1 1 шт."), ("CEN-22251", "21st Century B-2")]
+        self.assertEqual([{"sku": "CEN-21151", "qty": 1}, {"sku": "CEN-22251", "qty": 0}], _detail_order_items(rows))
+
+    def test_label_confirmation_distinguishes_received_from_missing(self):
+        self.assertTrue(_label_status_received("Завантажено"))
+        self.assertTrue(_label_status_received("PDF отримано"))
+        self.assertTrue(_label_status_received("Переглянути до 15 листопада"))
+        self.assertFalse(_label_status_received("Не надходила"))
+
+    def test_supplier_request_domain_matches_without_assuming_an_api_path(self):
+        from supplier4_run_order import _is_supplier_host
+        self.assertTrue(_is_supplier_host("https://monsterlabdrop.com.ua/checkout/submit-v2"))
+        self.assertTrue(_is_supplier_host("https://api.monsterlabdrop.com.ua/orders/new"))
+        self.assertFalse(_is_supplier_host("https://example.com/api/orders"))
 
     def test_compare_order_accepts_exact_skus_and_quantities(self):
         result = _compare_order([Sup4Item("SOL-00947", 2)], [{"sku": "sol-00947", "qty": 2, "price": 735}])
@@ -42,12 +99,21 @@ class Supplier4DropValidationTests(unittest.TestCase):
     def test_label_ttn_is_verified_from_name_or_pdf_content(self):
         with tempfile.TemporaryDirectory() as directory:
             named = Path(directory) / "label-20450398117642.pdf"
-            named.write_bytes(b"%PDF test")
+            self._write_pdf(named, "20450398117642")
             self.assertTrue(_label_matches_ttn(named, "20450398117642"))
             content = Path(directory) / "label.pdf"
-            content.write_bytes(b"%PDF 20450398117642")
+            self._write_pdf(content, "20450398117642")
             self.assertTrue(_label_matches_ttn(content, "20450398117642"))
             self.assertFalse(_label_matches_ttn(content, "20450398117643"))
+
+    def test_label_name_alone_cannot_match_and_pdf_page_size_is_enforced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            named = Path(directory) / "label-20450398117642.pdf"
+            self._write_pdf(named, "wrong-ttn")
+            self.assertFalse(_label_matches_ttn(named, "20450398117642"))
+            wrong_size = Path(directory) / "wrong-size.pdf"
+            self._write_pdf(wrong_size, "20450398117642", width=200, height=200)
+            self.assertFalse(_label_matches_ttn(wrong_size, "20450398117642"))
 
     def test_empty_pdf_cannot_be_accepted_by_filename_alone(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -64,10 +130,12 @@ class Supplier4DropValidationTests(unittest.TestCase):
         self.assertEqual("D20250", _history_order_number(row, "20451504851422"))
         self.assertEqual("", _history_order_number(row, "20451504750956"))
 
-    def test_history_api_d_number_requires_exact_ttn(self):
-        rows = [{"id": "D20253", "ttn": "20451504695822"}]
-        self.assertEqual("D20253", _history_api_order_number(rows, "20451504695822"))
-        self.assertEqual("", _history_api_order_number(rows, "20451504695821"))
+    def test_success_page_number_is_read_from_number_order_field(self):
+        self.assertEqual("D510001", _success_page_order_number(
+            "Замовлення створено. # НОМЕР ЗАМОВЛЕННЯ D510001. За цим номером замовлення шукають менеджери."
+        ))
+        self.assertEqual("", _success_page_order_number("Замовлення створено, номер не показано"))
+        self.assertEqual("", _success_page_order_number("Кошик"))
 
     def test_disabled_submit_classifies_deposit_error(self):
         self.assertEqual("INSUFFICIENT_DEPOSIT", _submit_not_ready_reason("Не вистачає 633 ₴ на депозиті. Поповніть баланс."))
@@ -83,6 +151,18 @@ class Supplier4DropValidationTests(unittest.TestCase):
         self.assertIn("INSUFFICIENT_STOCK", result["message"])
         self.assertIn("requested=SOL-00947:4", result["message"])
         self.assertEqual(2, result["available_qty"])
+
+    def test_supplier_refusal_message_drops_contact_and_arbitrary_payload_fields(self):
+        result = _classify_submit_rejection(
+            409,
+            {"error": "Недостатньо товару", "recipient": "Buyer", "phone": "+380 67 123 45 67",
+             "ttn": "20450000000001"},
+            [Sup4Item("CEN-21151", 2)],
+        )
+        self.assertIsNotNone(result)
+        self.assertNotIn("380", result["supplier_message"])
+        self.assertNotIn("20450000000001", result["supplier_message"])
+        self.assertEqual("", _supplier_error_text({"recipient": "Buyer", "phone": "123"}))
 
     def test_submit_rejection_classifies_russian_and_english_stock_shortages(self):
         for message in ("Недостаточно товара на складе", "Product is out of stock"):

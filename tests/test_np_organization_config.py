@@ -1,7 +1,10 @@
 import os
+import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -78,6 +81,37 @@ class NovaPoshtaOrganizationConfigTests(unittest.TestCase):
         os.environ.pop("BIOTUS_NP_API_KEY_ORG_4")
         with self.assertRaisesRegex(RuntimeError, "organizationId=4 requires BIOTUS_NP_API_KEY_ORG_4"):
             orchestrator.resolve_np_api_key_for_order({"organizationId": 4})
+
+    def test_salesdrive_order_read_pages_until_exact_id_when_filter_is_ignored(self):
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(self.payload).encode()
+
+        pages = [
+            {"data": [{"id": 34237}], "pagination": {"pageCount": 2}},
+            {"data": [{"id": 34153, "numberSup": "D510001"}], "pagination": {"pageCount": 2}},
+        ]
+        requests = []
+
+        def fake_urlopen(request, timeout):
+            requests.append((parse_qs(urlsplit(request.full_url).query), timeout))
+            return Response(pages[len(requests) - 1])
+
+        with patch.object(orchestrator, "SALESDRIVE_API_KEY", "test-key"), \
+             patch.object(orchestrator.urllib.request, "urlopen", side_effect=fake_urlopen):
+            order = orchestrator.salesdrive_get_order(34153)
+
+        self.assertEqual(order, {"id": 34153, "numberSup": "D510001"})
+        self.assertEqual([request[0]["page"] for request in requests], [["1"], ["2"]])
 
 
 if __name__ == "__main__":

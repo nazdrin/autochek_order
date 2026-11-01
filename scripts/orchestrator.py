@@ -241,11 +241,13 @@ ORCH_SUP3_ORG2_STORAGE_STATE_FILE = (
 ).strip()
 ORCH_SUP4_SUPPLIERLIST = int(os.getenv("ORCH_SUP4_SUPPLIERLIST", "42"))
 ORCH_SUP4_HEADLESS = (os.getenv("ORCH_SUP4_HEADLESS") or ORCH_HEADLESS or "1").strip()
-ORCH_SUP4_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP4_STORAGE_STATE_FILE") or ".state_supplier4.json").strip()
 ORCH_SUP4_CLEAR_BASKET = (os.getenv("ORCH_SUP4_CLEAR_BASKET") or "1").strip()
 ORCH_SUP4_ATTACH_DIR = (os.getenv("ORCH_SUP4_ATTACH_DIR") or "supplier4_labels").strip()
 ORCH_SUP4_PAUSE_SEC = (os.getenv("ORCH_SUP4_PAUSE_SEC") or "0").strip()
 ORCH_SUP4_ALLOW_SUBMIT = (os.getenv("ORCH_SUP4_ALLOW_SUBMIT") or "0").strip()
+ORCH_SUP4_EXPECTED_STORE = (os.getenv("ORCH_SUP4_EXPECTED_STORE") or "Старий кабінет").strip()
+ORCH_SUP4_EXPECTED_ACCOUNT = (os.getenv("ORCH_SUP4_EXPECTED_ACCOUNT") or os.getenv("SUP4_EXPECTED_ACCOUNT") or "").strip()
+ORCH_SUP4_STORAGE_STATE_FILE = (os.getenv("ORCH_SUP4_STORAGE_STATE_FILE") or ".state_supplier4.json").strip()
 ORCH_SUP6_SUPPLIERLIST = int(os.getenv("ORCH_SUP6_SUPPLIERLIST", "40"))
 ORCH_SUP6_QUEUE_STATUS = 21
 ORCH_SUP6_PAYMENT_METHODS = {20, 54, 16}
@@ -608,6 +610,42 @@ def salesdrive_update_status(
             # salesdrive often returns json; we don't require specific fields now
     except Exception as e:
         raise RuntimeError(f"SalesDrive update failed: {e}")
+
+
+def salesdrive_get_order(order_id: int) -> Dict[str, Any]:
+    """Read one exact SalesDrive order, paging locally because filter[id] may be ignored."""
+    if not SALESDRIVE_API_KEY:
+        raise RuntimeError("SALESDRIVE_API_KEY is not set")
+    limit = 100
+    previous_page_ids: tuple[str, ...] | None = None
+    for page in range(1, 1001):
+        query = urllib.parse.urlencode({"limit": limit, "page": page})
+        req = urllib.request.Request(f"{SALESDRIVE_BASE_URL}/api/order/list/?{query}", method="GET")
+        req.add_header("accept", "application/json")
+        req.add_header("X-Api-Key", SALESDRIVE_API_KEY)
+        with urllib.request.urlopen(req, timeout=_timeout_for_step("SALESDRIVE_UPDATE")) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise RuntimeError("SalesDrive order read returned an unexpected payload")
+        for row in rows:
+            if isinstance(row, dict) and str(row.get("id")) == str(order_id):
+                return row
+        page_ids = tuple(str(row.get("id") or "") for row in rows if isinstance(row, dict))
+        if not rows or (previous_page_ids is not None and page_ids == previous_page_ids):
+            break
+        previous_page_ids = page_ids
+        pagination = payload.get("pagination") if isinstance(payload, dict) else None
+        try:
+            page_count = int(pagination.get("pageCount")) if isinstance(pagination, dict) else 0
+        except (TypeError, ValueError):
+            page_count = 0
+        if page_count:
+            if page >= page_count:
+                break
+        elif len(rows) < limit:
+            break
+    raise RuntimeError(f"SalesDrive order {order_id} was not found after update")
 
 
 def run_python(script: Path, env: Dict[str, str], timeout_sec: int, args: List[str] | None = None) -> Tuple[int, str, str]:
@@ -1793,7 +1831,7 @@ def process_one_supplier3_order(order: Dict[str, Any]) -> None:
     )
 
 
-def process_one_supplier4_order(order: Dict[str, Any]) -> None:
+def process_one_supplier4_order(order: Dict[str, Any], state: Dict[str, Any] | None = None) -> None:
     order_id = order.get("id")
     try:
         order_id_int = int(order_id)
@@ -1808,19 +1846,18 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
     if not tracking_number:
         raise RuntimeError("Не найдено поле ord_delivery_data[0].trackingNumber для SUP4_TTN.")
 
-    if not ORCH_SUP4_STORAGE_STATE_FILE:
-        raise RuntimeError("ORCH_SUP4_STORAGE_STATE_FILE is empty.")
-
     env = os.environ.copy()
     env.setdefault("SUP4_HEADLESS", ORCH_SUP4_HEADLESS)
     env["SUP4_STAGE"] = "run"
-    env["SUP4_STORAGE_STATE_FILE"] = ORCH_SUP4_STORAGE_STATE_FILE
     env["SUP4_ITEMS"] = sup4_items
     env["SUP4_TTN"] = tracking_number
     env["SUP4_CLEAR_BASKET"] = ORCH_SUP4_CLEAR_BASKET
     env["SUP4_ATTACH_DIR"] = ORCH_SUP4_ATTACH_DIR
     env["SUP4_PAUSE_SEC"] = ORCH_SUP4_PAUSE_SEC
     env["SUP4_ALLOW_SUBMIT"] = ORCH_SUP4_ALLOW_SUBMIT
+    env["SUP4_EXPECTED_STORE"] = ORCH_SUP4_EXPECTED_STORE
+    env["SUP4_EXPECTED_ACCOUNT"] = ORCH_SUP4_EXPECTED_ACCOUNT
+    env["SUP4_STORAGE_STATE_FILE"] = ORCH_SUP4_STORAGE_STATE_FILE
     inject_np_api_key_env(env, order)
 
     print(f"[ORCH] Monsterlab SUP4_ITEMS => {sup4_items}")
@@ -1871,28 +1908,30 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
         elif isinstance(add_items_info.get("cart_qty_checks"), list):
             cart_qty_checks = add_items_info.get("cart_qty_checks")
 
-    if isinstance(cart_qty_checks, list) and cart_qty_checks:
-        bad_checks = []
-        for check in cart_qty_checks:
-            if not isinstance(check, dict):
-                continue
-            expected_qty = check.get("expected_qty")
-            actual_qty = check.get("actual_qty")
-            verified = bool(check.get("verified"))
-            try:
-                if int(expected_qty) != int(actual_qty) or not verified:
-                    bad_checks.append(check)
-            except Exception:
-                bad_checks.append(check)
-        if bad_checks:
-            raise StepError(step_name, f"Supplier4 qty verification failed: {bad_checks}")
-        print(f"[ORCH] Supplier4 qty verification ok: {len(cart_qty_checks)} item(s)")
-    else:
-        print("[ORCH] WARNING: Supplier4 response has no structured qty verification")
+    expected_items: Dict[str, int] = {}
+    for part in filter(None, re.split(r"[;,]", sup4_items)):
+        sku, _, qty_raw = part.strip().partition(":")
+        expected_items[sku.casefold()] = int(qty_raw or "1")
+    if not isinstance(cart_qty_checks, list) or len(cart_qty_checks) != len(expected_items):
+        raise StepError(step_name, "Supplier4 response lacks complete structured quantity verification")
+    checks_by_sku = {str(c.get("sku") or "").casefold(): c for c in cart_qty_checks if isinstance(c, dict)}
+    bad_checks = []
+    for sku, expected_qty in expected_items.items():
+        check = checks_by_sku.get(sku)
+        try:
+            if (not check or int(check.get("expected_qty")) != expected_qty
+                    or int(check.get("actual_qty")) != expected_qty or not check.get("verified")):
+                bad_checks.append({"sku": sku, "expected_qty": expected_qty, "check": check})
+        except (TypeError, ValueError):
+            bad_checks.append({"sku": sku, "expected_qty": expected_qty, "check": check})
+    if bad_checks or set(checks_by_sku) != set(expected_items):
+        raise StepError(step_name, f"Supplier4 qty verification failed: {bad_checks or checks_by_sku}")
+    print(f"[ORCH] Supplier4 qty verification ok: {len(cart_qty_checks)} item(s)")
 
-    # Monsterlab Drop v1 deliberately stops before the final supplier submit.
     # A prepared basket must never advance SalesDrive to the completed state.
     if not bool(payload.get("submitted")):
+        if payload.get("submit_state") != "prepared":
+            raise StepError(step_name, f"Invalid Supplier4 submit_state={payload.get('submit_state')!r}")
         print(
             f"[ORCH] Supplier4 order prepared but not submitted: order_id={order_id_int}; "
             "SalesDrive status was left unchanged"
@@ -1900,13 +1939,54 @@ def process_one_supplier4_order(order: Dict[str, Any]) -> None:
         return
 
     supplier_order_number = str(payload.get("supplier_order_number") or "").strip()
-    if not supplier_order_number:
+    if payload.get("submit_state") != "confirmed" or not re.fullmatch(r"D\d{4,}", supplier_order_number, re.I):
         raise StepError(step_name, "SUPPLIER_ORDER_NUMBER_NOT_FOUND after submitted SUP4 response")
-    salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
-    print(
-        f"[ORCH] SalesDrive status updated: order_id={order_id_int} -> "
-        f"statusId={ORCH_DONE_STATUS_ID}, numberSup={supplier_order_number}"
-    )
+    if state is None:
+        raise StepError("salesdrive_sync_after_confirmed", "Orchestrator state is required to persist the confirmed SUP4 order")
+    pending = state.setdefault("sup4_salesdrive_pending", {})
+    pending[str(order_id_int)] = supplier_order_number
+    save_state(state)
+    try:
+        salesdrive_update_status(order_id_int, ORCH_DONE_STATUS_ID, number_sup=supplier_order_number)
+        saved_order = salesdrive_get_order(order_id_int)
+        if str(saved_order.get("numberSup") or "").strip().upper() != supplier_order_number.upper():
+            raise RuntimeError("SalesDrive numberSup did not match the confirmed MonsterLab order")
+        if str(saved_order.get("statusId")) != str(ORCH_DONE_STATUS_ID):
+            raise RuntimeError("SalesDrive status did not match the configured completed status")
+        pending.pop(str(order_id_int), None)
+        save_state(state)
+    except Exception as exc:
+        raise StepError("salesdrive_sync_after_confirmed", str(exc)) from exc
+    print(f"[ORCH] SalesDrive verified: order_id={order_id_int} statusId={ORCH_DONE_STATUS_ID} numberSup={supplier_order_number}")
+
+
+def retry_confirmed_sup4_salesdrive_sync(state: Dict[str, Any]) -> None:
+    """Retry only SalesDrive updates for supplier orders already confirmed by MonsterLab."""
+    pending = state.get("sup4_salesdrive_pending")
+    if not isinstance(pending, dict) or not pending:
+        return
+    for order_id_raw, supplier_number in list(pending.items()):
+        try:
+            order_id = int(order_id_raw)
+            supplier_number = str(supplier_number or "").strip().upper()
+            if not re.fullmatch(r"D\d{4,}", supplier_number):
+                raise RuntimeError("Pending MonsterLab supplier number is invalid")
+            salesdrive_update_status(order_id, ORCH_DONE_STATUS_ID, number_sup=supplier_number)
+            saved_order = salesdrive_get_order(order_id)
+            if str(saved_order.get("numberSup") or "").strip().upper() != supplier_number:
+                raise RuntimeError("SalesDrive numberSup did not match the confirmed MonsterLab order")
+            if str(saved_order.get("statusId")) != str(ORCH_DONE_STATUS_ID):
+                raise RuntimeError("SalesDrive status did not match the configured completed status")
+            pending.pop(order_id_raw, None)
+            clear_failed(state, order_id)
+            clear_in_progress(state, order_id)
+            processed_ids = state.setdefault("processed_ids", [])
+            if order_id not in processed_ids:
+                processed_ids.append(order_id)
+            save_state(state)
+            print(f"[ORCH] Reconciled confirmed SUP4 order in SalesDrive: order_id={order_id} numberSup={supplier_number}")
+        except Exception as exc:
+            print(f"[ORCH] Confirmed SUP4 order awaits SalesDrive sync: order_id={order_id_raw}; {exc}", file=sys.stderr)
 
 
 def process_one_supplier6_order(order: Dict[str, Any]) -> None:
@@ -2369,7 +2449,7 @@ def process_one_order(order: Dict[str, Any], state: Dict[str, Any] | None = None
         return True
 
     if supplierlist == ORCH_SUP4_SUPPLIERLIST:
-        process_one_supplier4_order(order)
+        process_one_supplier4_order(order, state)
         return True
 
     if supplierlist == ORCH_SUP5_SUPPLIERLIST:
@@ -2578,6 +2658,8 @@ def main() -> int:
             continue
 
         try:
+            if not args.dry_run:
+                retry_confirmed_sup4_salesdrive_sync(state)
             env = os.environ.copy()
             fetch_args = ["--raw"]
             if args.order_id is not None:
@@ -2607,10 +2689,21 @@ def main() -> int:
             else:
                 # process up to BATCH_SIZE orders per fetch (skip processed and those in backoff)
                 eligible: List[Tuple[int, Dict[str, Any]]] = []
+                pending_sup4_sync = state.get("sup4_salesdrive_pending", {})
+                pending_sup4_ids = set()
+                if isinstance(pending_sup4_sync, dict):
+                    for pending_id in pending_sup4_sync:
+                        try:
+                            pending_sup4_ids.add(int(pending_id))
+                        except (TypeError, ValueError):
+                            continue
                 for o in orders:
                     try:
                         oid = int(o.get("id"))
                     except Exception:
+                        continue
+                    if oid in pending_sup4_ids:
+                        print(f"[ORCH] skip supplier submit; confirmed SUP4 order awaits SalesDrive sync order_id={oid}", flush=True)
                         continue
                     if oid in processed_ids:
                         print(f"[ORCH] skip due to processed order_id={oid}", flush=True)
@@ -2746,6 +2839,7 @@ def main() -> int:
 
                             # Record failure and decide if it became terminal
                             force_terminal = is_supplier2_order(order)
+                            confirmed_sup4_sync_pending = is_supplier4_order(order) and step == "salesdrive_sync_after_confirmed"
                             # DSN-specific fail-safe:
                             # keep terminal-on-first-failure only for final submit step to avoid duplicate orders.
                             # For add_items/checkout_ttn/attach_invoice_label we allow regular retries
@@ -2799,6 +2893,8 @@ def main() -> int:
                                 ambiguous_sup4_submit = is_supplier4_order(order) and is_ambiguous_sup4_submit_failure(step, reason)
                                 if ambiguous_sup4_submit:
                                     red_reason = f"{red_reason}\nВНИМАНИЕ: отправка SUP4 могла пройти. SalesDrive не менялся; проверьте Мої замовлення по ТТН."
+                                elif confirmed_sup4_sync_pending:
+                                    red_reason = f"{red_reason}\nЗаказ MonsterLab подтверждён; повторяется только синхронизация SalesDrive."
                                 else:
                                     try:
                                         salesdrive_update_status(int(order_id), ORCH_FAIL_STATUS_ID, comment=red_reason)
