@@ -14,8 +14,8 @@ git push origin main
 
 
 BIOTUS_BASE_URL=https://opt.biotus.ua
-BIOTUS_LOGIN=ibezdrabko@icloud.com
-BIOTUS_PASSWORD=397Aa397$
+BIOTUS_LOGIN=your_login
+BIOTUS_PASSWORD=your_password
 Запуск скрипта
 
 python -u scripts/orchestrator.py --once
