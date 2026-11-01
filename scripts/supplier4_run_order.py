@@ -1,7 +1,6 @@
 """Prepare, validate and (when explicitly enabled) submit SUP4 Monsterlab Drop orders."""
 import asyncio
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
 import os
@@ -233,14 +232,29 @@ def _sanitize_diagnostic(value: Any) -> Any:
 def _account_lock():
     lock_path = Path(tempfile.gettempdir()) / "supplier4_monsterlab_account.lock"
     with lock_path.open("a+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+            if handle.seek(0, 2) == 0:
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+        else:
+            import fcntl
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
             raise StageError("account_lock", "SUP4_ACCOUNT_ALREADY_IN_USE") from exc
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 async def _login(page) -> None:
