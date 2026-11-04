@@ -421,14 +421,29 @@ async def _read_cart(page) -> list[dict[str, Any]]:
         # The new cart renders one product per <li>; the nearest button-bearing
         # div only contains the product title and excludes the quantity control.
         row = link.locator("xpath=ancestor::li[1]")
-        text = re.sub(r"\s+", " ", await row.inner_text()).strip()
+        raw_text = await row.inner_text()
+        text = re.sub(r"\s+", " ", raw_text).strip()
         qty_match = re.search(r"×\s*(\d+)", text) or re.search(r"Кількість\s+(\d+)\b", text, re.I)
         if not qty_match:
             raise StageError("verify_cart", "CART_QUANTITY_UNREADABLE", {"sku": sku})
-        amounts = re.findall(r"([0-9][0-9 \u00a0]*[,.]\d{2})[ \u00a0]*₴", text)
+        line_total = _cart_line_total(raw_text, int(qty_match.group(1)))
         result.append({"sku": sku, "qty": int(qty_match.group(1)),
-                       "price": _parse_money(amounts[-1]) if amounts else None, "text": text})
+                       "price": line_total, "text": text})
     return result
+
+
+def _cart_line_total(raw_text: str, qty: int) -> int | None:
+    # Read amounts before collapsing newlines: the quantity control sits above
+    # the prices and must not become a thousands group. Total precedes unit price.
+    amounts = re.findall(r"([0-9][0-9 \u00a0]*[,.]\d{2})[ \u00a0]*₴", raw_text)
+    values = [_parse_money(amount) for amount in amounts]
+    if not values:
+        return None
+    if len(values) > 1 and values[0] != values[-1] * qty:
+        raise StageError("verify_cart", "CART_ROW_PRICE_INCONSISTENT", {
+            "qty": qty, "line_total_minor": values[0], "unit_price_minor": values[-1],
+        })
+    return values[0]
 
 
 async def _read_cart_at_url(page, sku: str) -> int:
@@ -543,8 +558,10 @@ async def _read_checkout_items(page) -> list[dict[str, Any]]:
         href = await link.get_attribute("href") or ""
         sku = href.rsplit("/", 1)[-1].strip()
         if re.fullmatch(r"[A-Z0-9][A-Z0-9-]{1,40}", sku, re.I):
-            row = link.locator("xpath=ancestor::div[.//a[starts-with(@href, '/cabinet/catalog/')]][1]")
-            item_links.append((sku, re.sub(r"\s+", " ", await row.inner_text()).strip()))
+            row = link.locator("xpath=ancestor::li[1]")
+            if await row.count() == 0:
+                row = link.locator("xpath=ancestor::div[.//a[starts-with(@href, '/cabinet/catalog/')]][1]")
+            item_links.append((sku, await row.inner_text()))
     return _detail_order_items(item_links)
 
 
@@ -735,7 +752,9 @@ def _detail_order_items(links: list[tuple[str, str]]) -> list[dict[str, Any]]:
     """Extract quantity only from each product's own row, never from order totals."""
     items = []
     for sku, row_text in links:
-        match = re.search(r"\b(\d+)\s*шт\.?", row_text, re.I)
+        match = re.search(r"\b(\d+)\s*шт\.?", row_text, re.I) or re.search(
+            r"^\s*(\d+)\s*×\s*[0-9][0-9 \u00a0]*[,.]\d{2}[ \u00a0]*₴", row_text, re.M
+        )
         if not match:
             items.append({"sku": sku, "qty": 0})
         else:
