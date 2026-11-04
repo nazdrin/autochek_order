@@ -348,7 +348,12 @@ async def _clear_cart(page) -> None:
         raise StageError(stage, "CART_NOT_EMPTY_AFTER_CLEAR", await _debug(page, stage, "not_empty"))
 
 
-async def _search_card(page, sku: str):
+def _stock_lower_bound(text: str) -> tuple[int, bool] | None:
+    match = re.search(r"(\d+)\s*(\+)?\s*шт\.?", text, re.I)
+    return (int(match.group(1)), bool(match.group(2))) if match else None
+
+
+async def _search_card(page, sku: str, *, required_qty: int = 1):
     stage = "add_items"
     search = page.get_by_placeholder(re.compile(r"Назва, бренд або артикул", re.I)).first
     await search.fill(sku)
@@ -371,21 +376,26 @@ async def _search_card(page, sku: str):
     text = await card.inner_text()
     if sku.casefold() not in _norm(text) or re.search(r"(?:^|\s)немає(?:\s|$)", _norm(text)):
         raise StageError(stage, "PRODUCT_NOT_AVAILABLE", await _debug(page, stage, "not_available", {"sku": sku, "card": text}))
-    stock = re.search(r"(\d+)\s*шт\.?", text, re.I)
+    stock = _stock_lower_bound(text)
     if not stock:
         raise StageError(stage, "PRODUCT_STOCK_UNVERIFIED", await _debug(page, stage, "stock_unverified", {"sku": sku, "card": text}))
+    available, is_lower_bound = stock
+    if is_lower_bound and required_qty > available:
+        raise StageError(stage, "PRODUCT_STOCK_UNVERIFIED", await _debug(page, stage, "stock_lower_bound", {
+            "sku": sku, "requested": required_qty, "available_at_least": available,
+        }))
     # Allow horizontal grouping spaces (including NBSP), but never newlines:
     # otherwise the SKU above the price can be concatenated into the amount.
     prices = re.findall(r"([0-9][0-9 \u00a0]*[,.]\d{2})[ \u00a0]*₴", text)
     unit_price = _parse_money(prices[0]) if prices else None
     if unit_price is None:
         raise StageError(stage, "PRODUCT_PRICE_UNREADABLE", await _debug(page, stage, "price_unreadable", {"sku": sku}))
-    return card, int(stock.group(1)), unit_price
+    return card, available, unit_price
 
 
 async def _add_item(page, item: Sup4Item) -> dict[str, Any]:
     await page.goto(f"{SUP4_BASE_URL}/cabinet/catalog", wait_until="domcontentloaded")
-    card, available, unit_price = await _search_card(page, item.sku)
+    card, available, unit_price = await _search_card(page, item.sku, required_qty=item.qty)
     if item.qty > available:
         raise StageError("add_items", "PRODUCT_STOCK_INSUFFICIENT", await _debug(page, "add_items", "requested_over_stock", {"sku": item.sku, "requested": item.qty, "available": available}))
     await page.goto(f"{SUP4_BASE_URL}/cabinet/cart", wait_until="domcontentloaded")
@@ -393,7 +403,7 @@ async def _add_item(page, item: Sup4Item) -> dict[str, Any]:
     current_qty = next((int(row["qty"]) for row in current if row["sku"].casefold() == item.sku.casefold()), 0)
     await page.goto(f"{SUP4_BASE_URL}/cabinet/catalog", wait_until="domcontentloaded")
     for _ in range(current_qty, item.qty):
-        card, _, _ = await _search_card(page, item.sku)
+        card, _, _ = await _search_card(page, item.sku, required_qty=item.qty)
         button = card.get_by_role("button", name=re.compile(r"^(?:У кошик|Додати .+ у кошик|Додати ще одну: .+)$", re.I)).first
         if await button.count() != 1:
             raise StageError("add_items", "PRODUCT_ADD_CONTROL_NOT_FOUND", await _debug(page, "add_items", "add_button_missing", {"sku": item.sku, "controls": await button.count()}))
