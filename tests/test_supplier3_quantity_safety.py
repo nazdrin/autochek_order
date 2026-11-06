@@ -142,7 +142,6 @@ class Supplier3QuantitySafetyTests(unittest.TestCase):
             patch.object(sup3, "SUP3_TTN", "20450000000000"),
             patch.object(sup3, "_is_logged_in", new=AsyncMock(return_value=(True, {}))),
             patch.object(sup3, "_best_effort_close_popups", new=AsyncMock()),
-            patch.object(sup3, "_apply_sup3_coupon", new=AsyncMock(return_value={"code": "sls7", "status": "applied"})),
             patch.object(sup3, "_read_checkout_quantities", new=AsyncMock(return_value=mismatch)),
             patch.object(sup3, "_fill_ttn_input", new=AsyncMock()) as fill_ttn,
             patch.object(sup3, "_download_np_label_sup3") as download_label,
@@ -155,11 +154,9 @@ class Supplier3QuantitySafetyTests(unittest.TestCase):
         download_label.assert_not_called()
         submit.assert_not_awaited()
 
-    def test_coupon_response_statuses(self):
-        self.assertEqual("applied", sup3._classify_sup3_coupon_response("Знижка по купону 7%", ""))
-        self.assertEqual("not_applicable", sup3._classify_sup3_coupon_response("", "Знижка не поширюється на товари"))
-        self.assertEqual("rejected", sup3._classify_sup3_coupon_response("", "Купон недійсний"))
-        self.assertEqual("technical_error", sup3._classify_sup3_coupon_response("", ""))
+    def test_coupon_application_is_removed(self):
+        self.assertFalse(hasattr(sup3, "_apply_sup3_coupon"))
+        self.assertFalse(hasattr(sup3, "SUP3_PROMO_CODE"))
 
     def test_checkout_row_reader_fails_closed_when_line_missing_or_ambiguous(self):
         page = object()
