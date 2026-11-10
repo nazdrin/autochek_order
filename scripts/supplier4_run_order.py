@@ -9,7 +9,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -355,10 +355,12 @@ def _stock_lower_bound(text: str) -> tuple[int, bool] | None:
 
 async def _search_card(page, sku: str, *, required_qty: int = 1):
     stage = "add_items"
-    search = page.get_by_placeholder(re.compile(r"Назва, бренд або артикул", re.I)).first
-    await search.fill(sku)
-    await search.press("Enter")
-    product_link = page.locator(f'a[href="/cabinet/catalog/{sku}"]')
+    catalog_path = "/cabinet/catalog"
+    current = urlsplit(page.url)
+    if current.path != catalog_path or parse_qs(current.query) != {"q": [sku]}:
+        query = urlencode({"q": sku})
+        await page.goto(f"{SUP4_BASE_URL}{catalog_path}?{query}", wait_until="domcontentloaded", timeout=SUP4_TIMEOUT_MS)
+    product_link = page.locator(f'[data-tour="catalog-row"] a[href="/cabinet/catalog/{sku}"]:visible')
     try:
         await product_link.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
     except Exception as exc:
@@ -394,21 +396,39 @@ async def _search_card(page, sku: str, *, required_qty: int = 1):
 
 
 async def _add_item(page, item: Sup4Item) -> dict[str, Any]:
-    await page.goto(f"{SUP4_BASE_URL}/cabinet/catalog", wait_until="domcontentloaded")
-    card, available, unit_price = await _search_card(page, item.sku, required_qty=item.qty)
+    _, available, unit_price = await _search_card(page, item.sku, required_qty=item.qty)
     if item.qty > available:
         raise StageError("add_items", "PRODUCT_STOCK_INSUFFICIENT", await _debug(page, "add_items", "requested_over_stock", {"sku": item.sku, "requested": item.qty, "available": available}))
-    await page.goto(f"{SUP4_BASE_URL}/cabinet/cart", wait_until="domcontentloaded")
-    current = await _read_cart(page)
-    current_qty = next((int(row["qty"]) for row in current if row["sku"].casefold() == item.sku.casefold()), 0)
-    await page.goto(f"{SUP4_BASE_URL}/cabinet/catalog", wait_until="domcontentloaded")
-    for _ in range(current_qty, item.qty):
-        card, _, _ = await _search_card(page, item.sku, required_qty=item.qty)
-        button = card.get_by_role("button", name=re.compile(r"^(?:У кошик|Додати .+ у кошик|Додати ще одну: .+)$", re.I)).first
-        if await button.count() != 1:
-            raise StageError("add_items", "PRODUCT_ADD_CONTROL_NOT_FOUND", await _debug(page, "add_items", "add_button_missing", {"sku": item.sku, "controls": await button.count()}))
-        await button.click()
     actual = await _read_cart_at_url(page, item.sku)
+    for qty_before in range(actual, item.qty):
+        card, _, _ = await _search_card(page, item.sku, required_qty=item.qty)
+        name = r"^Додати ще одну: .+$" if qty_before else r"^(?:У кошик|Додати .+ у кошик)$"
+        button = card.get_by_role("button", name=re.compile(name, re.I))
+        try:
+            await button.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
+            async with page.expect_event(
+                "requestfinished",
+                predicate=lambda request: request.method == "POST"
+                and _is_supplier_host(request.url)
+                and urlsplit(request.url).path == "/cabinet/catalog",
+                timeout=SUP4_TIMEOUT_MS,
+            ) as request_info:
+                await button.click(timeout=SUP4_TIMEOUT_MS)
+            request = await request_info.value
+            response = await request.response()
+            if response is None or not response.ok:
+                raise StageError("add_items", "CART_ADD_REQUEST_FAILED", {
+                    "sku": item.sku, "status": response.status if response else None,
+                })
+        except PlaywrightTimeoutError as exc:
+            raise StageError("add_items", "CART_ADD_NOT_CONFIRMED", await _debug(
+                page, "add_items", "add_not_confirmed", {"sku": item.sku, "expected_qty": qty_before + 1}
+            )) from exc
+        actual = await _read_cart_at_url(page, item.sku)
+        if actual != qty_before + 1:
+            raise StageError("add_items", "CART_ORDER_MISMATCH", await _debug(
+                page, "add_items", "quantity_not_set", {"sku": item.sku, "expected": qty_before + 1, "actual": actual}
+            ))
     if actual != item.qty:
         raise StageError("add_items", "CART_ORDER_MISMATCH", await _debug(page, "add_items", "quantity_not_set", {"sku": item.sku, "expected": item.qty, "actual": actual}))
     return {"sku": item.sku, "expected_qty": item.qty, "actual_qty": actual,
@@ -795,74 +815,141 @@ def _label_status_received(value: object) -> bool:
     return any(marker in text for marker in positive) and not any(marker in text for marker in negative)
 
 
+async def _history_rows(page, ttn: str, *, modern: bool) -> list[dict[str, Any]]:
+    anchors = page.locator('a[href^="/cabinet/orders/"]:visible')
+    rows = {}
+    for anchor in await anchors.all():
+        href = await anchor.get_attribute("href") or ""
+        if not re.fullmatch(r"/cabinet/orders/D\d+", href, re.I):
+            continue
+        if modern:
+            row = anchor.locator("xpath=ancestor::li[1]")
+            ttn_cell = row.get_by_role("button", name="Копіювати: Номер ТТН", exact=True).locator("..")
+            exact_ttn = ttn_cell.get_by_text(ttn, exact=True)
+        else:
+            row = anchor.locator("xpath=ancestor::*[self::div or self::tr][.//a[starts-with(@href, '/cabinet/orders/D')]][1]")
+            exact_ttn = row.get_by_text(ttn, exact=True)
+        rows[href] = {
+            "number": href.rsplit("/", 1)[-1].upper(),
+            "href": href,
+            "row_text": (await row.inner_text(timeout=SUP4_TIMEOUT_MS)).strip(),
+            "exact_ttn": await exact_ttn.count() == 1 and await exact_ttn.is_visible(),
+        }
+    return list(rows.values())
+
+
 async def _find_orders_for_ttn(page, ttn: str) -> list[dict[str, str]]:
     ttn = _validated_ttn(ttn)
-    await page.goto(f"{SUP4_BASE_URL}/cabinet/orders", wait_until="domcontentloaded")
-    search = page.get_by_placeholder(re.compile(r"Номер замовлення або ТТН", re.I)).first
-    await search.fill(ttn)
-    await search.press("Enter")
-    try:
-        await page.wait_for_url(
-            lambda url: parse_qs(urlsplit(str(url)).query).get("q") == [ttn],
-            timeout=SUP4_TIMEOUT_MS,
-        )
-    except PlaywrightTimeoutError as exc:
-        raise StageError("preflight_history", "HISTORY_SEARCH_NOT_APPLIED",
-                         await _debug(page, "preflight_history", "search_not_applied")) from exc
-    search_confirmed = False
-    for _ in range(max(1, min(20, SUP4_TIMEOUT_MS // 250))):
-        body = await page.locator("body").inner_text()
-        ttn_text = page.get_by_text(ttn, exact=True).first
-        exact_ttn_visible = await ttn_text.count() > 0 and await ttn_text.is_visible()
-        if exact_ttn_visible or "за цими умовами нічого не знайдено" in _norm(body):
-            search_confirmed = True
-            break
-        await page.wait_for_timeout(250)
-    if not search_confirmed:
-        raise StageError("preflight_history", "HISTORY_SEARCH_NOT_CONFIRMED",
-                         await _debug(page, "preflight_history", "search_not_confirmed"))
-    matches: list[dict[str, str]] = []
-    for page_number in range(100):
-        anchors = page.locator('a[href^="/cabinet/orders/"]')
-        page_signature: list[tuple[str, str]] = []
-        for i in range(await anchors.count()):
-            anchor = anchors.nth(i)
-            if not await anchor.is_visible():
-                continue
-            href = await anchor.get_attribute("href") or ""
-            if not re.fullmatch(r"/cabinet/orders/D\d+", href, re.I):
-                continue
-            row = anchor.locator("xpath=ancestor::div[.//a[starts-with(@href, '/cabinet/orders/')]][1]")
-            text = re.sub(r"\s+", " ", await row.inner_text()).strip()
-            page_signature.append((href, text))
-            if re.search(rf"(?<!\d){re.escape(_digits(ttn))}(?!\d)", _digits(text)):
-                matches.append({"number": href.rsplit("/", 1)[-1].upper(), "href": href, "row_text": text})
+    stage = "preflight_history"
+    history_url = f"{SUP4_BASE_URL}/cabinet/orders"
 
-        next_page = page.locator(
-            'button[aria-label*="наступ" i], button[title*="наступ" i], '
-            'button[aria-label*="next" i], button[title*="next" i], a[rel="next"]'
-        ).first
-        if await next_page.count() == 0:
-            next_page = page.get_by_role("button", name=re.compile(r"^(?:Наступна|Далі|Next|›|»|>)", re.I)).first
-        if await next_page.count() == 0:
-            next_page = page.get_by_role("link", name=re.compile(r"^(?:Далі|Наступна|Next)$", re.I)).first
-        if await next_page.count() == 0 or not await next_page.is_enabled():
-            return matches
-        await next_page.click()
-        await page.wait_for_timeout(350)
-        next_anchors = page.locator('a[href^="/cabinet/orders/"]')
-        next_signature = []
-        for index in range(await next_anchors.count()):
-            anchor = next_anchors.nth(index)
-            if not await anchor.is_visible():
-                continue
-            href = await anchor.get_attribute("href") or ""
-            if re.fullmatch(r"/cabinet/orders/D\d+", href, re.I):
-                row = anchor.locator("xpath=ancestor::div[.//a[starts-with(@href, '/cabinet/orders/')]][1]")
-                next_signature.append((href, re.sub(r"\s+", " ", await row.inner_text()).strip()))
-        if next_signature == page_signature:
-            raise StageError("preflight_history", "HISTORY_PAGINATION_STALLED", {"page": page_number + 1})
-    raise StageError("preflight_history", "HISTORY_SEARCH_PAGE_LIMIT", {"max_pages": 100})
+    async def fail(reason: str) -> StageError:
+        return StageError(stage, reason, await _debug(page, stage, reason.lower()))
+
+    response = await page.goto(history_url, wait_until="domcontentloaded", timeout=SUP4_TIMEOUT_MS)
+    if not _is_supplier_host(page.url) or urlsplit(page.url).path != "/cabinet/orders":
+        raise await fail("HISTORY_PAGE_REDIRECTED")
+    if response is None or not response.ok:
+        raise await fail("HISTORY_PAGE_UNAVAILABLE")
+
+    current_field = page.get_by_placeholder("Номер, ТТН чи ваш номер", exact=True).and_(page.locator(":visible"))
+    legacy_field = page.get_by_placeholder("Номер замовлення або ТТН", exact=True).and_(page.locator(":visible"))
+    try:
+        await current_field.or_(legacy_field).first.wait_for(state="visible", timeout=SUP4_TIMEOUT_MS)
+        modern = await current_field.count() > 0
+        if not modern:
+            await legacy_field.fill(ttn, timeout=SUP4_TIMEOUT_MS)
+            await legacy_field.press("Enter", timeout=SUP4_TIMEOUT_MS)
+    except PlaywrightTimeoutError as exc:
+        raise await fail("HISTORY_SEARCH_FIELD_UNAVAILABLE") from exc
+
+    def query_applied(url: str) -> bool:
+        parts = urlsplit(str(url))
+        return _is_supplier_host(str(url)) and parts.path == "/cabinet/orders" and parse_qs(parts.query).get("q") == [ttn]
+
+    try:
+        if modern:
+            # The current cabinet renders the search from q on a fresh navigation.
+            # This avoids submitting before the search field is hydrated.
+            response = await page.goto(f"{history_url}?q={ttn}", wait_until="domcontentloaded", timeout=SUP4_TIMEOUT_MS)
+            if response is None or not response.ok or not query_applied(page.url):
+                raise await fail("HISTORY_SEARCH_NOT_APPLIED")
+        await page.wait_for_url(query_applied, timeout=SUP4_TIMEOUT_MS)
+    except PlaywrightTimeoutError as exc:
+        raise await fail("HISTORY_SEARCH_NOT_APPLIED") from exc
+
+    matches = {}
+    previous_rows = None
+    for page_number in range(1, 101):
+        params = parse_qs(urlsplit(page.url).query)
+        if modern:
+            if set(params) - {"q", "page", "pageSize", "limit"}:
+                raise await fail("HISTORY_SEARCH_FILTERED")
+            try:
+                for name in ("Будь-коли", "Усі статуси"):
+                    await page.locator("main button:visible").filter(has_text=re.compile(rf"^\s*{name}\s*$")).wait_for(
+                        state="visible", timeout=SUP4_TIMEOUT_MS
+                    )
+            except PlaywrightTimeoutError as exc:
+                raise await fail("HISTORY_SEARCH_FILTERED") from exc
+
+        deadline = asyncio.get_running_loop().time() + SUP4_TIMEOUT_MS / 1000
+        results = page.locator("main") if modern else page
+        empty = results.get_by_text("За цими умовами нічого не знайдено", exact=True)
+        while True:
+            try:
+                rows = await _history_rows(page, ttn, modern=modern)
+            except PlaywrightTimeoutError as exc:
+                raise await fail("HISTORY_ROWS_UNRECOGNIZED") from exc
+            signature = tuple(row["href"] for row in rows)
+            if rows and signature != previous_rows and (
+                page_number > 1 or any(row["exact_ttn"] for row in rows)
+            ):
+                break
+            if page_number == 1 and not rows and await empty.is_visible():
+                return []
+            if asyncio.get_running_loop().time() >= deadline:
+                reason = "HISTORY_SEARCH_NOT_CONFIRMED" if page_number == 1 else "HISTORY_PAGINATION_STALLED"
+                raise await fail(reason)
+            await asyncio.sleep(0.1)
+
+        for row in rows:
+            if row.pop("exact_ttn"):
+                matches[row["number"]] = row
+
+        if modern:
+            next_page = page.get_by_role("link", name=re.compile(rf"^Сторінка {page_number + 1} з \d+$"))
+            if not await next_page.count():
+                links = page.get_by_role("link", name=re.compile(r"^Сторінка \d+ з \d+$"))
+                for link in await links.all():
+                    label = await link.get_attribute("aria-label") or ""
+                    if int(label.rsplit(" ", 1)[-1]) > page_number:
+                        raise await fail("HISTORY_PAGINATION_STALLED")
+                return list(matches.values())
+        else:
+            next_page = page.locator(
+                'button[aria-label*="наступ" i], button[title*="наступ" i], '
+                'button[aria-label*="next" i], button[title*="next" i], a[rel="next"]'
+            ).first
+            if not await next_page.count():
+                next_page = page.get_by_role("button", name=re.compile(r"^(?:Наступна|Далі|Next|›|»|>)", re.I)).first
+            if not await next_page.count():
+                next_page = page.get_by_role("link", name=re.compile(r"^(?:Далі|Наступна|Next)$", re.I)).first
+            if not await next_page.count() or not await next_page.is_enabled():
+                return list(matches.values())
+
+        previous_rows = signature
+        previous_url = page.url
+        try:
+            await next_page.click(timeout=SUP4_TIMEOUT_MS)
+            if modern:
+                await page.wait_for_url(
+                    lambda url: str(url) != previous_url and query_applied(url), timeout=SUP4_TIMEOUT_MS
+                )
+        except PlaywrightTimeoutError as exc:
+            raise await fail("HISTORY_PAGINATION_STALLED") from exc
+
+    raise await fail("HISTORY_SEARCH_PAGE_LIMIT")
 
 
 async def _read_order_detail(page, href: str, *, timeout_ms: int | None = None) -> dict[str, Any]:
